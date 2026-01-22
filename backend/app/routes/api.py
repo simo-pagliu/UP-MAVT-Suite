@@ -9,24 +9,49 @@ bp = Blueprint('api', __name__, url_prefix='/api')
 # Initialize session
 @bp.route('/session', methods=['POST'])
 def create_session():
-    """Create a new session with initial name"""
-    data = request.json
+    """Create a new session with initial name and criteria"""
+    data = request.json or {}
     name = data.get('name')
-    
+    criteria = data.get('criteria', [])
+
     if not name:
         return jsonify({'error': 'Name is required'}), 400
-    
+
+    if not isinstance(criteria, list) or len(criteria) == 0:
+        return jsonify({'error': 'At least one criterion is required'}), 400
+
+    required_fields = {'criterion_name', 'min', 'max', 'unit'}
+    for idx, row in enumerate(criteria):
+        if not isinstance(row, dict):
+            return jsonify({'error': f'Row {idx + 1} is not valid'}), 400
+        if not required_fields.issubset(row.keys()):
+            return jsonify({'error': f'Row {idx + 1} is missing required fields'}), 400
+
     db = current_app.db
     session_doc = {
         'name': name,
+        'criteria': criteria,
         'qualitative_indicators': None,
         'value_functions': None,
         'pile_bwt': None,
         'created_at': datetime.utcnow()
     }
-    
+
     result = db.sessions.insert_one(session_doc)
     return jsonify({'session_id': str(result.inserted_id)}), 201
+
+# Get session by name
+@bp.route('/session/by-name/<name>', methods=['GET'])
+def get_session_by_name(name):
+    """Retrieve a session by name"""
+    db = current_app.db
+    session = db.sessions.find_one({'name': name})
+    if not session:
+        return jsonify({'exists': False}), 200
+    
+    session['_id'] = str(session['_id'])
+    session['exists'] = True
+    return jsonify(session), 200
 
 # Get session
 @bp.route('/session/<session_id>', methods=['GET'])

@@ -26,7 +26,7 @@ function App() {
       <Container maxW="lg" py={8}>
         <VStack spacing={8} align="stretch">
           {currentPage === 'input' && (
-            <InputPage onSessionCreated={handleSessionCreated} />
+            <InputPage onSessionCreated={handleSessionCreated} sessionId={sessionId} />
           )}
           {currentPage === 'qualitative' && sessionId && (
             <QualitativeIndicatorsPage sessionId={sessionId} />

@@ -1,0 +1,5 @@
+criterion_name,min,max,unit
+Length,5,15,cm
+Width,2,8,cm
+Height,10,20,cm
+Weight,0.5,5,kg
