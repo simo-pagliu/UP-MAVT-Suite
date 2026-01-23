@@ -36,6 +36,16 @@ function InputPage({ onSessionCreated, sessionId }) {
   const toast = useToast()
   const fileInputRef = useRef(null)
 
+  const normalizeCriteria = (items) => {
+    if (!Array.isArray(items)) return []
+    return items.map((c) => ({
+      criterion_name: c.criterion_name || '',
+      unit: c.unit || '',
+      group: c.group || '',
+      alternatives: Array.isArray(c.alternatives) ? c.alternatives : [],
+    }))
+  }
+
   useEffect(() => {
     if (sessionId) {
       const fetchSession = async () => {
@@ -47,7 +57,7 @@ function InputPage({ onSessionCreated, sessionId }) {
             setNameChecked(true)
           }
           if (session.criteria && Array.isArray(session.criteria)) {
-            setCriteria(session.criteria)
+                  setCriteria(normalizeCriteria(session.criteria))
           }
           setExistingSessionId(sessionId)
           setIsExistingSession(true)
@@ -103,7 +113,7 @@ function InputPage({ onSessionCreated, sessionId }) {
       if (data.exists) {
         // Session exists, load it
         if (data.criteria && Array.isArray(data.criteria)) {
-          setCriteria(data.criteria)
+          setCriteria(normalizeCriteria(data.criteria))
         }
         setExistingSessionId(data._id)
         setIsExistingSession(true)
@@ -179,6 +189,24 @@ function InputPage({ onSessionCreated, sessionId }) {
         return
       }
 
+      // Optional second row: groups
+      let groups = Array(criterionNames.length).fill('')
+      let alternativesStartIndex = 1
+      if (rows[1] && rows[1][0] && rows[1][0].toLowerCase() === 'group') {
+        groups = rows[1].slice(1)
+        alternativesStartIndex = 2
+        if (groups.length !== criterionNames.length) {
+          toast({
+            title: 'Error',
+            description: 'Number of groups must match number of criteria',
+            status: 'error',
+            duration: 3000,
+            isClosable: true,
+          })
+          return
+        }
+      }
+
       // Last row: units (first cell should be "Unit")
       const unitRow = rows[rows.length - 1]
       const units = unitRow.slice(1) // Skip first column
@@ -195,7 +223,7 @@ function InputPage({ onSessionCreated, sessionId }) {
       }
 
       // Middle rows: alternatives
-      const alternativeRows = rows.slice(1, rows.length - 1)
+      const alternativeRows = rows.slice(alternativesStartIndex, rows.length - 1)
       
       if (alternativeRows.length === 0) {
         toast({
@@ -216,6 +244,7 @@ function InputPage({ onSessionCreated, sessionId }) {
         }))
         return {
           criterion_name: name,
+          group: groups[idx] || '',
           unit: units[idx],
           alternatives
         }
@@ -305,6 +334,7 @@ function InputPage({ onSessionCreated, sessionId }) {
     const alternativeCount = criteria[0]?.alternatives.length || 0
     const newCriterion = {
       criterion_name: '',
+      group: '',
       unit: '',
       alternatives: Array(alternativeCount).fill(null).map((_, idx) => ({
         name: criteria[0].alternatives[idx].name,
@@ -339,6 +369,10 @@ function InputPage({ onSessionCreated, sessionId }) {
     // Header row: Alternative, Criterion1, Criterion2, ...
     const headerRow = ['Alternative', ...criteria.map(c => c.criterion_name)]
     rows.push(headerRow.join(','))
+
+    // Group row
+    const groupRow = ['Group', ...criteria.map(c => c.group || '')]
+    rows.push(groupRow.join(','))
     
     // Alternative rows: name, value1, value2, ...
     const alternativeCount = criteria[0]?.alternatives.length || 0
@@ -604,6 +638,14 @@ function InputPage({ onSessionCreated, sessionId }) {
                             placeholder="Criterion"
                             size="sm"
                             fontWeight="bold"
+                            bg="white"
+                          />
+                          <Input
+                            value={criterion.group || ''}
+                            onChange={(e) => handleCellChange(idx, 'group', e.target.value)}
+                            placeholder="Group"
+                            size="sm"
+                            fontSize="xs"
                             bg="white"
                           />
                           <Input

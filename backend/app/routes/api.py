@@ -35,13 +35,18 @@ def create_session():
     if not isinstance(criteria, list) or len(criteria) == 0:
         return jsonify({'error': 'At least one criterion is required'}), 400
 
-    # Validate new criteria format: each criterion has name, unit, and alternatives
+    # Validate new criteria format: each criterion has name, unit, group (optional), and alternatives
     required_fields = {'criterion_name', 'unit', 'alternatives'}
     for idx, criterion in enumerate(criteria):
         if not isinstance(criterion, dict):
             return jsonify({'error': f'Criterion {idx + 1} is not valid'}), 400
         if not required_fields.issubset(criterion.keys()):
             return jsonify({'error': f'Criterion {idx + 1} is missing required fields'}), 400
+        # Ensure group field exists and is a string
+        if 'group' not in criterion:
+            criterion['group'] = ''
+        if not isinstance(criterion.get('group'), str):
+            return jsonify({'error': f'Criterion {idx + 1} group must be a string'}), 400
         if not isinstance(criterion.get('alternatives'), list):
             return jsonify({'error': f'Criterion {idx + 1} alternatives must be a list'}), 400
         for alt_idx, alt in enumerate(criterion['alternatives']):

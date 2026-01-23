@@ -1,4 +1,5 @@
 Alternative,Cost,Power,GHG
+Group, Technoeconomic, Technoeconomic, Enviromental
 Nuclear,1000,1000,6
 Solar,50,50,20
 Gas,25,300,50
