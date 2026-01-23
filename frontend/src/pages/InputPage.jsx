@@ -456,10 +456,11 @@ function InputPage({ onSessionCreated, sessionId }) {
     setLoading(true)
     try {
       if (isExistingSession && existingSessionId) {
-        // Use existing session
+        // Update existing session criteria
+        await axios.put(`${API_URL}/session/${existingSessionId}/criteria`, { criteria })
         toast({
           title: 'Success',
-          description: 'Using existing session',
+          description: 'Session updated',
           status: 'success',
           duration: 2,
           isClosable: true,

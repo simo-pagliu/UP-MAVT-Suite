@@ -117,6 +117,45 @@ def delete_session(session_id):
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
 
+# Update criteria
+@bp.route('/session/<session_id>/criteria', methods=['PUT'])
+def update_criteria(session_id):
+    """Update session criteria"""
+    data = request.json or {}
+    criteria = data.get('criteria', [])
+
+    if not isinstance(criteria, list) or len(criteria) == 0:
+        return jsonify({'error': 'At least one criterion is required'}), 400
+
+    # Validate criteria format
+    required_fields = {'criterion_name', 'unit', 'alternatives'}
+    for idx, criterion in enumerate(criteria):
+        if not isinstance(criterion, dict):
+            return jsonify({'error': f'Criterion {idx + 1} is not valid'}), 400
+        if not required_fields.issubset(criterion.keys()):
+            return jsonify({'error': f'Criterion {idx + 1} is missing required fields'}), 400
+        if 'group' not in criterion:
+            criterion['group'] = ''
+        if not isinstance(criterion.get('group'), str):
+            return jsonify({'error': f'Criterion {idx + 1} group must be a string'}), 400
+        if not isinstance(criterion.get('alternatives'), list):
+            return jsonify({'error': f'Criterion {idx + 1} alternatives must be a list'}), 400
+        for alt_idx, alt in enumerate(criterion['alternatives']):
+            if not isinstance(alt, dict) or 'name' not in alt or 'value' not in alt:
+                return jsonify({'error': f'Criterion {idx + 1}, alternative {alt_idx + 1} is invalid'}), 400
+
+    db = current_app.db
+    try:
+        result = db.sessions.update_one(
+            {'_id': ObjectId(session_id)},
+            {'$set': {'criteria': criteria}}
+        )
+        if result.matched_count == 0:
+            return jsonify({'error': 'Session not found'}), 404
+        return jsonify({'status': 'updated'}), 200
+    except:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
 # Update qualitative indicators
 @bp.route('/session/<session_id>/qualitative', methods=['PUT'])
 def update_qualitative(session_id):
