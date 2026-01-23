@@ -20,12 +20,18 @@ def create_session():
     if not isinstance(criteria, list) or len(criteria) == 0:
         return jsonify({'error': 'At least one criterion is required'}), 400
 
-    required_fields = {'criterion_name', 'min', 'max', 'unit'}
-    for idx, row in enumerate(criteria):
-        if not isinstance(row, dict):
-            return jsonify({'error': f'Row {idx + 1} is not valid'}), 400
-        if not required_fields.issubset(row.keys()):
-            return jsonify({'error': f'Row {idx + 1} is missing required fields'}), 400
+    # Validate new criteria format: each criterion has name, unit, and alternatives
+    required_fields = {'criterion_name', 'unit', 'alternatives'}
+    for idx, criterion in enumerate(criteria):
+        if not isinstance(criterion, dict):
+            return jsonify({'error': f'Criterion {idx + 1} is not valid'}), 400
+        if not required_fields.issubset(criterion.keys()):
+            return jsonify({'error': f'Criterion {idx + 1} is missing required fields'}), 400
+        if not isinstance(criterion.get('alternatives'), list):
+            return jsonify({'error': f'Criterion {idx + 1} alternatives must be a list'}), 400
+        for alt_idx, alt in enumerate(criterion['alternatives']):
+            if not isinstance(alt, dict) or 'name' not in alt or 'value' not in alt:
+                return jsonify({'error': f'Criterion {idx + 1}, alternative {alt_idx + 1} is invalid'}), 400
 
     db = current_app.db
     session_doc = {
@@ -39,6 +45,16 @@ def create_session():
 
     result = db.sessions.insert_one(session_doc)
     return jsonify({'session_id': str(result.inserted_id)}), 201
+
+# Get all sessions (for admin)
+@bp.route('/sessions', methods=['GET'])
+def get_all_sessions():
+    """Retrieve all sessions"""
+    db = current_app.db
+    sessions = list(db.sessions.find().sort('created_at', -1))
+    for session in sessions:
+        session['_id'] = str(session['_id'])
+    return jsonify(sessions), 200
 
 # Get session by name
 @bp.route('/session/by-name/<name>', methods=['GET'])
@@ -65,6 +81,19 @@ def get_session(session_id):
         
         session['_id'] = str(session['_id'])
         return jsonify(session), 200
+    except:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
+# Delete session
+@bp.route('/session/<session_id>', methods=['DELETE'])
+def delete_session(session_id):
+    """Delete a session"""
+    db = current_app.db
+    try:
+        result = db.sessions.delete_one({'_id': ObjectId(session_id)})
+        if result.deleted_count == 0:
+            return jsonify({'error': 'Session not found'}), 404
+        return jsonify({'status': 'deleted'}), 200
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
 

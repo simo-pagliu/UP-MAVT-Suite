@@ -1,5 +1,6 @@
-criterion_name,min,max,unit
-Length,5,15,cm
-Width,2,8,cm
-Height,10,20,cm
-Weight,0.5,5,kg
+Alternative,Cost,Power,GHG
+Nuclear,1000,1000,6
+Solar,50,50,20
+Gas,25,300,50
+Coal,10,100,300
+Unit,EUR,Mwe,gCO2eq/kWh

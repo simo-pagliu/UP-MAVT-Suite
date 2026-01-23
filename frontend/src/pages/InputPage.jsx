@@ -1,4 +1,5 @@
 import { AddIcon, DeleteIcon } from '@chakra-ui/icons'
+import { useRef } from 'react'
 import {
   Box,
   Button,
@@ -31,9 +32,9 @@ function InputPage({ onSessionCreated, sessionId }) {
   const [nameChecked, setNameChecked] = useState(false)
   const [existingSessionId, setExistingSessionId] = useState(null)
   const [isExistingSession, setIsExistingSession] = useState(false)
+  const [showCodeInput, setShowCodeInput] = useState(false)
   const toast = useToast()
-
-  const expectedHeaders = ['criterion_name', 'min', 'max', 'unit']
+  const fileInputRef = useRef(null)
 
   useEffect(() => {
     if (sessionId) {
@@ -58,11 +59,35 @@ function InputPage({ onSessionCreated, sessionId }) {
     }
   }, [sessionId])
 
+  const generateRandomCode = () => {
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
+    let code = ''
+    for (let i = 0; i < 8; i++) {
+      code += characters.charAt(Math.floor(Math.random() * characters.length))
+    }
+    return code
+  }
+
+  const handleNewSession = () => {
+    const code = generateRandomCode()
+    setName(code)
+    setNameChecked(true)
+    setIsExistingSession(false)
+    setCriteria([])
+    toast({
+      title: 'New session created',
+      description: `Session code: ${code}`,
+      status: 'success',
+      duration: 3000,
+      isClosable: true,
+    })
+  }
+
   const handleCheckName = async () => {
     if (!name.trim()) {
       toast({
         title: 'Error',
-        description: 'Please enter a name',
+        description: 'Please enter a session code',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -84,7 +109,7 @@ function InputPage({ onSessionCreated, sessionId }) {
         setIsExistingSession(true)
         toast({
           title: 'Session found',
-          description: 'Loaded existing criteria for this name',
+          description: 'Loaded existing criteria for this session code',
           status: 'info',
           duration: 3000,
           isClosable: true,
@@ -105,7 +130,7 @@ function InputPage({ onSessionCreated, sessionId }) {
     } catch (error) {
       toast({
         title: 'Error',
-        description: error.response?.data?.error || 'Failed to check name',
+        description: error.response?.data?.error || 'Failed to check session code',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -124,11 +149,11 @@ function InputPage({ onSessionCreated, sessionId }) {
       const text = e.target?.result
       if (typeof text !== 'string') return
 
-      const lines = text.trim().split(/\r?\n/)
-      if (lines.length === 0) {
+      const lines = text.trim().split(/\r?\n/).filter(Boolean)
+      if (lines.length < 3) {
         toast({
           title: 'Error',
-          description: 'The CSV file is empty',
+          description: 'CSV must have at least criterion names, one alternative, and units',
           status: 'error',
           duration: 3000,
           isClosable: true,
@@ -136,37 +161,17 @@ function InputPage({ onSessionCreated, sessionId }) {
         return
       }
 
-      const [headerLine, ...rows] = lines
-      const headers = headerLine.split(',').map((h) => h.trim().toLowerCase())
-      const missingHeaders = expectedHeaders.filter((h) => !headers.includes(h))
-
-      if (missingHeaders.length > 0) {
+      // Parse all rows
+      const rows = lines.map(line => line.split(',').map(cell => cell.trim()))
+      
+      // First row: criterion names (first cell should be something like "Alternative")
+      const headerRow = rows[0]
+      const criterionNames = headerRow.slice(1) // Skip first column
+      
+      if (criterionNames.length === 0) {
         toast({
-          title: 'Invalid CSV format',
-          description: `Missing columns: ${missingHeaders.join(', ')}`,
-          status: 'error',
-          duration: 4000,
-          isClosable: true,
-        })
-        return
-      }
-
-      const parsedRows = rows
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((line) => {
-          const cells = line.split(',').map((cell) => cell.trim())
-          const row = {}
-          expectedHeaders.forEach((header, idx) => {
-            row[header] = cells[idx] ?? ''
-          })
-          return row
-        })
-
-      if (parsedRows.length === 0) {
-        toast({
-          title: 'Invalid CSV',
-          description: 'No data rows found under the header',
+          title: 'Error',
+          description: 'No criteria columns found',
           status: 'error',
           duration: 3000,
           isClosable: true,
@@ -174,10 +179,52 @@ function InputPage({ onSessionCreated, sessionId }) {
         return
       }
 
-      setCriteria(parsedRows)
+      // Last row: units (first cell should be "Unit")
+      const unitRow = rows[rows.length - 1]
+      const units = unitRow.slice(1) // Skip first column
+      
+      if (units.length !== criterionNames.length) {
+        toast({
+          title: 'Error',
+          description: 'Number of units must match number of criteria',
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        })
+        return
+      }
+
+      // Middle rows: alternatives
+      const alternativeRows = rows.slice(1, rows.length - 1)
+      
+      if (alternativeRows.length === 0) {
+        toast({
+          title: 'Error',
+          description: 'No alternatives found',
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        })
+        return
+      }
+
+      // Transform to criteria structure
+      const parsedCriteria = criterionNames.map((name, idx) => {
+        const alternatives = alternativeRows.map(row => ({
+          name: row[0],
+          value: row[idx + 1] || ''
+        }))
+        return {
+          criterion_name: name,
+          unit: units[idx],
+          alternatives
+        }
+      })
+
+      setCriteria(parsedCriteria)
       toast({
         title: 'File loaded',
-        description: `${parsedRows.length} row(s) imported`,
+        description: `${criterionNames.length} criteria and ${alternativeRows.length} alternatives imported`,
         status: 'success',
         duration: 2000,
         isClosable: true,
@@ -197,27 +244,88 @@ function InputPage({ onSessionCreated, sessionId }) {
     reader.readAsText(file)
   }
 
-  const handleCellChange = (index, key, value) => {
+  const handleCellChange = (criterionIdx, field, value) => {
     setCriteria((prev) => {
       const updated = [...prev]
-      updated[index] = { ...updated[index], [key]: value }
+      updated[criterionIdx] = { ...updated[criterionIdx], [field]: value }
       return updated
     })
   }
 
-  const handleAddRow = () => {
-    setCriteria((prev) => [...prev, { criterion_name: '', min: '', max: '', unit: '' }])
+  const handleAlternativeChange = (criterionIdx, altIdx, value) => {
+    setCriteria((prev) => {
+      const updated = [...prev]
+      const updatedAlts = [...updated[criterionIdx].alternatives]
+      updatedAlts[altIdx] = { ...updatedAlts[altIdx], value }
+      updated[criterionIdx] = { ...updated[criterionIdx], alternatives: updatedAlts }
+      return updated
+    })
   }
 
-  const handleRemoveRow = (index) => {
-    setCriteria((prev) => prev.filter((_, i) => i !== index))
+  const handleAlternativeNameChange = (altIdx, value) => {
+    setCriteria((prev) => {
+      return prev.map(criterion => ({
+        ...criterion,
+        alternatives: criterion.alternatives.map((alt, idx) => 
+          idx === altIdx ? { ...alt, name: value } : alt
+        )
+      }))
+    })
   }
 
-  const handleSubmit = async () => {
+  const handleAddAlternative = () => {
     if (criteria.length === 0) {
       toast({
         title: 'Error',
-        description: 'Please upload a CSV or add at least one row',
+        description: 'Upload a CSV first to define criteria',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+    setCriteria((prev) => prev.map(criterion => ({
+      ...criterion,
+      alternatives: [...criterion.alternatives, { name: '', value: '' }]
+    })))
+  }
+
+  const handleAddCriterion = () => {
+    if (criteria.length === 0) {
+      toast({
+        title: 'Error',
+        description: 'Upload a CSV first to define initial structure',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+    // Create a new criterion with the same alternatives as existing criteria
+    const alternativeCount = criteria[0]?.alternatives.length || 0
+    const newCriterion = {
+      criterion_name: '',
+      unit: '',
+      alternatives: Array(alternativeCount).fill(null).map((_, idx) => ({
+        name: criteria[0].alternatives[idx].name,
+        value: ''
+      }))
+    }
+    setCriteria((prev) => [...prev, newCriterion])
+  }
+
+  const handleRemoveAlternative = (altIdx) => {
+    setCriteria((prev) => prev.map(criterion => ({
+      ...criterion,
+      alternatives: criterion.alternatives.filter((_, idx) => idx !== altIdx)
+    })))
+  }
+
+  const downloadCSV = () => {
+    if (criteria.length === 0) {
+      toast({
+        title: 'Error',
+        description: 'No data to download',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -225,13 +333,85 @@ function InputPage({ onSessionCreated, sessionId }) {
       return
     }
 
-    const hasEmptyFields = criteria.some(
-      (row) => !row.criterion_name || row.min === '' || row.max === '' || !row.unit,
-    )
-    if (hasEmptyFields) {
+    // Build CSV content
+    const rows = []
+    
+    // Header row: Alternative, Criterion1, Criterion2, ...
+    const headerRow = ['Alternative', ...criteria.map(c => c.criterion_name)]
+    rows.push(headerRow.join(','))
+    
+    // Alternative rows: name, value1, value2, ...
+    const alternativeCount = criteria[0]?.alternatives.length || 0
+    for (let i = 0; i < alternativeCount; i++) {
+      const row = [
+        criteria[0].alternatives[i].name,
+        ...criteria.map(c => c.alternatives[i]?.value || '')
+      ]
+      rows.push(row.join(','))
+    }
+    
+    // Unit row: Unit, unit1, unit2, ...
+    const unitRow = ['Unit', ...criteria.map(c => c.unit)]
+    rows.push(unitRow.join(','))
+    
+    // Create CSV string
+    const csvContent = rows.join('\n')
+    
+    // Create download link
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    const url = URL.createObjectURL(blob)
+    link.setAttribute('href', url)
+    link.setAttribute('download', `${name || 'criteria'}_export.csv`)
+    link.style.visibility = 'hidden'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    
+    toast({
+      title: 'Success',
+      description: 'CSV file downloaded',
+      status: 'success',
+      duration: 2000,
+      isClosable: true,
+    })
+  }
+
+  const handleSubmit = async () => {
+    if (criteria.length === 0) {
       toast({
         title: 'Error',
-        description: 'All rows must have criterion_name, min, max, and unit',
+        description: 'Please upload a CSV',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    // Validate all criteria have names and units
+    const hasEmptyCriteria = criteria.some(
+      (criterion) => !criterion.criterion_name || !criterion.unit
+    )
+    if (hasEmptyCriteria) {
+      toast({
+        title: 'Error',
+        description: 'All criteria must have a name and unit',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
+    // Validate all alternatives have names and values
+    const hasEmptyAlternatives = criteria.some(criterion =>
+      criterion.alternatives.some(alt => !alt.name || alt.value === '')
+    )
+    if (hasEmptyAlternatives) {
+      toast({
+        title: 'Error',
+        description: 'All alternatives must have names and values',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -281,40 +461,90 @@ function InputPage({ onSessionCreated, sessionId }) {
       <VStack spacing={6} align="stretch">
         <Heading as="h1" size="lg">Input</Heading>
         <FormControl>
-          <FormLabel>Name</FormLabel>
-          <HStack>
-            <Input
-              placeholder="Enter your name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              isDisabled={nameChecked}
-              onKeyPress={(e) => e.key === 'Enter' && !nameChecked && handleCheckName()}
-            />
-            {!nameChecked && (
+          <FormLabel>Session Code</FormLabel>
+          
+          {!nameChecked && !showCodeInput && (
+            <VStack spacing={4} align="stretch">
+              <Text fontSize="sm" color="gray.600">
+                Start a new session or continue with an existing session code.
+              </Text>
+              <HStack spacing={4} justify="center">
+                <Button 
+                  colorScheme="blue" 
+                  onClick={handleNewSession}
+                  size="lg"
+                  px={8}
+                >
+                  New Empty Session
+                </Button>
+                <Button 
+                  variant="outline" 
+                  onClick={() => setShowCodeInput(true)}
+                  size="lg"
+                  px={8}
+                >
+                  I Have a Code
+                </Button>
+              </HStack>
+            </VStack>
+          )}
+
+          {!nameChecked && showCodeInput && (
+            <VStack spacing={3} align="stretch">
+              <Text fontSize="sm" color="gray.600">
+                Enter your session code below.
+              </Text>
+              <HStack>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setShowCodeInput(false)
+                    setName('')
+                  }}
+                >
+                  ← Back
+                </Button>
+              </HStack>
+              <HStack>
+                <Input
+                  placeholder="Enter session code"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && handleCheckName()}
+                  autoFocus
+                />
+                <Button
+                  colorScheme="blue"
+                  onClick={handleCheckName}
+                  isLoading={loading}
+                  minW="100px"
+                >
+                  Next
+                </Button>
+              </HStack>
+            </VStack>
+          )}
+
+          {nameChecked && (
+            <HStack mb={4}>
+              <Text fontSize="sm" fontWeight="medium">Session Code: {name}</Text>
               <Button
-                colorScheme="blue"
-                onClick={handleCheckName}
-                isLoading={loading}
-                minW="100px"
-              >
-                Next
-              </Button>
-            )}
-            {nameChecked && (
-              <Button
+                size="sm"
                 variant="outline"
                 onClick={() => {
                   setNameChecked(false)
+                  setShowCodeInput(false)
                   setCriteria([])
                   setIsExistingSession(false)
                   setExistingSessionId(null)
+                  setName('')
                 }}
-                minW="100px"
               >
                 Change
               </Button>
-            )}
-          </HStack>
+            </HStack>
+          )}
         </FormControl>
 
         {nameChecked && (
@@ -322,20 +552,41 @@ function InputPage({ onSessionCreated, sessionId }) {
             <Divider />
 
             <VStack align="stretch" spacing={4}>
-          <Heading as="h2" size="md">Criteria</Heading>
+          <Heading as="h2" size="md">Criteria & Alternatives</Heading>
           <Text fontSize="sm" color="gray.600">
-            Upload a CSV with columns: criterion_name, min, max, unit. You can also edit the table below once loaded.
+            Upload a CSV where the first column contains alternative names, other columns are criteria. First row has criterion names, last row has units.
           </Text>
           <FormControl>
             <FormLabel>Upload CSV</FormLabel>
-            <Input type="file" accept=".csv" onChange={handleFileUpload} />
+            <Input 
+              type="file" 
+              accept=".csv" 
+              onChange={handleFileUpload} 
+              ref={fileInputRef}
+              display="none"
+            />
+            <Button 
+              onClick={() => fileInputRef.current?.click()} 
+              colorScheme="blue" 
+              variant="outline"
+              width="full"
+            >
+              Choose File
+            </Button>
           </FormControl>
 
           <HStack justify="space-between">
-            <Button leftIcon={<AddIcon />} size="sm" onClick={handleAddRow}>
-              Add Row
+            <HStack spacing={2}>
+              <Button leftIcon={<AddIcon />} size="sm" onClick={handleAddAlternative}>
+                Add Alternative
+              </Button>
+              <Button leftIcon={<AddIcon />} size="sm" onClick={handleAddCriterion}>
+                Add Criterion
+              </Button>
+            </HStack>
+            <Button size="sm" onClick={downloadCSV}>
+              Download CSV
             </Button>
-            <Text fontSize="xs" color="gray.500">Example format: criterion_name,min,max,unit</Text>
           </HStack>
 
           {criteria.length > 0 ? (
@@ -343,56 +594,62 @@ function InputPage({ onSessionCreated, sessionId }) {
               <Table size="sm" variant="simple">
                 <Thead bg="gray.50">
                   <Tr>
-                    <Th>Criterion Name</Th>
-                    <Th>Min</Th>
-                    <Th>Max</Th>
-                    <Th>Unit</Th>
-                    <Th>Actions</Th>
+                    <Th minW="150px">Alternative</Th>
+                    {criteria.map((criterion, idx) => (
+                      <Th key={idx} minW="180px">
+                        <VStack spacing={2} align="stretch">
+                          <Input
+                            value={criterion.criterion_name}
+                            onChange={(e) => handleCellChange(idx, 'criterion_name', e.target.value)}
+                            placeholder="Criterion"
+                            size="sm"
+                            fontWeight="bold"
+                            bg="white"
+                          />
+                          <Input
+                            value={criterion.unit}
+                            onChange={(e) => handleCellChange(idx, 'unit', e.target.value)}
+                            placeholder="Unit"
+                            size="sm"
+                            fontSize="xs"
+                            bg="white"
+                          />
+                        </VStack>
+                      </Th>
+                    ))}
+                    <Th minW="90px">Actions</Th>
                   </Tr>
                 </Thead>
                 <Tbody>
-                  {criteria.map((row, index) => (
-                    <Tr key={`${row.criterion_name}-${index}`}>
-                      <Td>
+                  {criteria[0]?.alternatives.map((_, altIdx) => (
+                    <Tr key={altIdx}>
+                      <Td minW="150px">
                         <Input
-                          value={row.criterion_name}
-                          onChange={(e) => handleCellChange(index, 'criterion_name', e.target.value)}
-                          placeholder="Length"
+                          value={criteria[0].alternatives[altIdx].name}
+                          onChange={(e) => handleAlternativeNameChange(altIdx, e.target.value)}
+                          placeholder="Alternative name"
                           size="sm"
                         />
                       </Td>
-                      <Td>
-                        <Input
-                          value={row.min}
-                          onChange={(e) => handleCellChange(index, 'min', e.target.value)}
-                          placeholder="5"
-                          size="sm"
-                        />
-                      </Td>
-                      <Td>
-                        <Input
-                          value={row.max}
-                          onChange={(e) => handleCellChange(index, 'max', e.target.value)}
-                          placeholder="15"
-                          size="sm"
-                        />
-                      </Td>
-                      <Td>
-                        <Input
-                          value={row.unit}
-                          onChange={(e) => handleCellChange(index, 'unit', e.target.value)}
-                          placeholder="cm"
-                          size="sm"
-                        />
-                      </Td>
-                      <Td width="90px">
+                      {criteria.map((criterion, critIdx) => (
+                        <Td key={critIdx} minW="180px">
+                          <Input
+                            value={criterion.alternatives[altIdx]?.value || ''}
+                            onChange={(e) => handleAlternativeChange(critIdx, altIdx, e.target.value)}
+                            placeholder="Value"
+                            size="sm"
+                            type="number"
+                          />
+                        </Td>
+                      ))}
+                      <Td width="90px" minW="90px">
                         <IconButton
-                          aria-label="Remove row"
+                          aria-label="Remove alternative"
                           icon={<DeleteIcon />}
                           size="sm"
                           variant="ghost"
                           colorScheme="red"
-                          onClick={() => handleRemoveRow(index)}
+                          onClick={() => handleRemoveAlternative(altIdx)}
                         />
                       </Td>
                     </Tr>
@@ -402,7 +659,7 @@ function InputPage({ onSessionCreated, sessionId }) {
             </Box>
           ) : (
             <Box borderWidth={1} borderRadius="md" p={4} bg="gray.50">
-              <Text fontSize="sm" color="gray.600">No data loaded yet. Upload a CSV or add rows manually.</Text>
+              <Text fontSize="sm" color="gray.600">No data loaded yet. Upload a CSV.</Text>
             </Box>
           )}
             </VStack>
