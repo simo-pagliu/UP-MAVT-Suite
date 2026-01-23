@@ -7,6 +7,7 @@ function Navigation({ currentPage, onPageChange }) {
     { id: 'value', label: 'Value Functions' },
     { id: 'pile', label: 'PILE-BWT' },
     { id: 'output', label: 'Output' },
+    { id: 'admin', label: 'Admin' },
   ]
 
   return (

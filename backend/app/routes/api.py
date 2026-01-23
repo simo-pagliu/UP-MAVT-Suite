@@ -3,8 +3,23 @@ from bson.objectid import ObjectId
 from datetime import datetime
 import csv
 import io
+import os
 
 bp = Blueprint('api', __name__, url_prefix='/api')
+
+# Admin authentication
+@bp.route('/admin/login', methods=['POST'])
+def admin_login():
+    """Verify admin password"""
+    data = request.json or {}
+    password = data.get('password')
+    
+    admin_password = os.getenv('ADMIN_PASSWORD', 'admin123')
+    
+    if password == admin_password:
+        return jsonify({'success': True}), 200
+    else:
+        return jsonify({'success': False, 'error': 'Invalid password'}), 401
 
 # Initialize session
 @bp.route('/session', methods=['POST'])
@@ -163,6 +178,52 @@ def update_pile(session_id):
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
 
+# Export input data as CSV
+@bp.route('/session/<session_id>/export-input', methods=['GET'])
+def export_input_csv(session_id):
+    """Export session input data (criteria and alternatives) as CSV"""
+    db = current_app.db
+    try:
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        
+        # Create CSV in memory
+        output = io.StringIO()
+        writer = csv.writer(output)
+        
+        # Header row
+        writer.writerow(['Session Name', session.get('name')])
+        writer.writerow([])  # Empty row
+        
+        # Criteria and alternatives
+        criteria = session.get('criteria', [])
+        if criteria:
+            writer.writerow(['Criterion', 'Unit', 'Alternative', 'Value'])
+            for criterion in criteria:
+                criterion_name = criterion.get('criterion_name', '')
+                unit = criterion.get('unit', '')
+                alternatives = criterion.get('alternatives', [])
+                
+                for alt in alternatives:
+                    writer.writerow([
+                        criterion_name,
+                        unit,
+                        alt.get('name', ''),
+                        alt.get('value', '')
+                    ])
+        
+        # Convert to bytes
+        output.seek(0)
+        return send_file(
+            io.BytesIO(output.getvalue().encode()),
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'input_{session.get("name", session_id)}.csv'
+        )
+    except:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
 # Export results as CSV
 @bp.route('/session/<session_id>/export', methods=['GET'])
 def export_csv(session_id):
@@ -199,7 +260,7 @@ def export_csv(session_id):
             io.BytesIO(output.getvalue().encode()),
             mimetype='text/csv',
             as_attachment=True,
-            download_name=f'results_{session_id}.csv'
+            download_name=f'output_{session.get("name", session_id)}.csv'
         )
     except:
         return jsonify({'error': 'Invalid session ID'}), 400

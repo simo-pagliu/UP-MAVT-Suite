@@ -6,6 +6,7 @@ import QualitativeIndicatorsPage from './pages/QualitativeIndicatorsPage'
 import ValueFunctionsPage from './pages/ValueFunctionsPage'
 import PileBwtPage from './pages/PileBwtPage'
 import OutputPage from './pages/OutputPage'
+import AdminPage from './pages/AdminPage'
 
 function App() {
   const [currentPage, setCurrentPage] = useState('input')
@@ -23,7 +24,7 @@ function App() {
   return (
     <Box minH="100vh" bg="gray.50">
       <Navigation currentPage={currentPage} onPageChange={handlePageChange} />
-      <Container maxW="lg" py={8}>
+      <Container maxW={currentPage === 'admin' ? 'container.xl' : 'lg'} py={8}>
         <VStack spacing={8} align="stretch">
           {currentPage === 'input' && (
             <InputPage onSessionCreated={handleSessionCreated} sessionId={sessionId} />
@@ -39,6 +40,9 @@ function App() {
           )}
           {currentPage === 'output' && sessionId && (
             <OutputPage sessionId={sessionId} />
+          )}
+          {currentPage === 'admin' && (
+            <AdminPage />
           )}
         </VStack>
       </Container>

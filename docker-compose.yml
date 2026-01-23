@@ -21,6 +21,7 @@ services:
     environment:
       MONGO_URI: mongodb://mongo:27017/elicitation
       FLASK_ENV: development
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
     depends_on:
       - mongo
     volumes:
