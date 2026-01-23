@@ -36,7 +36,7 @@ function App() {
             <ValueFunctionsPage sessionId={sessionId} />
           )}
           {currentPage === 'pile' && sessionId && (
-            <PileBwtPage sessionId={sessionId} />
+            <PileBwtPage sessionId={sessionId} onPageChange={handlePageChange} />
           )}
           {currentPage === 'output' && sessionId && (
             <OutputPage sessionId={sessionId} />

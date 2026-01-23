@@ -172,6 +172,10 @@ function AdminPage() {
     window.open(`http://localhost:5000/api/session/${sessionId}/export`, '_blank')
   }
 
+  const handleDownloadBWT = (sessionId, sessionName) => {
+    window.open(`http://localhost:5000/api/session/${sessionId}/bwt/export`, '_blank')
+  }
+
   // Show login form if not authenticated
   if (!isAuthenticated) {
     return (
@@ -231,6 +235,7 @@ function AdminPage() {
                 <Th>Criteria Count</Th>
                 <Th>Qualitative</Th>
                 <Th>Value Functions</Th>
+                <Th>BWT</Th>
                 <Th>PILE-BWT</Th>
                 <Th>Actions</Th>
               </Tr>
@@ -243,6 +248,7 @@ function AdminPage() {
                   <Td>{session.criteria?.length || 0}</Td>
                   <Td>{session.qualitative_indicators !== null ? '✓' : '—'}</Td>
                   <Td>{session.value_functions !== null ? '✓' : '—'}</Td>
+                  <Td>{session.bwt !== null ? '✓' : '—'}</Td>
                   <Td>{session.pile_bwt !== null ? '✓' : '—'}</Td>
                   <Td>
                     <HStack spacing={2}>
@@ -259,6 +265,13 @@ function AdminPage() {
                         onClick={() => handleDownloadOutput(session._id, session.name)}
                       >
                         Output
+                      </Button>
+                      <Button
+                        colorScheme="purple"
+                        size="sm"
+                        onClick={() => handleDownloadBWT(session._id, session.name)}
+                      >
+                        BWT
                       </Button>
                       <Button
                         colorScheme="red"

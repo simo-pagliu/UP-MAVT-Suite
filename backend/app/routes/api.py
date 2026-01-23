@@ -59,6 +59,7 @@ def create_session():
         'criteria': criteria,
         'qualitative_indicators': None,
         'value_functions': None,
+        'bwt': None,
         'pile_bwt': None,
         'created_at': datetime.utcnow()
     }
@@ -244,6 +245,67 @@ def export_value_functions_csv(session_id):
             mimetype='text/csv',
             as_attachment=True,
             download_name=f'value_functions_{session.get("name", session_id)}.csv'
+        )
+    except:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
+# Update BWT (Best-Worst Technique)
+@bp.route('/session/<session_id>/bwt', methods=['PUT'])
+def update_bwt(session_id):
+    """Update BWT data"""
+    data = request.json
+    value = data.get('value')
+    
+    if value is None:
+        return jsonify({'error': 'Value is required'}), 400
+    
+    db = current_app.db
+    try:
+        result = db.sessions.update_one(
+            {'_id': ObjectId(session_id)},
+            {'$set': {'bwt': value}}
+        )
+        if result.matched_count == 0:
+            return jsonify({'error': 'Session not found'}), 404
+        return jsonify({'status': 'updated'}), 200
+    except:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
+# Export BWT as CSV
+@bp.route('/session/<session_id>/bwt/export', methods=['GET'])
+def export_bwt_csv(session_id):
+    """Export BWT data as CSV"""
+    db = current_app.db
+    try:
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+
+        bwt_data = session.get('bwt') or {}
+        comparisons = bwt_data.get('comparisons', [])
+
+        if not comparisons:
+            return jsonify({'error': 'No BWT data to export'}), 404
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['REFERENCE_CRITERION', 'ADJUSTED_CRITERION', 'DATA_VALUE', 'TYPE'])
+
+        for comp in comparisons:
+            if isinstance(comp, dict):
+                writer.writerow([
+                    comp.get('reference_criterion', ''),
+                    comp.get('adjusted_criterion', ''),
+                    comp.get('data_value', ''),
+                    comp.get('type', '')
+                ])
+
+        output.seek(0)
+        return send_file(
+            io.BytesIO(output.getvalue().encode()),
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'bwt_{session.get("name", session_id)}.csv'
         )
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
