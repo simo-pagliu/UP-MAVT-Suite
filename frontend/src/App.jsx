@@ -23,8 +23,8 @@ function App() {
 
   return (
     <Box minH="100vh" bg="gray.50">
-      <Navigation currentPage={currentPage} onPageChange={handlePageChange} />
-      <Container maxW={currentPage === 'admin' ? 'container.xl' : 'lg'} py={8}>
+      <Navigation currentPage={currentPage} onPageChange={handlePageChange} sessionId={sessionId} />
+      <Container maxW="container.xl" py={8}>
         <VStack spacing={8} align="stretch">
           {currentPage === 'input' && (
             <InputPage onSessionCreated={handleSessionCreated} sessionId={sessionId} />
