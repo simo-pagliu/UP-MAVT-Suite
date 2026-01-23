@@ -11,21 +11,21 @@ function OutputPage({ sessionId }) {
   const handleDownload = async () => {
     setLoading(true)
     try {
-      const response = await axios.get(`${API_URL}/session/${sessionId}/export`, {
+      const response = await axios.get(`${API_URL}/session/${sessionId}/value-functions/export`, {
         responseType: 'blob'
       })
       
       const url = window.URL.createObjectURL(new Blob([response.data]))
       const link = document.createElement('a')
       link.href = url
-      link.setAttribute('download', `results_${sessionId}.csv`)
+      link.setAttribute('download', `value_functions_${sessionId}.csv`)
       document.body.appendChild(link)
       link.click()
-      link.parentChild.removeChild(link)
+      link.parentNode.removeChild(link)
       
       toast({
         title: 'Success',
-        description: 'File downloaded',
+        description: 'Value functions CSV downloaded',
         status: 'success',
         duration: 2,
         isClosable: true,
@@ -33,7 +33,7 @@ function OutputPage({ sessionId }) {
     } catch (error) {
       toast({
         title: 'Error',
-        description: error.response?.data?.error || 'Failed to download',
+        description: error.response?.data?.error || 'Failed to download value functions',
         status: 'error',
         duration: 3,
         isClosable: true,

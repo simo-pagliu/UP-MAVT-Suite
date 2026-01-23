@@ -200,6 +200,54 @@ def update_value(session_id):
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
 
+# Export value functions as CSV
+@bp.route('/session/<session_id>/value-functions/export', methods=['GET'])
+def export_value_functions_csv(session_id):
+    """Export value functions as CSV with serialized point lists"""
+    db = current_app.db
+    try:
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+
+        value_functions = session.get('value_functions') or {}
+        criteria_map = value_functions.get('criteria') if isinstance(value_functions, dict) else None
+        if not criteria_map or not isinstance(criteria_map, dict):
+            return jsonify({'error': 'No value functions to export'}), 404
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['CRITERION_NAME', 'LIST OF POINTS'])
+
+        for name, cfg in criteria_map.items():
+            points = cfg.get('points') if isinstance(cfg, dict) else []
+            serialized = ''
+            if isinstance(points, list):
+                parts = []
+                for p in points:
+                    if not isinstance(p, dict):
+                        continue
+                    x = p.get('x')
+                    y = p.get('y')
+                    if x is None or y is None:
+                        continue
+                    try:
+                        parts.append(f"{float(x)}:{float(y)}")
+                    except (TypeError, ValueError):
+                        continue
+                serialized = ';'.join(parts)
+            writer.writerow([name, serialized])
+
+        output.seek(0)
+        return send_file(
+            io.BytesIO(output.getvalue().encode()),
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'value_functions_{session.get("name", session_id)}.csv'
+        )
+    except:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
 # Update PILE-BWT
 @bp.route('/session/<session_id>/pile', methods=['PUT'])
 def update_pile(session_id):
