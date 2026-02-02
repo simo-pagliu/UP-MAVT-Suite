@@ -15,10 +15,16 @@ import {
   SliderFilledTrack,
   SliderThumb,
   FormLabel,
+  NumberInput,
+  NumberInputField,
+  Alert,
+  AlertIcon,
+  AlertTitle,
+  AlertDescription,
 } from '@chakra-ui/react'
 import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
 import axios from 'axios'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   LineChart,
   Line,
@@ -48,8 +54,27 @@ function PileBwtPage({ sessionId, onPageChange }) {
   const [currentPairIndex, setCurrentPairIndex] = useState(0)
   const [comparisons, setComparisons] = useState([])
   const [sliderValue, setSliderValue] = useState(0)
+  const [sliderInputValue, setSliderInputValue] = useState('')
   const [saving, setSaving] = useState(false)
+  const [bwtSignature, setBwtSignature] = useState(null)
+  const [criteriaMismatch, setCriteriaMismatch] = useState(false)
+  const [criteriaMismatchAcknowledged, setCriteriaMismatchAcknowledged] = useState(false)
   const toast = useToast()
+
+  const getCriteriaSignature = (criteriaList) => {
+    const normalized = (criteriaList || []).map((crit) => ({
+      name: crit.criterion_name || '',
+      unit: crit.unit || '',
+      group: crit.group || '',
+      alternatives: (crit.alternatives || []).map((alt) => ({
+        name: alt.name || alt.alternative_name || '',
+        value: alt.value,
+      })),
+    }))
+    return JSON.stringify(normalized)
+  }
+
+  const criteriaSignature = useMemo(() => getCriteriaSignature(criteria), [criteria])
 
   useEffect(() => {
     const fetchSession = async () => {
@@ -80,6 +105,10 @@ function PileBwtPage({ sessionId, onPageChange }) {
         if (session.bwt?.comparisons && session.bwt.comparisons.length > 0) {
           setComparisons(session.bwt.comparisons)
         }
+
+        if (session.bwt?.criteria_signature) {
+          setBwtSignature(session.bwt.criteria_signature)
+        }
       } catch (error) {
         toast({
           title: 'Error',
@@ -96,6 +125,20 @@ function PileBwtPage({ sessionId, onPageChange }) {
       fetchSession()
     }
   }, [sessionId, toast])
+
+  useEffect(() => {
+    if (loading) return
+    if (comparisons.length > 0 && !bwtSignature) {
+      setCriteriaMismatch(true)
+      return
+    }
+    if (bwtSignature && criteriaSignature && bwtSignature !== criteriaSignature) {
+      setCriteriaMismatch(true)
+    } else if (bwtSignature && criteriaSignature && bwtSignature === criteriaSignature) {
+      setCriteriaMismatch(false)
+      setCriteriaMismatchAcknowledged(false)
+    }
+  }, [loading, bwtSignature, criteriaSignature, comparisons.length])
 
   useEffect(() => {
     if (!loading && groups.length > 0 && selectedGroupIndex !== null) {
@@ -130,10 +173,62 @@ function PileBwtPage({ sessionId, onPageChange }) {
           setWorstCriterion(worst)
           setStep('evaluate-pairs')
           setCurrentPairIndex(0)
+          const firstPair = newPairs[0]
+          const existing = comparisons.find(
+            (c) =>
+              c.reference_criterion === firstPair.reference.criterion_name &&
+              c.adjusted_criterion === firstPair.adjusted.criterion_name &&
+              c.group === groupName
+          )
+          setSliderValue(existing ? existing.data_value : getDataRange(firstPair.adjusted).min)
         }
       }
     }
   }, [loading, groups, selectedGroupIndex])
+
+  useEffect(() => {
+    if (Number.isFinite(sliderValue)) {
+      setSliderInputValue(sliderValue.toFixed(2))
+    }
+  }, [sliderValue])
+
+  const buildBwtPayload = (comps) => ({
+    comparisons: comps,
+    criteria_signature: criteriaSignature,
+  })
+
+  const handleCriteriaMismatchReset = async () => {
+    setSaving(true)
+    try {
+      await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
+        value: buildBwtPayload([]),
+      })
+      setComparisons([])
+      setPairs([])
+      setBestCriterion(null)
+      setWorstCriterion(null)
+      setCurrentPairIndex(0)
+      setStep('select-criteria')
+      setCriteriaMismatch(false)
+      setCriteriaMismatchAcknowledged(false)
+      setBwtSignature(criteriaSignature)
+      toast({
+        title: 'BWT reset',
+        description: 'Please redo the elicitation process.',
+        status: 'success',
+        isClosable: true,
+      })
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.response?.data?.error || 'Failed to reset BWT',
+        status: 'error',
+        isClosable: true,
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const getGroupCompletionStatus = (groupIndex) => {
     const groupName = groups[groupIndex]?.name
@@ -174,7 +269,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
     setSaving(true)
     try {
       await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
-        value: { comparisons: newComparisons },
+        value: buildBwtPayload(newComparisons),
       })
       toast({
         title: 'Group reset successfully',
@@ -304,7 +399,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
       setSaving(true)
       try {
         await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
-          value: { comparisons: updatedComparisons },
+          value: buildBwtPayload(updatedComparisons),
         })
         setComparisons(updatedComparisons)
         setCurrentPairIndex(currentPairIndex + 1)
@@ -332,7 +427,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
       setSaving(true)
       try {
         await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
-          value: { comparisons: updatedComparisons },
+          value: buildBwtPayload(updatedComparisons),
         })
         setComparisons(updatedComparisons)
         setCurrentPairIndex(currentPairIndex - 1)
@@ -355,7 +450,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
     setSaving(true)
     try {
       await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
-        value: { comparisons: comps },
+        value: buildBwtPayload(comps),
       })
     } catch (error) {
       toast({
@@ -400,6 +495,36 @@ function PileBwtPage({ sessionId, onPageChange }) {
       return (
         <Box display="flex" justifyContent="center" alignItems="center" minH="60vh">
           <VStack spacing={4} textAlign="center">
+            {criteriaMismatch && (
+              <Alert status="error" borderRadius="md" textAlign="left" w="100%">
+                <AlertIcon />
+                <Box flex="1">
+                  <AlertTitle>BWT invalid</AlertTitle>
+                  <AlertDescription>
+                    The criteria have changed since the last elicitation. Please reset and redo the BWT process.
+                  </AlertDescription>
+                </Box>
+                <HStack spacing={2} ml={4}>
+                  {!criteriaMismatchAcknowledged && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setCriteriaMismatchAcknowledged(true)}
+                    >
+                      Keep (invalid)
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    colorScheme="red"
+                    onClick={handleCriteriaMismatchReset}
+                    isLoading={saving}
+                  >
+                    Reset BWT
+                  </Button>
+                </HStack>
+              </Alert>
+            )}
             <Heading size="lg">Select a Group to Start</Heading>
             <Text color="gray.600" fontSize="lg">
               Click on a group in the sidebar to view or complete its comparisons
@@ -413,6 +538,36 @@ function PileBwtPage({ sessionId, onPageChange }) {
       const selectedGroup = groups[selectedGroupIndex]
       return (
         <VStack spacing={6} align="stretch">
+          {criteriaMismatch && (
+            <Alert status="error" borderRadius="md">
+              <AlertIcon />
+              <Box flex="1">
+                <AlertTitle>BWT invalid</AlertTitle>
+                <AlertDescription>
+                  The criteria have changed since the last elicitation. Please reset and redo the BWT process.
+                </AlertDescription>
+              </Box>
+              <HStack spacing={2} ml={4}>
+                {!criteriaMismatchAcknowledged && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setCriteriaMismatchAcknowledged(true)}
+                  >
+                    Keep (invalid)
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  colorScheme="red"
+                  onClick={handleCriteriaMismatchReset}
+                  isLoading={saving}
+                >
+                  Reset BWT
+                </Button>
+              </HStack>
+            </Alert>
+          )}
           <Box display="flex" justifyContent="space-between" alignItems="center">
             <Heading size="lg">Select Best and Worst Criteria</Heading>
             <Badge colorScheme="blue">
@@ -513,6 +668,36 @@ function PileBwtPage({ sessionId, onPageChange }) {
 
       return (
         <VStack spacing={6} align="stretch">
+          {criteriaMismatch && (
+            <Alert status="error" borderRadius="md">
+              <AlertIcon />
+              <Box flex="1">
+                <AlertTitle>BWT invalid</AlertTitle>
+                <AlertDescription>
+                  The criteria have changed since the last elicitation. Please reset and redo the BWT process.
+                </AlertDescription>
+              </Box>
+              <HStack spacing={2} ml={4}>
+                {!criteriaMismatchAcknowledged && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setCriteriaMismatchAcknowledged(true)}
+                  >
+                    Keep (invalid)
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  colorScheme="red"
+                  onClick={handleCriteriaMismatchReset}
+                  isLoading={saving}
+                >
+                  Reset BWT
+                </Button>
+              </HStack>
+            </Alert>
+          )}
           <Box display="flex" justifyContent="space-between" alignItems="center">
             <Heading size="lg">
               Pair {currentPairIndex + 1} of {pairs.length}
@@ -522,13 +707,36 @@ function PileBwtPage({ sessionId, onPageChange }) {
             </Badge>
           </Box>
 
-          <Text fontSize="sm" color="gray.600">
-            Reference (fixed at best): <strong>{pair.reference.criterion_name}</strong> | Adjusted (with slider): <strong>{pair.adjusted.criterion_name}</strong>
-          </Text>
+          <Box border="1px" borderColor="gray.200" borderRadius="md" p={4} bg="gray.50">
+            <Text fontSize="sm" color="gray.700" mb={2}>
+              On the left, you see the baseline: all criteria are at their worst, except for {' '}
+              <strong>{pair.reference.criterion_name}</strong>, which is at its best.
+              <br />
+              On the right, the compensated scenario: how much must {' '}
+              <strong>{pair.adjusted.criterion_name}</strong> improve to compensate the total loss of {' '}
+              <strong>{pair.reference.criterion_name}</strong>?
+            </Text>
+            <Text fontSize="sm" color="gray.600">
+              Adjust the slider to affect the compensated scenario.
+            </Text>
+          </Box>
+
+          <HStack spacing={4} align="stretch">
+            <Box border="1px" borderColor="gray.200" borderRadius="md" p={3} flex={1} bg="white">
+              <Text fontSize="sm" color="gray.700">
+                <strong>Baseline:</strong> {pair.reference.criterion_name} [{referenceRange.min.toFixed(2)}-{referenceRange.max.toFixed(2)}] {pair.reference.unit}
+              </Text>
+            </Box>
+            <Box border="1px" borderColor="gray.200" borderRadius="md" p={3} flex={1} bg="white">
+              <Text fontSize="sm" color="gray.700">
+                <strong>Adjustable:</strong> {pair.adjusted.criterion_name} [{adjustedRange.min.toFixed(2)}-{adjustedRange.max.toFixed(2)}] {pair.adjusted.unit}
+              </Text>
+            </Box>
+          </HStack>
 
           <HStack spacing={4} align="stretch">
             <Box border="1px" borderColor="gray.200" borderRadius="md" p={4} flex={1}>
-              <Heading size="sm" mb={2} textAlign="center">{pair.reference.criterion_name}</Heading>
+              <Heading size="sm" mb={2} textAlign="center">Baseline scenario</Heading>
               <ResponsiveContainer width="100%" height={400}>
                 <BarChart data={plot1Data} margin={{ top: 10, right: 10, bottom: 20, left: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -541,9 +749,9 @@ function PileBwtPage({ sessionId, onPageChange }) {
                     tick={{ fontSize: 12 }}
                   />
                   <YAxis domain={[0, 1]} tick={{ fontSize: 12 }} />
-                  <Bar dataKey="value" fill="#3182ce">
+                  <Bar dataKey="value" fill="#2b6cb0">
                     {plot1Data.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.isReference ? '#38a169' : '#cbd5e0'} />
+                      <Cell key={`cell-${index}`} fill={entry.isReference ? '#2c5282' : '#cbd5e0'} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -551,7 +759,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
             </Box>
 
             <Box border="1px" borderColor="gray.200" borderRadius="md" p={4} flex={1}>
-              <Heading size="sm" mb={2} textAlign="center">{pair.adjusted.criterion_name}</Heading>
+              <Heading size="sm" mb={2} textAlign="center">Compensated scenario</Heading>
               <ResponsiveContainer width="100%" height={400}>
                 <BarChart data={plot2Data} margin={{ top: 10, right: 10, bottom: 20, left: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -564,9 +772,9 @@ function PileBwtPage({ sessionId, onPageChange }) {
                     tick={{ fontSize: 12 }}
                   />
                   <YAxis domain={[0, 1]} tick={{ fontSize: 12 }} />
-                  <Bar dataKey="value" fill="#48bb78">
+                  <Bar dataKey="value" fill="#63b3ed">
                     {plot2Data.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.isAdjusted ? '#d69e2e' : '#cbd5e0'} />
+                      <Cell key={`cell-${index}`} fill={entry.isAdjusted ? '#2b6cb0' : '#cbd5e0'} />
                     ))}
                   </Bar>
                 </BarChart>
@@ -575,9 +783,50 @@ function PileBwtPage({ sessionId, onPageChange }) {
           </HStack>
 
           <Box>
-            <FormLabel>
-              {pair.adjusted.criterion_name} Value: <strong>{sliderValue.toFixed(2)}</strong> {pair.adjusted.unit}
-            </FormLabel>
+            <HStack justify="flex-start" align="center" spacing={3} mb={2}>
+              <FormLabel mb={0} fontWeight="bold" fontSize="md">
+                Adjust "{pair.adjusted.criterion_name}" [{pair.adjusted.unit}]:
+              </FormLabel>
+              <NumberInput
+                value={sliderInputValue}
+                min={adjustedRange.min}
+                max={adjustedRange.max}
+                step={(adjustedRange.max - adjustedRange.min) / 100}
+                precision={2}
+                onChange={(valueString) => {
+                  setSliderInputValue(valueString)
+                }}
+                size="md"
+                maxW="160px"
+                variant="unstyled"
+              >
+                <NumberInputField
+                  textAlign="left"
+                  fontWeight="bold"
+                  fontSize="md"
+                  lineHeight="1.2"
+                  px={2}
+                  py={1}
+                  height="auto"
+                  mt="1px"
+                  border="1px solid"
+                  borderColor="gray.300"
+                  borderRadius="md"
+                  bg="white"
+                  _focus={{ borderColor: 'blue.400', boxShadow: '0 0 0 1px #63b3ed' }}
+                  onBlur={() => {
+                    const parsed = Number(sliderInputValue)
+                    if (Number.isFinite(parsed)) {
+                      const clamped = Math.min(adjustedRange.max, Math.max(adjustedRange.min, parsed))
+                      setSliderValue(clamped)
+                      setSliderInputValue(clamped.toFixed(2))
+                    } else {
+                      setSliderInputValue(Number.isFinite(sliderValue) ? sliderValue.toFixed(2) : adjustedRange.min.toFixed(2))
+                    }
+                  }}
+                />
+              </NumberInput>
+            </HStack>
             <Slider
               min={adjustedRange.min}
               max={adjustedRange.max}
@@ -611,13 +860,13 @@ function PileBwtPage({ sessionId, onPageChange }) {
                     allowDataOverflow
                   />
                   <YAxis domain={[0, 1]} tick={{ fontSize: 12 }} />
-                  <Line type="linear" dataKey="y" stroke="#8884d8" dot strokeWidth={2} />
+                  <Line type="linear" dataKey="y" stroke="#2b6cb0" dot strokeWidth={2} />
                   <ReferenceDot
                     x={sliderValue}
                     y={currentVFValue}
                     r={4}
-                    fill="#d69e2e"
-                    stroke="#b7791f"
+                    fill="#4299e1"
+                    stroke="#2b6cb0"
                     strokeWidth={1.5}
                     isFront
                     ifOverflow="extendDomain"
@@ -752,7 +1001,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
                               setSaving(true)
                               try {
                                 await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
-                                  value: { comparisons: updated },
+                                  value: buildBwtPayload(updated),
                                 })
                                 setComparisons(updated)
                                 setCurrentPairIndex(pairIdx)
