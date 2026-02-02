@@ -66,6 +66,7 @@ def create_session():
         'value_functions': None,
         'bwt': None,
         'pile_bwt': None,
+        'locked': False,
         'created_at': datetime.utcnow()
     }
 
@@ -159,6 +160,28 @@ def update_criteria(session_id):
         if result.matched_count == 0:
             return jsonify({'error': 'Session not found'}), 404
         return jsonify({'status': 'updated'}), 200
+    except:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
+# Toggle input lock
+@bp.route('/session/<session_id>/lock', methods=['PUT'])
+def toggle_session_lock(session_id):
+    """Toggle the lock status of a session's input"""
+    db = current_app.db
+    try:
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        
+        current_locked = session.get('locked', False)
+        new_locked = not current_locked
+        
+        result = db.sessions.update_one(
+            {'_id': ObjectId(session_id)},
+            {'$set': {'locked': new_locked}}
+        )
+        
+        return jsonify({'locked': new_locked}), 200
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
 

@@ -128,15 +128,31 @@ function PileBwtPage({ sessionId, onPageChange }) {
 
   useEffect(() => {
     if (loading) return
+    
+    console.log('BWT Mismatch Check:', {
+      comparisonsLength: comparisons.length,
+      bwtSignature,
+      criteriaSignature,
+      match: bwtSignature === criteriaSignature
+    })
+    
+    // If there are comparisons but no saved signature (old data), it's a mismatch
     if (comparisons.length > 0 && !bwtSignature) {
+      console.log('Setting mismatch: comparisons exist but no signature')
       setCriteriaMismatch(true)
       return
     }
-    if (bwtSignature && criteriaSignature && bwtSignature !== criteriaSignature) {
-      setCriteriaMismatch(true)
-    } else if (bwtSignature && criteriaSignature && bwtSignature === criteriaSignature) {
-      setCriteriaMismatch(false)
-      setCriteriaMismatchAcknowledged(false)
+    
+    // If there's a saved signature and current signature, compare them
+    if (bwtSignature && criteriaSignature) {
+      if (bwtSignature !== criteriaSignature) {
+        console.log('Setting mismatch: signatures dont match')
+        setCriteriaMismatch(true)
+      } else {
+        console.log('Clearing mismatch: signatures match')
+        setCriteriaMismatch(false)
+        setCriteriaMismatchAcknowledged(false)
+      }
     }
   }, [loading, bwtSignature, criteriaSignature, comparisons.length])
 

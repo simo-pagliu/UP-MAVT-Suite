@@ -33,6 +33,7 @@ function InputPage({ onSessionCreated, sessionId }) {
   const [existingSessionId, setExistingSessionId] = useState(null)
   const [isExistingSession, setIsExistingSession] = useState(false)
   const [showCodeInput, setShowCodeInput] = useState(false)
+  const [isLocked, setIsLocked] = useState(false)
   const toast = useToast()
   const fileInputRef = useRef(null)
 
@@ -60,6 +61,7 @@ function InputPage({ onSessionCreated, sessionId }) {
           if (session.criteria && Array.isArray(session.criteria)) {
                   setCriteria(normalizeCriteria(session.criteria))
           }
+          setIsLocked(session.locked || false)
           setExistingSessionId(sessionId)
           setIsExistingSession(true)
         } catch (error) {
@@ -116,6 +118,7 @@ function InputPage({ onSessionCreated, sessionId }) {
         if (data.criteria && Array.isArray(data.criteria)) {
           setCriteria(normalizeCriteria(data.criteria))
         }
+        setIsLocked(data.locked || false)
         setExistingSessionId(data._id)
         setIsExistingSession(true)
         toast({
@@ -128,6 +131,7 @@ function InputPage({ onSessionCreated, sessionId }) {
       } else {
         // New session
         setIsExistingSession(false)
+        setIsLocked(false)
         setCriteria([])
         toast({
           title: 'New session',
@@ -152,6 +156,17 @@ function InputPage({ onSessionCreated, sessionId }) {
   }
 
   const handleFileUpload = (event) => {
+    if (isLocked) {
+      toast({
+        title: 'Error',
+        description: 'This session is locked. You cannot modify the criteria.',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
+
     const file = event.target.files?.[0]
     if (!file) return
 
@@ -480,16 +495,28 @@ function InputPage({ onSessionCreated, sessionId }) {
     setLoading(true)
     try {
       if (isExistingSession && existingSessionId) {
-        // Update existing session criteria
-        await axios.put(`${API_URL}/session/${existingSessionId}/criteria`, { criteria })
-        toast({
-          title: 'Success',
-          description: 'Session updated',
-          status: 'success',
-          duration: 2,
-          isClosable: true,
-        })
-        onSessionCreated(existingSessionId)
+        // If locked, just proceed without updating
+        if (isLocked) {
+          toast({
+            title: 'Proceeding',
+            description: 'Session is locked, proceeding to elicitation',
+            status: 'info',
+            duration: 2,
+            isClosable: true,
+          })
+          onSessionCreated(existingSessionId)
+        } else {
+          // Update existing session criteria
+          await axios.put(`${API_URL}/session/${existingSessionId}/criteria`, { criteria })
+          toast({
+            title: 'Success',
+            description: 'Session updated',
+            status: 'success',
+            duration: 2,
+            isClosable: true,
+          })
+          onSessionCreated(existingSessionId)
+        }
       } else {
         // Create new session
         const response = await axios.post(`${API_URL}/session`, { name, criteria })
@@ -622,18 +649,27 @@ function InputPage({ onSessionCreated, sessionId }) {
           <>
             <Divider />
 
+            {isLocked && (
+              <Box bg="yellow.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="yellow.400">
+                <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
+                  🔒 This session is locked. You can view the criteria but cannot modify them.
+                </Text>
+              </Box>
+            )}
+
             <VStack align="stretch" spacing={4}>
           <Heading as="h2" size="md">Criteria & Alternatives</Heading>
           <Text fontSize="sm" color="gray.600">
             Upload a CSV where the first column contains alternative names, other columns are criteria. First row has criterion names, last row has units.
           </Text>
-          <FormControl>
-            <FormLabel>Upload CSV</FormLabel>
-            <Input 
-              type="file" 
-              accept=".csv" 
-              onChange={handleFileUpload} 
-              ref={fileInputRef}
+          {!isLocked && (
+            <FormControl>
+              <FormLabel>Upload CSV</FormLabel>
+              <Input 
+                type="file" 
+                accept=".csv" 
+                onChange={handleFileUpload} 
+                ref={fileInputRef}
               display="none"
             />
             <Button 
@@ -644,14 +680,25 @@ function InputPage({ onSessionCreated, sessionId }) {
             >
               Choose File
             </Button>
-          </FormControl>
+            </FormControl>
+          )}
 
           <HStack justify="space-between">
             <HStack spacing={2}>
-              <Button leftIcon={<AddIcon />} size="sm" onClick={handleAddAlternative}>
+              <Button 
+                leftIcon={<AddIcon />} 
+                size="sm" 
+                onClick={handleAddAlternative}
+                isDisabled={isLocked}
+              >
                 Add Alternative
               </Button>
-              <Button leftIcon={<AddIcon />} size="sm" onClick={handleAddCriterion}>
+              <Button 
+                leftIcon={<AddIcon />} 
+                size="sm" 
+                onClick={handleAddCriterion}
+                isDisabled={isLocked}
+              >
                 Add Criterion
               </Button>
             </HStack>
@@ -676,6 +723,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                             size="sm"
                             fontWeight="bold"
                             bg="white"
+                            isDisabled={isLocked}
                           />
                           <Input
                             value={criterion.group || ''}
@@ -684,6 +732,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                             size="sm"
                             fontSize="xs"
                             bg="white"
+                            isDisabled={isLocked}
                           />
                           <Input
                             value={criterion.description || ''}
@@ -692,6 +741,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                             size="sm"
                             fontSize="xs"
                             bg="white"
+                            isDisabled={isLocked}
                           />
                           <Input
                             value={criterion.unit}
@@ -700,6 +750,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                             size="sm"
                             fontSize="xs"
                             bg="white"
+                            isDisabled={isLocked}
                           />
                         </VStack>
                       </Th>
@@ -716,6 +767,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                           onChange={(e) => handleAlternativeNameChange(altIdx, e.target.value)}
                           placeholder="Alternative name"
                           size="sm"
+                          isDisabled={isLocked}
                         />
                       </Td>
                       {criteria.map((criterion, critIdx) => (
@@ -726,6 +778,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                             placeholder="Value"
                             size="sm"
                             type="number"
+                            isDisabled={isLocked}
                           />
                         </Td>
                       ))}
@@ -737,6 +790,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                           variant="ghost"
                           colorScheme="red"
                           onClick={() => handleRemoveAlternative(altIdx)}
+                          isDisabled={isLocked}
                         />
                       </Td>
                     </Tr>

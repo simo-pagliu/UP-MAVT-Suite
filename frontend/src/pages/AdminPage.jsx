@@ -176,6 +176,37 @@ function AdminPage() {
     window.open(`http://localhost:5000/api/session/${sessionId}/bwt/export`, '_blank')
   }
 
+  const handleToggleLock = async (sessionId) => {
+    try {
+      const response = await fetch(`http://localhost:5000/api/session/${sessionId}/lock`, {
+        method: 'PUT',
+      })
+      
+      if (!response.ok) throw new Error('Failed to toggle lock')
+      
+      const data = await response.json()
+      
+      toast({
+        title: 'Success',
+        description: data.locked ? 'Session locked' : 'Session unlocked',
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
+      })
+      
+      // Refresh the sessions list
+      fetchSessions()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to toggle lock',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+    }
+  }
+
   // Show login form if not authenticated
   if (!isAuthenticated) {
     return (
@@ -233,6 +264,7 @@ function AdminPage() {
                 <Th>Name</Th>
                 <Th>Created At</Th>
                 <Th>Criteria Count</Th>
+                <Th>Locked</Th>
                 <Th>Qualitative</Th>
                 <Th>Value Functions</Th>
                 <Th>BWT</Th>
@@ -246,12 +278,20 @@ function AdminPage() {
                   <Td>{session.name}</Td>
                   <Td>{formatDate(session.created_at)}</Td>
                   <Td>{session.criteria?.length || 0}</Td>
+                  <Td>{session.locked ? '🔒 Locked' : '🔓 Unlocked'}</Td>
                   <Td>{session.qualitative_indicators !== null ? '✓' : '—'}</Td>
                   <Td>{session.value_functions !== null ? '✓' : '—'}</Td>
                   <Td>{session.bwt !== null ? '✓' : '—'}</Td>
                   <Td>{session.pile_bwt !== null ? '✓' : '—'}</Td>
                   <Td>
                     <HStack spacing={2}>
+                      <Button
+                        colorScheme={session.locked ? 'orange' : 'yellow'}
+                        size="sm"
+                        onClick={() => handleToggleLock(session._id)}
+                      >
+                        {session.locked ? 'Unlock' : 'Lock'}
+                      </Button>
                       <Button
                         colorScheme="blue"
                         size="sm"
