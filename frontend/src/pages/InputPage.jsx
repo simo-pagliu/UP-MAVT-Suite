@@ -518,7 +518,19 @@ function InputPage({ onSessionCreated, sessionId }) {
   return (
     <Box bg="white" p={8} borderRadius="lg" boxShadow="sm">
       <VStack spacing={6} align="stretch">
-        <Heading as="h1" size="lg">Input</Heading>
+        <HStack justify="space-between" align="center" mb={4}>
+          <Heading as="h1" size="lg">Input</Heading>
+          {nameChecked && (
+            <Button
+              colorScheme="blue"
+              isLoading={loading}
+              onClick={handleSubmit}
+              size="lg"
+            >
+              Continue
+            </Button>
+          )}
+        </HStack>
         <FormControl>
           <FormLabel>Session Code</FormLabel>
           
@@ -738,14 +750,6 @@ function InputPage({ onSessionCreated, sessionId }) {
             </Box>
           )}
             </VStack>
-
-            <Button
-              colorScheme="blue"
-              isLoading={loading}
-              onClick={handleSubmit}
-            >
-              Continue
-            </Button>
           </>
         )}
       </VStack>
