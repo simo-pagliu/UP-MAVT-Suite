@@ -32,7 +32,7 @@ import {
   VStack,
   useToast,
 } from '@chakra-ui/react'
-import { CheckCircleIcon, WarningIcon } from '@chakra-ui/icons'
+import { CheckCircleIcon, WarningIcon, CloseIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
@@ -648,7 +648,7 @@ function ValueFunctionsPage({ sessionId }) {
                     colorScheme="blue"
                     justifyContent="space-between"
                     onClick={() => setActive(name)}
-                    rightIcon={done ? <CheckCircleIcon /> : undefined}
+                    rightIcon={done ? <CheckCircleIcon color="green.500" /> : <CloseIcon color="red.500" boxSize={3} />}
                   >
                     <Text noOfLines={1}>{idx + 1}. {name}</Text>
                   </Button>
@@ -660,10 +660,45 @@ function ValueFunctionsPage({ sessionId }) {
         <Box>
           {activeData ? (
             <VStack align="stretch" spacing={5}>
-              <HStack justify="space-between" align="center">
+              <VStack align="stretch" spacing={3}>
                 <Heading size="md">{active}</Heading>
-                <Badge colorScheme="purple">X range: {activeData.range.min} – {activeData.range.max}</Badge>
-              </HStack>
+                <Box bg="gray.50" p={3} borderRadius="md" border="1px solid" borderColor="gray.200">
+                  <Text fontSize="sm" fontWeight="semibold">
+                    RANGE: [{activeData.range.min} – {activeData.range.max}]
+                  </Text>
+                </Box>
+              </VStack>
+
+              <Box>
+                <FormLabel fontWeight="bold" mb={3}>Editing Method</FormLabel>
+                <HStack spacing={2}>
+                  <Button
+                    variant={activeData.mode === MODE.MID ? 'solid' : 'outline'}
+                    colorScheme="blue"
+                    isDisabled={activeData.shape.startsWith('gaussian')}
+                    onClick={() => {
+                      markDirty((prev) => ({
+                        ...prev,
+                        [active]: { ...prev[active], mode: MODE.MID },
+                      }))
+                    }}
+                  >
+                    Mid-splitting
+                  </Button>
+                  <Button
+                    variant={activeData.mode === MODE.FREE ? 'solid' : 'outline'}
+                    colorScheme="blue"
+                    onClick={() => {
+                      markDirty((prev) => ({
+                        ...prev,
+                        [active]: { ...prev[active], mode: MODE.FREE },
+                      }))
+                    }}
+                  >
+                    Free Edit
+                  </Button>
+                </HStack>
+              </Box>
 
               <Box>
                 <FormLabel fontWeight="bold">Shape</FormLabel>
@@ -717,135 +752,138 @@ function ValueFunctionsPage({ sessionId }) {
                 </FormControl>
               </SimpleGrid>
 
-              <Tabs
-                colorScheme="blue"
-                index={activeData.mode === MODE.MID ? 0 : 1}
-                onChange={(idx) => {
-                  if (!activeData) return
-                  const nextMode = idx === 0 ? MODE.MID : MODE.FREE
-                  markDirty((prev) => ({
-                    ...prev,
-                    [active]: { ...prev[active], mode: nextMode },
-                  }))
-                }}
-              >
-                <TabList>
-                  <Tab isDisabled={activeData.shape.startsWith('gaussian')}>Mid-splitting (default)</Tab>
-                  <Tab>Free edit</Tab>
-                </TabList>
-                <TabPanels>
-                  <TabPanel>
-                    <VStack align="stretch" spacing={4}>
-                      <Flex align="center" justify="space-between">
-                        <FormLabel m={0}>Step 1: midpoint [{activeData.thresholds.low} – {activeData.thresholds.high}]</FormLabel>
-                        <HStack>
-                          <Text fontSize="sm" color="gray.600">Skip</Text>
-                          <Checkbox
-                            isChecked={activeData.midSplit.skipFirst}
-                            onChange={(e) => handleSkipStep('skipFirst', e.target.checked)}
-                          />
-                        </HStack>
-                      </Flex>
-                      {!activeData.midSplit.skipFirst && (
+              {activeData.mode === MODE.MID ? (
+                <VStack align="stretch" spacing={4}>
+                  <Box>
+                    <Flex align="center" justify="space-between" mb={3}>
+                      <FormLabel m={0} fontWeight="bold">Indifference point 0.5</FormLabel>
+                      <HStack>
+                        <Text fontSize="sm" color="gray.600">Skip</Text>
+                        <Checkbox
+                          isChecked={activeData.midSplit.skipFirst}
+                          onChange={(e) => handleSkipStep('skipFirst', e.target.checked)}
+                        />
+                      </HStack>
+                    </Flex>
+                    {!activeData.midSplit.skipFirst && (
+                      <VStack align="stretch" spacing={2}>
+                        <Text fontSize="sm" color="gray.700">
+                          At which point X increasing <strong>{active}</strong> from <strong>{activeData.range.min}</strong> to <strong>X</strong> has the same importance as increasing it from <strong>X</strong> to <strong>{activeData.range.max}</strong>?
+                        </Text>
                         <Input
                           key={`mid-step1-${activeData.midSplit.step1 ?? 'blank'}`}
                           type="number"
                           defaultValue={activeData.midSplit.step1 ?? ''}
-                          placeholder="Enter X for 50/50 split"
+                          placeholder="Enter X"
                           onBlur={(e) => {
                             const num = parseFloat(e.target.value)
                             if (Number.isFinite(num)) handleMidSplitChange('step1', num, true)
                           }}
                         />
-                      )}
-                      {!activeData.midSplit.skipFirst && (
-                        <>
-                          <Divider />
-                          <Flex align="center" justify="space-between">
-                            <FormLabel m={0}>Step 2: split min → X [{activeData.thresholds.low} – {activeData.midSplit.step1 ?? activeData.thresholds.high}]</FormLabel>
-                            <HStack>
-                              <Text fontSize="sm" color="gray.600">Skip</Text>
-                              <Checkbox
-                                isChecked={activeData.midSplit.skipSecond}
-                                onChange={(e) => handleSkipStep('skipSecond', e.target.checked)}
-                              />
-                            </HStack>
-                          </Flex>
-                          {!activeData.midSplit.skipSecond && (
+                      </VStack>
+                    )}
+                  </Box>
+
+                  {!activeData.midSplit.skipFirst && (
+                    <>
+                      <Divider />
+                      <Box>
+                        <Flex align="center" justify="space-between" mb={3}>
+                          <FormLabel m={0} fontWeight="bold">Indifference point 0.25</FormLabel>
+                          <HStack>
+                            <Text fontSize="sm" color="gray.600">Skip</Text>
+                            <Checkbox
+                              isChecked={activeData.midSplit.skipSecond}
+                              onChange={(e) => handleSkipStep('skipSecond', e.target.checked)}
+                            />
+                          </HStack>
+                        </Flex>
+                        {!activeData.midSplit.skipSecond && (
+                          <VStack align="stretch" spacing={2}>
+                            <Text fontSize="sm" color="gray.700">
+                              At which point X increasing <strong>{active}</strong> from <strong>{activeData.range.min}</strong> to <strong>X</strong> has the same importance as increasing it from <strong>X</strong> to <strong>{activeData.midSplit.step1 ?? activeData.range.max}</strong>?
+                            </Text>
                             <Input
                               key={`mid-step2-${activeData.midSplit.step2 ?? 'blank'}`}
                               type="number"
                               defaultValue={activeData.midSplit.step2 ?? ''}
-                              placeholder="Enter X for first half"
+                              placeholder="Enter X"
                               onBlur={(e) => {
                                 const num = parseFloat(e.target.value)
                                 if (Number.isFinite(num)) handleMidSplitChange('step2', num, true)
                               }}
                             />
-                          )}
-                          <Divider />
-                          <Flex align="center" justify="space-between">
-                            <FormLabel m={0}>Step 3: split X → max [{activeData.midSplit.step1 ?? activeData.thresholds.low} – {activeData.thresholds.high}]</FormLabel>
-                            <HStack>
-                              <Text fontSize="sm" color="gray.600">Skip</Text>
-                              <Checkbox
-                                isChecked={activeData.midSplit.skipThird}
-                                onChange={(e) => handleSkipStep('skipThird', e.target.checked)}
-                              />
-                            </HStack>
-                          </Flex>
-                          {!activeData.midSplit.skipThird && (
+                          </VStack>
+                        )}
+                      </Box>
+
+                      <Divider />
+                      <Box>
+                        <Flex align="center" justify="space-between" mb={3}>
+                          <FormLabel m={0} fontWeight="bold">Indifference point 0.75</FormLabel>
+                          <HStack>
+                            <Text fontSize="sm" color="gray.600">Skip</Text>
+                            <Checkbox
+                              isChecked={activeData.midSplit.skipThird}
+                              onChange={(e) => handleSkipStep('skipThird', e.target.checked)}
+                            />
+                          </HStack>
+                        </Flex>
+                        {!activeData.midSplit.skipThird && (
+                          <VStack align="stretch" spacing={2}>
+                            <Text fontSize="sm" color="gray.700">
+                              At which point X increasing <strong>{active}</strong> from <strong>X</strong> to <strong>{activeData.range.max}</strong> has the same importance as increasing it from <strong>{activeData.range.min}</strong> to <strong>X</strong>?
+                            </Text>
                             <Input
                               key={`mid-step3-${activeData.midSplit.step3 ?? 'blank'}`}
                               type="number"
                               defaultValue={activeData.midSplit.step3 ?? ''}
-                              placeholder="Enter X for second half"
+                              placeholder="Enter X"
                               onBlur={(e) => {
                                 const num = parseFloat(e.target.value)
                                 if (Number.isFinite(num)) handleMidSplitChange('step3', num, true)
                               }}
                             />
-                          )}
-                        </>
+                          </VStack>
+                        )}
+                      </Box>
+                    </>
+                  )}
+                  <Text fontSize="sm" color="gray.600">Skipping indifference point 0.5 keeps the function linear. Points 0.25 and 0.75 add curve refinement.</Text>
+                </VStack>
+              ) : (
+                <VStack align="stretch" spacing={3}>
+                  <HStack justify="space-between">
+                    <Button size="sm" onClick={handleAddPoint}>Add point</Button>
+                    <Text fontSize="sm" color="gray.500">Max 10 points. Endpoints stay in range.</Text>
+                  </HStack>
+                  {activeData.points.map((p, idx) => (
+                    <HStack key={`${idx}-${p.x}`} spacing={3} align="center">
+                      <Text fontSize="sm" color="gray.600">Point {idx + 1}</Text>
+                      <NumberInput
+                        value={p.x}
+                        min={activeData.range.min}
+                        max={activeData.range.max}
+                        onChange={(val, num) => handlePointChange(idx, 'x', num)}
+                      >
+                        <NumberInputField placeholder="X" />
+                      </NumberInput>
+                      <NumberInput
+                        value={p.y}
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        onChange={(val, num) => handlePointChange(idx, 'y', num)}
+                      >
+                        <NumberInputField placeholder="Y" />
+                      </NumberInput>
+                      {idx !== 0 && idx !== activeData.points.length - 1 && (
+                        <Button size="xs" colorScheme="red" variant="ghost" onClick={() => handleRemovePoint(idx)}>Remove</Button>
                       )}
-                      <Text fontSize="sm" color="gray.600">Skipping step 1 keeps the function linear. Steps 2 and 3 add points at 25% and 75% of the curve depending on monotonicity.</Text>
-                    </VStack>
-                  </TabPanel>
-                  <TabPanel>
-                    <VStack align="stretch" spacing={3}>
-                      <HStack justify="space-between">
-                        <Button size="sm" onClick={handleAddPoint}>Add point</Button>
-                        <Text fontSize="sm" color="gray.500">Max 10 points. Endpoints stay in range.</Text>
-                      </HStack>
-                      {activeData.points.map((p, idx) => (
-                        <HStack key={`${idx}-${p.x}`} spacing={3} align="center">
-                          <Text fontSize="sm" color="gray.600">Point {idx + 1}</Text>
-                          <NumberInput
-                            value={p.x}
-                            min={activeData.range.min}
-                            max={activeData.range.max}
-                            onChange={(val, num) => handlePointChange(idx, 'x', num)}
-                          >
-                            <NumberInputField placeholder="X" />
-                          </NumberInput>
-                          <NumberInput
-                            value={p.y}
-                            min={0}
-                            max={1}
-                            step={0.05}
-                            onChange={(val, num) => handlePointChange(idx, 'y', num)}
-                          >
-                            <NumberInputField placeholder="Y" />
-                          </NumberInput>
-                          {idx !== 0 && idx !== activeData.points.length - 1 && (
-                            <Button size="xs" colorScheme="red" variant="ghost" onClick={() => handleRemovePoint(idx)}>Remove</Button>
-                          )}
-                        </HStack>
-                      ))}
-                    </VStack>
-                  </TabPanel>
-                </TabPanels>
-              </Tabs>
+                    </HStack>
+                  ))}
+                </VStack>
+              )}
 
               <ValueFunctionPlot
                 range={activeData.range}
