@@ -21,10 +21,17 @@ import {
   AlertIcon,
   AlertTitle,
   AlertDescription,
+  AlertDialog,
+  AlertDialogBody,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogContent,
+  AlertDialogOverlay,
+  useDisclosure,
 } from '@chakra-ui/react'
 import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
 import axios from 'axios'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import {
   LineChart,
   Line,
@@ -59,6 +66,8 @@ function PileBwtPage({ sessionId, onPageChange }) {
   const [bwtSignature, setBwtSignature] = useState(null)
   const [criteriaMismatch, setCriteriaMismatch] = useState(false)
   const [criteriaMismatchAcknowledged, setCriteriaMismatchAcknowledged] = useState(false)
+  const { isOpen, onOpen, onClose } = useDisclosure()
+  const cancelRef = useRef()
   const toast = useToast()
 
   const getCriteriaSignature = (criteriaList) => {
@@ -960,7 +969,17 @@ function PileBwtPage({ sessionId, onPageChange }) {
         maxH="100vh"
         overflowY="auto"
       >
-        <Heading size="md" mb={6}>Groups</Heading>
+        <VStack spacing={4} align="stretch" mb={6}>
+          <Heading size="md">Groups</Heading>
+          <Button
+            colorScheme="red"
+            size="sm"
+            onClick={onOpen}
+            variant="outline"
+          >
+            Reset All BWT Data
+          </Button>
+        </VStack>
         <VStack spacing={3} align="stretch">
           {groups.map((group, idx) => {
             const isActive = selectedGroupIndex === idx
@@ -1070,6 +1089,42 @@ function PileBwtPage({ sessionId, onPageChange }) {
       <Box flex={1} bg="white" p={4} overflow="auto">
         {renderContent()}
       </Box>
+
+      {/* Reset Confirmation Dialog */}
+      <AlertDialog
+        isOpen={isOpen}
+        leastDestructiveRef={cancelRef}
+        onClose={onClose}
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              Reset All BWT Data
+            </AlertDialogHeader>
+
+            <AlertDialogBody>
+              Are you sure you want to reset all BWT comparisons? This will delete all your progress and cannot be undone.
+            </AlertDialogBody>
+
+            <AlertDialogFooter>
+              <Button ref={cancelRef} onClick={onClose}>
+                Cancel
+              </Button>
+              <Button 
+                colorScheme="red" 
+                onClick={() => {
+                  handleCriteriaMismatchReset()
+                  onClose()
+                }} 
+                ml={3}
+                isLoading={saving}
+              >
+                Reset All
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
     </HStack>
   )
 }
