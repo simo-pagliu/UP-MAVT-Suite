@@ -1,5 +1,6 @@
 Alternative,Cost,Power,GHG
 Group, Technoeconomic, Technoeconomic, Enviromental
+Description,Total capital investment cost,Installed electrical capacity,Lifecycle greenhouse gas emissions
 Nuclear,1000,1000,6
 Solar,50,50,20
 Gas,25,300,50

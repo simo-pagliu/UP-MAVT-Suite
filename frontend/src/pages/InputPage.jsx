@@ -42,6 +42,7 @@ function InputPage({ onSessionCreated, sessionId }) {
       criterion_name: c.criterion_name || '',
       unit: c.unit || '',
       group: c.group || '',
+      description: c.description || '',
       alternatives: Array.isArray(c.alternatives) ? c.alternatives : [],
     }))
   }
@@ -191,6 +192,7 @@ function InputPage({ onSessionCreated, sessionId }) {
 
       // Optional second row: groups
       let groups = Array(criterionNames.length).fill('')
+      let descriptions = Array(criterionNames.length).fill('')
       let alternativesStartIndex = 1
       if (rows[1] && rows[1][0] && rows[1][0].toLowerCase() === 'group') {
         groups = rows[1].slice(1)
@@ -199,6 +201,22 @@ function InputPage({ onSessionCreated, sessionId }) {
           toast({
             title: 'Error',
             description: 'Number of groups must match number of criteria',
+            status: 'error',
+            duration: 3000,
+            isClosable: true,
+          })
+          return
+        }
+      }
+
+      // Optional third row: descriptions
+      if (rows[alternativesStartIndex] && rows[alternativesStartIndex][0] && rows[alternativesStartIndex][0].toLowerCase() === 'description') {
+        descriptions = rows[alternativesStartIndex].slice(1)
+        alternativesStartIndex += 1
+        if (descriptions.length !== criterionNames.length) {
+          toast({
+            title: 'Error',
+            description: 'Number of descriptions must match number of criteria',
             status: 'error',
             duration: 3000,
             isClosable: true,
@@ -245,6 +263,7 @@ function InputPage({ onSessionCreated, sessionId }) {
         return {
           criterion_name: name,
           group: groups[idx] || '',
+          description: descriptions[idx] || '',
           unit: units[idx],
           alternatives
         }
@@ -335,6 +354,7 @@ function InputPage({ onSessionCreated, sessionId }) {
     const newCriterion = {
       criterion_name: '',
       group: '',
+      description: '',
       unit: '',
       alternatives: Array(alternativeCount).fill(null).map((_, idx) => ({
         name: criteria[0].alternatives[idx].name,
@@ -373,6 +393,10 @@ function InputPage({ onSessionCreated, sessionId }) {
     // Group row
     const groupRow = ['Group', ...criteria.map(c => c.group || '')]
     rows.push(groupRow.join(','))
+
+    // Description row
+    const descriptionRow = ['Description', ...criteria.map(c => c.description || '')]
+    rows.push(descriptionRow.join(','))
     
     // Alternative rows: name, value1, value2, ...
     const alternativeCount = criteria[0]?.alternatives.length || 0
@@ -645,6 +669,14 @@ function InputPage({ onSessionCreated, sessionId }) {
                             value={criterion.group || ''}
                             onChange={(e) => handleCellChange(idx, 'group', e.target.value)}
                             placeholder="Group"
+                            size="sm"
+                            fontSize="xs"
+                            bg="white"
+                          />
+                          <Input
+                            value={criterion.description || ''}
+                            onChange={(e) => handleCellChange(idx, 'description', e.target.value)}
+                            placeholder="Description"
                             size="sm"
                             fontSize="xs"
                             bg="white"

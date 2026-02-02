@@ -723,14 +723,24 @@ function PileBwtPage({ sessionId, onPageChange }) {
 
           <HStack spacing={4} align="stretch">
             <Box border="1px" borderColor="gray.200" borderRadius="md" p={3} flex={1} bg="white">
-              <Text fontSize="sm" color="gray.700">
+              <Text fontSize="sm" color="gray.700" mb={1}>
                 <strong>Baseline:</strong> {pair.reference.criterion_name} [{referenceRange.min.toFixed(2)}-{referenceRange.max.toFixed(2)}] {pair.reference.unit}
               </Text>
+              {pair.reference.description && (
+                <Text fontSize="xs" color="gray.600">
+                  {pair.reference.description}
+                </Text>
+              )}
             </Box>
             <Box border="1px" borderColor="gray.200" borderRadius="md" p={3} flex={1} bg="white">
-              <Text fontSize="sm" color="gray.700">
+              <Text fontSize="sm" color="gray.700" mb={1}>
                 <strong>Adjustable:</strong> {pair.adjusted.criterion_name} [{adjustedRange.min.toFixed(2)}-{adjustedRange.max.toFixed(2)}] {pair.adjusted.unit}
               </Text>
+              {pair.adjusted.description && (
+                <Text fontSize="xs" color="gray.600">
+                  {pair.adjusted.description}
+                </Text>
+              )}
             </Box>
           </HStack>
 

@@ -663,9 +663,29 @@ function ValueFunctionsPage({ sessionId }) {
               <VStack align="stretch" spacing={3}>
                 <Heading size="md">{active}</Heading>
                 <Box bg="gray.50" p={3} borderRadius="md" border="1px solid" borderColor="gray.200">
-                  <Text fontSize="sm" fontWeight="semibold">
+                  <Text fontSize="sm" fontWeight="semibold" mb={2}>
                     RANGE: [{activeData.range.min} – {activeData.range.max}]
                   </Text>
+                  {(() => {
+                    const activeCriterion = criteria.find((c) => (c.criterion_name || `Criterion ${criteria.indexOf(c) + 1}`) === active)
+                    if (activeCriterion) {
+                      return (
+                        <>
+                          {activeCriterion.unit && (
+                            <Text fontSize="sm" color="gray.700">
+                              <strong>Unit:</strong> {activeCriterion.unit}
+                            </Text>
+                          )}
+                          {activeCriterion.description && (
+                            <Text fontSize="sm" color="gray.700">
+                              <strong>Description:</strong> {activeCriterion.description}
+                            </Text>
+                          )}
+                        </>
+                      )
+                    }
+                    return null
+                  })()}
                 </Box>
               </VStack>
 
