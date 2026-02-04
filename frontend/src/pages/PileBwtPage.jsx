@@ -55,6 +55,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
   const [groups, setGroups] = useState([])
   const [selectedGroupIndex, setSelectedGroupIndex] = useState(null)
   const [step, setStep] = useState('idle')
+  const [selectionStep, setSelectionStep] = useState(null) // 'select-best' or 'select-worst'
   const [bestCriterion, setBestCriterion] = useState(null)
   const [worstCriterion, setWorstCriterion] = useState(null)
   const [pairs, setPairs] = useState([])
@@ -62,6 +63,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
   const [comparisons, setComparisons] = useState([])
   const [sliderValue, setSliderValue] = useState(0)
   const [sliderInputValue, setSliderInputValue] = useState('')
+  const [sliderTouched, setSliderTouched] = useState(false)
   const [saving, setSaving] = useState(false)
   const [bwtSignature, setBwtSignature] = useState(null)
   const [criteriaMismatch, setCriteriaMismatch] = useState(false)
@@ -86,6 +88,56 @@ function PileBwtPage({ sessionId, onPageChange }) {
   }
 
   const criteriaSignature = useMemo(() => getCriteriaSignature(criteria), [criteria])
+
+  const getBestWorstByGroupName = (groupName, comps = comparisons) => {
+    const groupComps = comps.filter((c) => c.group === groupName && c.type === 'best')
+    if (groupComps.length === 0) return { best: null, worst: null }
+    const bestName = groupComps[0].adjusted_criterion
+    const worstName = groupComps[0].reference_criterion
+    const best = criteria.find((c) => c.criterion_name === bestName)
+    const worst = criteria.find((c) => c.criterion_name === worstName)
+    return { best, worst }
+  }
+
+  const allGroups = useMemo(() => {
+    if (!groups || groups.length === 0) return []
+    const baseGroups = [...groups]
+    if (baseGroups.length <= 1) return baseGroups
+
+    const missingGroups = []
+    const bests = []
+    const worsts = []
+
+    baseGroups.forEach((g) => {
+      const { best, worst } = getBestWorstByGroupName(g.name)
+      if (best && worst) {
+        bests.push(best)
+        worsts.push(worst)
+      } else {
+        missingGroups.push(g.name)
+      }
+    })
+
+    const isReady = missingGroups.length === 0
+
+    return [
+      ...baseGroups,
+      {
+        name: 'intra-B',
+        criteria: bests,
+        isIntra: true,
+        isReady,
+        missingGroups,
+      },
+      {
+        name: 'intra-W',
+        criteria: worsts,
+        isIntra: true,
+        isReady,
+        missingGroups,
+      },
+    ]
+  }, [groups, comparisons, criteria])
 
   useEffect(() => {
     const fetchSession = async () => {
@@ -169,15 +221,22 @@ function PileBwtPage({ sessionId, onPageChange }) {
   }, [loading, bwtSignature, criteriaSignature, comparisons.length])
 
   useEffect(() => {
-    if (!loading && groups.length > 0 && selectedGroupIndex !== null) {
-      const groupName = groups[selectedGroupIndex]?.name
+    if (!loading && allGroups.length > 0 && selectedGroupIndex !== null) {
+      const selectedGroup = allGroups[selectedGroupIndex]
+      if (!selectedGroup) return
+      if (selectedGroup.isIntra && !selectedGroup.isReady) {
+        setStep('select-criteria')
+        return
+      }
+
+      const groupName = selectedGroup.name
       const groupComps = comparisons.filter((c) => c.group === groupName && c.type !== 'intra-best' && c.type !== 'intra-worst')
       
       if (groupComps.length === 0) {
         setStep('select-criteria')
       } else {
         // Generate pairs for this group and load
-        const groupCriteria = groups[selectedGroupIndex].criteria
+        const groupCriteria = selectedGroup.criteria
         const { best, worst } = getGroupBestWorst(selectedGroupIndex)
         if (best && worst) {
           const others = groupCriteria.filter(
@@ -212,7 +271,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
         }
       }
     }
-  }, [loading, groups, selectedGroupIndex])
+  }, [loading, allGroups, selectedGroupIndex, comparisons])
 
   useEffect(() => {
     if (Number.isFinite(sliderValue)) {
@@ -271,36 +330,37 @@ function PileBwtPage({ sessionId, onPageChange }) {
   }
 
   const getGroupCompletionStatus = (groupIndex) => {
-    const groupName = groups[groupIndex]?.name
+    const group = allGroups[groupIndex]
+    const groupName = group?.name
     if (!groupName) return 0
+    if (group.isIntra && !group.isReady) return 0
     const groupComps = comparisons.filter((c) => c.group === groupName && c.type !== 'intra-best' && c.type !== 'intra-worst')
-    const expectedComps = groups[groupIndex]?.criteria?.length || 0
+    const expectedComps = group?.criteria?.length || 0
     const expected = Math.max(1, 2 * expectedComps - 3)
     return groupComps.length > 0 ? Math.min(100, Math.round((groupComps.length / expected) * 100)) : 0
   }
 
   const getGroupBestWorst = (groupIndex) => {
-    const groupName = groups[groupIndex]?.name
-    const groupComps = comparisons.filter((c) => c.group === groupName && c.type === 'best')
-    if (groupComps.length === 0) return { best: null, worst: null }
-    const bestName = groupComps[0].adjusted_criterion
-    const worstName = groupComps[0].reference_criterion
-    const best = criteria.find((c) => c.criterion_name === bestName)
-    const worst = criteria.find((c) => c.criterion_name === worstName)
-    return { best, worst }
+    const groupName = allGroups[groupIndex]?.name
+    if (!groupName) return { best: null, worst: null }
+    return getBestWorstByGroupName(groupName)
   }
 
   const isGroupComplete = (groupIndex) => {
-    const groupName = groups[groupIndex]?.name
+    const group = allGroups[groupIndex]
+    const groupName = group?.name
+    if (!groupName) return false
+    if (group.isIntra && !group.isReady) return false
     const groupComps = comparisons.filter((c) => c.group === groupName && c.type !== 'intra-best' && c.type !== 'intra-worst')
-    const expectedComps = groups[groupIndex]?.criteria?.length || 0
+    const expectedComps = group?.criteria?.length || 0
     const expected = Math.max(1, 2 * expectedComps - 3)
     return groupComps.length >= expected
   }
 
   const handleResetGroup = async () => {
     if (!ensureSessionUnlocked()) return
-    const groupName = groups[selectedGroupIndex].name
+    const groupName = allGroups[selectedGroupIndex]?.name
+    if (!groupName) return
     const newComparisons = comparisons.filter((c) => c.group !== groupName)
     setComparisons(newComparisons)
     setBestCriterion(null)
@@ -378,7 +438,38 @@ function PileBwtPage({ sessionId, onPageChange }) {
     return sorted[0].x
   }
 
+  const isVFIncreasing = (criterionName) => {
+    const points = valueFunction[criterionName]?.points || []
+    if (!points || points.length < 2) return true // Default to increasing
+    const sorted = [...points].sort((a, b) => a.x - b.x)
+    // Compare first and last y values
+    return sorted[sorted.length - 1].y > sorted[0].y
+  }
+
+  const getBarChartData = (groupCriteria) => {
+    return groupCriteria.map((crit) => {
+      const range = getDataRange(crit)
+      const isIncreasing = isVFIncreasing(crit.criterion_name)
+      return {
+        name: crit.criterion_name,
+        minLabel: isIncreasing ? range.min.toFixed(2) : range.max.toFixed(2),
+        maxLabel: isIncreasing ? range.max.toFixed(2) : range.min.toFixed(2),
+        value: 1,
+        isIncreasing,
+      }
+    })
+  }
+
   const handleSelectCriteria = () => {
+    setSelectionStep('select-best')
+  }
+
+  const handleBestSelected = () => {
+    if (!bestCriterion) return
+    setSelectionStep('select-worst')
+  }
+
+  const handleWorstSelected = () => {
     if (!bestCriterion || !worstCriterion) {
       toast({
         title: 'Please select both best and worst criteria',
@@ -388,7 +479,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
       return
     }
 
-    const groupCriteria = groups[selectedGroupIndex].criteria
+    const groupCriteria = allGroups[selectedGroupIndex].criteria
     const others = groupCriteria.filter(
       (c) => c.criterion_name !== bestCriterion.criterion_name && c.criterion_name !== worstCriterion.criterion_name
     )
@@ -409,6 +500,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
 
     setPairs(newPairs)
     setCurrentPairIndex(0)
+    setSelectionStep(null)
     setStep('evaluate-pairs')
     setSliderValue(getDataRange(bestCriterion).min)
   }
@@ -421,13 +513,13 @@ function PileBwtPage({ sessionId, onPageChange }) {
       adjusted_criterion: pair.adjusted.criterion_name,
       data_value: value,
       type: pair.type,
-      group: groups[selectedGroupIndex].name,
+      group: allGroups[selectedGroupIndex].name,
     }
 
     const filtered = comps.filter(
       (c) => !(c.reference_criterion === pair.reference.criterion_name &&
         c.adjusted_criterion === pair.adjusted.criterion_name &&
-        c.group === groups[selectedGroupIndex].name)
+        c.group === allGroups[selectedGroupIndex].name)
     )
     return [...filtered, newComparison]
   }
@@ -445,6 +537,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
         })
         setComparisons(updatedComparisons)
         setCurrentPairIndex(currentPairIndex + 1)
+        setSliderTouched(false)
         const nextComp = getComparisonForPair(currentPairIndex + 1, updatedComparisons)
         setSliderValue(nextComp ? nextComp.data_value : getDataRange(pairs[currentPairIndex + 1].adjusted).min)
         // Scroll to top
@@ -479,6 +572,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
         })
         setComparisons(updatedComparisons)
         setCurrentPairIndex(currentPairIndex - 1)
+        setSliderTouched(false)
         const prevComp = getComparisonForPair(currentPairIndex - 1, updatedComparisons)
         setSliderValue(prevComp ? prevComp.data_value : getDataRange(pairs[currentPairIndex - 1].adjusted).min)
         // Scroll to top
@@ -528,10 +622,12 @@ function PileBwtPage({ sessionId, onPageChange }) {
   const getComparisonForPair = (pairIndex, comps = comparisons) => {
     if (pairIndex >= pairs.length) return null
     const pair = pairs[pairIndex]
+    const groupName = allGroups[selectedGroupIndex]?.name
+    if (!groupName) return null
     return comps.find(
       (c) => c.reference_criterion === pair.reference.criterion_name &&
         c.adjusted_criterion === pair.adjusted.criterion_name &&
-        c.group === groups[selectedGroupIndex].name
+        c.group === groupName
     )
   }
 
@@ -543,7 +639,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
     )
   }
 
-  if (groups.length === 0) {
+  if (allGroups.length === 0) {
     return (
       <Box bg="white" p={8} borderRadius="lg" boxShadow="sm">
         <Heading>No criteria available</Heading>
@@ -552,6 +648,17 @@ function PileBwtPage({ sessionId, onPageChange }) {
   }
 
   const renderContent = () => {
+    const selectedGroup = selectedGroupIndex !== null ? allGroups[selectedGroupIndex] : null
+    if (selectedGroup?.isIntra && !selectedGroup.isReady) {
+      return (
+        <Box bg="orange.50" p={6} borderRadius="md" borderLeft="4px" borderLeftColor="orange.400">
+          <Heading size="md" mb={2}>Complete elicitation first</Heading>
+          <Text color="orange.800">
+            Complete elicitation of {selectedGroup.missingGroups.join(', ')}.
+          </Text>
+        </Box>
+      )
+    }
     if (step === 'idle') {
       return (
         <Box display="flex" justifyContent="center" alignItems="center" minH="60vh">
@@ -596,7 +703,247 @@ function PileBwtPage({ sessionId, onPageChange }) {
     }
 
     if (step === 'select-criteria') {
-      const selectedGroup = groups[selectedGroupIndex]
+      // Show selection pages for best/worst
+      if (selectionStep === 'select-best' || selectionStep === 'select-worst') {
+        const selectedGroup = allGroups[selectedGroupIndex]
+        const isSelectingBest = selectionStep === 'select-best'
+        const question = isSelectingBest
+          ? 'If all these indicators were at their worst performance point, which one would you increase first?'
+          : 'Which one would you increase last?'
+        const currentSelection = isSelectingBest ? bestCriterion : worstCriterion
+        const setCurrentSelection = isSelectingBest ? setBestCriterion : setWorstCriterion
+        const barData = getBarChartData(selectedGroup.criteria)
+
+        return (
+          <VStack spacing={6} align="stretch">
+            {criteriaMismatch && (
+              <Alert status="error" borderRadius="md">
+                <AlertIcon />
+                <Box flex="1">
+                  <AlertTitle>BWT invalid</AlertTitle>
+                  <AlertDescription>
+                    The criteria have changed since the last elicitation. Please reset and redo the BWT process.
+                  </AlertDescription>
+                </Box>
+                <HStack spacing={2} ml={4}>
+                  {!criteriaMismatchAcknowledged && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setCriteriaMismatchAcknowledged(true)}
+                    >
+                      Keep (invalid)
+                    </Button>
+                  )}
+                  <Button
+                    size="sm"
+                    colorScheme="red"
+                    onClick={handleCriteriaMismatchReset}
+                    isLoading={saving}
+                  >
+                    Reset BWT
+                  </Button>
+                </HStack>
+              </Alert>
+            )}
+
+            <Box display="flex" justifyContent="space-between" alignItems="center">
+              <Heading size="lg">{isSelectingBest ? 'Select Best Criterion' : 'Select Worst Criterion'}</Heading>
+              <Badge colorScheme="blue">
+                Group {selectedGroupIndex + 1} of {allGroups.length}: {selectedGroup.name}
+              </Badge>
+            </Box>
+
+            <Box bg="blue.50" p={4} borderRadius="md" borderLeft="4px" borderLeftColor="blue.400">
+              <Text fontSize="md" color="blue.900" fontWeight="medium">
+                {question}
+              </Text>
+            </Box>
+
+            <HStack align="stretch" spacing={4} flex={1}>
+              {/* Left: Bar Chart with Min/Max Labels */}
+              <Box flex={2} border="1px" borderColor="gray.200" borderRadius="md" p={4}>
+                <Heading size="sm" mb={3}>Criteria Ranges</Heading>
+                <ResponsiveContainer width="100%" height={barData.length * 60 + 80}>
+                  <BarChart
+                    data={barData}
+                    layout="vertical"
+                    margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis 
+                      type="number" 
+                      domain={[0, 1]} 
+                      ticks={[0, 1]}
+                      tick={{ fontSize: 13, fontWeight: 'bold', fill: '#1a202c' }}
+                    />
+                    <YAxis
+                      dataKey="name"
+                      type="category"
+                      width={80}
+                      tick={{ fontSize: 11 }}
+                      interval={0}
+                    />
+                    <Bar
+                      dataKey="value"
+                      fill="#cbd5e0"
+                      onClick={(data) => {
+                        setCurrentSelection(selectedGroup.criteria.find(c => c.criterion_name === data.name))
+                      }}
+                      cursor="pointer"
+                      radius={[0, 4, 4, 0]}
+                      maxBarSize={25}
+                      isAnimationActive={false}
+                      label={(props) => {
+                        const data = barData[props.index]
+                        const isSelected = currentSelection?.criterion_name === data.name
+                        const barStartX = props.x
+                        const barEndX = props.x + props.width
+                        const barY = props.y + props.height / 2
+                        const labelColor = isSelected ? 'white' : '#1a202c'
+                        
+                        return [
+                          // Min label on the left
+                          <text
+                            key={`min-${props.index}`}
+                            x={barStartX + 4}
+                            y={barY}
+                            fill={labelColor}
+                            textAnchor="start"
+                            dominantBaseline="middle"
+                            fontSize="11"
+                            fontWeight="bold"
+                          >
+                            {data.minLabel}
+                          </text>,
+                          // Max label on the right
+                          <text
+                            key={`max-${props.index}`}
+                            x={barEndX - 4}
+                            y={barY}
+                            fill={labelColor}
+                            textAnchor="end"
+                            dominantBaseline="middle"
+                            fontSize="11"
+                            fontWeight="bold"
+                          >
+                            {data.maxLabel}
+                          </text>
+                        ]
+                      }}
+                    >
+                      {barData.map((item, index) => (
+                        <Cell 
+                          key={`cell-${index}`} 
+                          fill={currentSelection?.criterion_name === item.name ? '#4299e1' : '#cbd5e0'}
+                          style={{ transition: 'fill 0.3s ease-in-out' }}
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </Box>
+              {/* Right: Clickable List */}
+              <Box flex={1} border="1px" borderColor="gray.200" borderRadius="md" p={4}>
+                <Heading size="sm" mb={4}>
+                  Select
+                </Heading>
+                <VStack spacing={2} align="stretch">
+                  {selectedGroup.criteria.map((crit) => {
+                    const isDisabled = !isSelectingBest && bestCriterion?.criterion_name === crit.criterion_name
+                    return (
+                    <Box
+                      key={crit.criterion_name}
+                      p={3}
+                      borderRadius="md"
+                      border="2px"
+                      borderColor={
+                        currentSelection?.criterion_name === crit.criterion_name
+                          ? 'blue.500'
+                          : isDisabled ? 'gray.300' : 'gray.200'
+                      }
+                      bg={
+                        currentSelection?.criterion_name === crit.criterion_name
+                          ? 'blue.50'
+                          : isDisabled ? 'gray.100' : 'white'
+                      }
+                      cursor={isDisabled ? 'not-allowed' : 'pointer'}
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        !isDisabled && setCurrentSelection(crit)
+                      }}
+                      _hover={!isDisabled ? { borderColor: 'blue.400', bg: 'gray.50' } : {}}
+                      opacity={isDisabled ? 0.6 : 1}
+                      transition="all 0.2s"
+                    >
+                      <Text
+                        fontWeight={
+                          currentSelection?.criterion_name === crit.criterion_name
+                            ? 'bold'
+                            : 'normal'
+                        }
+                        color={
+                          currentSelection?.criterion_name === crit.criterion_name
+                            ? 'blue.700'
+                            : isDisabled ? 'gray.500' : 'black'
+                        }
+                      >
+                        {crit.criterion_name}
+                      </Text>
+                      <Text fontSize="xs" color={isDisabled ? 'gray.400' : 'gray.600'}>
+                        {isDisabled ? '(Already selected as best)' : crit.unit}
+                      </Text>
+                    </Box>
+                    )
+                  })}
+                </VStack>
+              </Box>
+            </HStack>
+
+            {/* Navigation Buttons */}
+            <HStack spacing={4} justify="space-between" pt={4}>
+              <HStack spacing={2}>
+                <Button
+                  variant="outline"
+                  colorScheme="red"
+                  onClick={() => {
+                    setBestCriterion(null)
+                    setWorstCriterion(null)
+                    setSelectionStep(null)
+                    setStep('select-criteria')
+                  }}
+                >
+                  Reset Group
+                </Button>
+                <Button
+                  isDisabled={!isSelectingBest}
+                  onClick={() => setSelectionStep('select-best')}
+                >
+                  Back
+                </Button>
+              </HStack>
+              <Button
+                colorScheme="blue"
+                isDisabled={!currentSelection}
+                onClick={() => {
+                  if (isSelectingBest) {
+                    handleBestSelected()
+                  } else {
+                    handleWorstSelected()
+                  }
+                }}
+                isLoading={saving}
+              >
+                {isSelectingBest ? 'Next' : 'Confirm'}
+              </Button>
+            </HStack>
+          </VStack>
+        )
+      }
+
+      // Initial screen to start selection
+      const selectedGroup = allGroups[selectedGroupIndex]
       return (
         <VStack spacing={6} align="stretch">
           {criteriaMismatch && (
@@ -632,58 +979,22 @@ function PileBwtPage({ sessionId, onPageChange }) {
           <Box display="flex" justifyContent="space-between" alignItems="center">
             <Heading size="lg">Select Best and Worst Criteria</Heading>
             <Badge colorScheme="blue">
-              Group {selectedGroupIndex + 1} of {groups.length}: {selectedGroup.name}
+              Group {selectedGroupIndex + 1} of {allGroups.length}: {selectedGroup.name}
             </Badge>
           </Box>
-          <Text fontSize="sm" color="gray.600">
-            Select the criterion you would increase FIRST if everything was at worst (Best),
-            and the one you would increase LAST (Worst).
+          <Text fontSize="md" color="gray.700">
+            Let's start by identifying the best and worst performing criteria in this group. 
+            You'll be asked to identify which criterion you'd improve first and which you'd improve last.
           </Text>
           <Divider />
 
-          <Box>
-            <Heading size="md" mb={4}>
-              Criteria in {selectedGroup.name}
-            </Heading>
-            <Grid templateColumns="repeat(auto-fit, minmax(250px, 1fr))" gap={4}>
-              {selectedGroup.criteria.map((crit) => {
-                const range = getDataRange(crit)
-                return (
-                  <Box key={crit.criterion_name} p={4} border="1px" borderColor="gray.200" borderRadius="md">
-                    <Text fontWeight="bold" mb={2}>
-                      {crit.criterion_name}
-                    </Text>
-                    <Text fontSize="sm" color="gray.600" mb={2}>
-                      Unit: {crit.unit}
-                    </Text>
-                    <Text fontSize="sm" mb={2}>
-                      Min: {range.min.toFixed(2)} | Max: {range.max.toFixed(2)}
-                    </Text>
-                    <HStack spacing={2}>
-                      <Button
-                        size="sm"
-                        colorScheme={bestCriterion?.criterion_name === crit.criterion_name ? 'green' : 'gray'}
-                        onClick={() => setBestCriterion(crit)}
-                      >
-                        Best
-                      </Button>
-                      <Button
-                        size="sm"
-                        colorScheme={worstCriterion?.criterion_name === crit.criterion_name ? 'red' : 'gray'}
-                        onClick={() => setWorstCriterion(crit)}
-                      >
-                        Worst
-                      </Button>
-                    </HStack>
-                  </Box>
-                )
-              })}
-            </Grid>
-          </Box>
-
           <Box pt={4} display="flex" gap={4} justifyContent="flex-end">
-            <Button onClick={handleSelectCriteria} colorScheme="blue" isDisabled={!bestCriterion || !worstCriterion}>
-              Continue to Pairs
+            <Button 
+              onClick={handleSelectCriteria} 
+              colorScheme="blue"
+              size="lg"
+            >
+              Start Selection
             </Button>
           </Box>
         </VStack>
@@ -694,7 +1005,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
       const pair = pairs[currentPairIndex]
       const adjustedRange = getDataRange(pair.adjusted)
       const referenceRange = getDataRange(pair.reference)
-      const groupCriteria = groups[selectedGroupIndex].criteria
+      const groupCriteria = allGroups[selectedGroupIndex].criteria
       const comparison = getComparisonForPair(currentPairIndex)
       const isAllComplete = isGroupComplete(selectedGroupIndex)
       const currentVFValue = interpolateVF(pair.adjusted.criterion_name, sliderValue)
@@ -917,7 +1228,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
                       const updatedComparisons = upsertComparisonForPair(currentPairIndex, sliderValue)
                       await handleSaveAll(updatedComparisons)
                       
-                      if (selectedGroupIndex < groups.length - 1) {
+                      if (selectedGroupIndex < allGroups.length - 1) {
                         // Move to next group
                         setSelectedGroupIndex(selectedGroupIndex + 1)
                         setBestCriterion(null)
@@ -938,11 +1249,12 @@ function PileBwtPage({ sessionId, onPageChange }) {
                       await handleNextPair()
                     }
                   }} 
+                  isDisabled={!sliderTouched}
                   isLoading={saving}
                   size="md"
                 >
                   {currentPairIndex === pairs.length - 1 
-                    ? (selectedGroupIndex === groups.length - 1 ? 'Complete & Go to Output' : 'Next Group') 
+                    ? (selectedGroupIndex === allGroups.length - 1 ? 'Complete & Go to Output' : 'Next Group') 
                     : 'Next'}
                 </Button>
               </HStack>
@@ -952,7 +1264,10 @@ function PileBwtPage({ sessionId, onPageChange }) {
               max={adjustedRange.max}
               step={(adjustedRange.max - adjustedRange.min) / 100}
               value={sliderValue}
-              onChange={setSliderValue}
+              onChange={(value) => {
+                setSliderValue(value)
+                setSliderTouched(true)
+              }}
             >
               <SliderTrack>
                 <SliderFilledTrack />
@@ -1008,7 +1323,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
   }
 
   return (
-    <HStack align="stretch" spacing={0} minH="100vh">
+    <HStack align="stretch" spacing={0} h="100vh" overflow="hidden">
       {/* Sidebar */}
       <Box
         w="320px"
@@ -1021,30 +1336,22 @@ function PileBwtPage({ sessionId, onPageChange }) {
       >
         <VStack spacing={4} align="stretch" mb={6}>
           <Heading size="md">Groups</Heading>
-          <Button
-            colorScheme="red"
-            size="sm"
-            onClick={onOpen}
-            variant="outline"
-            isDisabled={isSessionLocked}
-          >
-            Reset All BWT Data
-          </Button>
         </VStack>
         <VStack spacing={3} align="stretch">
-          {groups.map((group, idx) => {
+          {allGroups.map((group, idx) => {
             const isActive = selectedGroupIndex === idx
             const completion = getGroupCompletionStatus(idx)
             const isCompleted = completion === 100
+            const isBlocked = group.isIntra && !group.isReady
             return (
               <Box key={group.name}>
                 <Box
                   p={3}
                   borderRadius="md"
                   cursor="pointer"
-                  bg={isActive ? 'blue.500' : isCompleted ? 'green.100' : 'white'}
+                  bg={isBlocked ? 'orange.50' : isActive ? 'blue.500' : isCompleted ? 'green.100' : 'white'}
                   borderWidth="1px"
-                  borderColor={isActive ? 'blue.600' : isCompleted ? 'green.300' : 'gray.300'}
+                  borderColor={isBlocked ? 'orange.300' : isActive ? 'blue.600' : isCompleted ? 'green.300' : 'gray.300'}
                   onClick={() => {
                     setSelectedGroupIndex(idx)
                   }}
@@ -1054,20 +1361,20 @@ function PileBwtPage({ sessionId, onPageChange }) {
                     <VStack align="start" spacing={0} flex={1}>
                       <Text
                         fontWeight="bold"
-                        color={isActive ? 'white' : 'black'}
+                        color={isActive ? 'white' : isBlocked ? 'orange.800' : 'black'}
                         fontSize="sm"
                       >
                         {group.name}
                       </Text>
-                      <Text fontSize="xs" color={isActive ? 'whiteAlpha.800' : 'gray.600'}>
-                        {completion}% complete
+                      <Text fontSize="xs" color={isActive ? 'whiteAlpha.800' : isBlocked ? 'orange.700' : 'gray.600'}>
+                        {isBlocked ? `Complete elicitation of ${group.missingGroups.join(', ')}` : `${completion}% complete`}
                       </Text>
                     </VStack>
                     <Box
                       h="12px"
                       w="12px"
                       borderRadius="full"
-                      bg={completion === 100 ? 'green.500' : completion > 0 ? 'blue.500' : 'gray.300'}
+                      bg={isBlocked ? 'orange.400' : completion === 100 ? 'green.500' : completion > 0 ? 'blue.500' : 'gray.300'}
                     />
                   </HStack>
                 </Box>
@@ -1139,21 +1446,24 @@ function PileBwtPage({ sessionId, onPageChange }) {
             )
           })}
         </VStack>
-      </Box>
-
-      {/* Main Content */}
-      <Box ref={mainContentRef} flex={1} bg="white" p={4} overflow="auto">
-        {isSessionLocked && (
-          <Box bg="yellow.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="yellow.400" mb={4}>
-            <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
-              🔒 Session is locked. Editing is disabled.
-            </Text>
+        {/* Reset Group Button at the bottom */}
+        {selectedGroupIndex !== null && (
+          <Box mt="auto" pt={6}>
+            <Button
+              colorScheme="red"
+              size="sm"
+              onClick={onOpen}
+              variant="outline"
+              isDisabled={isSessionLocked}
+              width="100%"
+            >
+              Reset Group
+            </Button>
           </Box>
         )}
-        {renderContent()}
       </Box>
 
-      {/* Reset Confirmation Dialog */}
+      {/* Reset Group Confirmation Dialog */}
       <AlertDialog
         isOpen={isOpen}
         leastDestructiveRef={cancelRef}
@@ -1162,11 +1472,11 @@ function PileBwtPage({ sessionId, onPageChange }) {
         <AlertDialogOverlay>
           <AlertDialogContent>
             <AlertDialogHeader fontSize="lg" fontWeight="bold">
-              Reset All BWT Data
+              Reset Group
             </AlertDialogHeader>
 
             <AlertDialogBody>
-              Are you sure you want to reset all BWT comparisons? This will delete all your progress and cannot be undone.
+              Are you sure you want to reset the "{allGroups[selectedGroupIndex]?.name}" group? This will delete all comparisons for this group and cannot be undone.
             </AlertDialogBody>
 
             <AlertDialogFooter>
@@ -1176,18 +1486,37 @@ function PileBwtPage({ sessionId, onPageChange }) {
               <Button 
                 colorScheme="red" 
                 onClick={() => {
-                  handleCriteriaMismatchReset()
+                  handleResetGroup()
                   onClose()
                 }} 
                 ml={3}
                 isLoading={saving}
               >
-                Reset All
+                Reset
               </Button>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialogOverlay>
       </AlertDialog>
+
+      {/* Main Content */}
+      <Box
+        ref={mainContentRef}
+        flex={1}
+        bg="white"
+        p={4}
+        maxH="100vh"
+        overflowY="auto"
+      >
+        {isSessionLocked && (
+          <Box bg="yellow.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="yellow.400" mb={4}>
+            <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
+              🔒 Session is locked. Editing is disabled.
+            </Text>
+          </Box>
+        )}
+        {renderContent()}
+      </Box>
     </HStack>
   )
 }
