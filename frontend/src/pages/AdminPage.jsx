@@ -363,7 +363,7 @@ function AdminPage() {
                   <Td>{session.qualitative_indicators !== null ? '✓' : '—'}</Td>
                   <Td>{session.value_functions !== null ? '✓' : '—'}</Td>
                   <Td>{session.bwt !== null ? '✓' : '—'}</Td>
-                  <Td>{session.pile_bwt !== null ? '✓' : '—'}</Td>
+                  <Td>{session.bwt !== null ? '✓' : '—'}</Td>
                   <Td>
                     <IconButton
                       aria-label="Open session menu"

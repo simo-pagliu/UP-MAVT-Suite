@@ -3,6 +3,7 @@ from bson.objectid import ObjectId
 from datetime import datetime
 import csv
 import io
+import json
 import os
 
 bp = Blueprint('api', __name__, url_prefix='/api')
@@ -65,7 +66,6 @@ def create_session():
         'qualitative_indicators': None,
         'value_functions': None,
         'bwt': None,
-        'pile_bwt': None,
         'locked': False,
         'session_locked': False,
         'created_at': datetime.utcnow()
@@ -314,6 +314,35 @@ def export_value_functions_csv(session_id):
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
 
+# Export value functions as JSON
+@bp.route('/session/<session_id>/value-functions/export-json', methods=['GET'])
+def export_value_functions_json(session_id):
+    """Export value functions as JSON"""
+    db = current_app.db
+    try:
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+
+        value_functions = session.get('value_functions') or {}
+        if not value_functions:
+            return jsonify({'error': 'No value functions to export'}), 404
+
+        payload = {
+            'session_id': str(session.get('_id')),
+            'name': session.get('name'),
+            'value_functions': value_functions,
+        }
+
+        return send_file(
+            io.BytesIO(json.dumps(payload, ensure_ascii=False, indent=2).encode()),
+            mimetype='application/json',
+            as_attachment=True,
+            download_name=f'value_functions_{session.get("name", session_id)}.json'
+        )
+    except:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
 # Update BWT (Best-Worst Technique)
 @bp.route('/session/<session_id>/bwt', methods=['PUT'])
 def update_bwt(session_id):
@@ -379,32 +408,6 @@ def export_bwt_csv(session_id):
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
 
-# Update PILE-BWT
-@bp.route('/session/<session_id>/pile', methods=['PUT'])
-def update_pile(session_id):
-    """Update PILE-BWT"""
-    data = request.json
-    value = data.get('value')
-    
-    if value is None:
-        return jsonify({'error': 'Value is required'}), 400
-    
-    db = current_app.db
-    try:
-        session = db.sessions.find_one({'_id': ObjectId(session_id)})
-        if not session:
-            return jsonify({'error': 'Session not found'}), 404
-        if session.get('session_locked', False):
-            return jsonify({'error': 'Session is locked'}), 423
-
-        db.sessions.update_one(
-            {'_id': ObjectId(session_id)},
-            {'$set': {'pile_bwt': value}}
-        )
-        return jsonify({'status': 'updated'}), 200
-    except:
-        return jsonify({'error': 'Invalid session ID'}), 400
-
 # Export input data as CSV
 @bp.route('/session/<session_id>/export-input', methods=['GET'])
 def export_input_csv(session_id):
@@ -451,6 +454,102 @@ def export_input_csv(session_id):
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
 
+# Export input data as JSON
+@bp.route('/session/<session_id>/export-input-json', methods=['GET'])
+def export_input_json(session_id):
+    """Export session input data (criteria and alternatives) as JSON"""
+    db = current_app.db
+    try:
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+
+        payload = {
+            'session_id': str(session.get('_id')),
+            'name': session.get('name'),
+            'criteria': session.get('criteria', []),
+        }
+
+        return send_file(
+            io.BytesIO(json.dumps(payload, ensure_ascii=False, indent=2).encode()),
+            mimetype='application/json',
+            as_attachment=True,
+            download_name=f'input_{session.get("name", session_id)}.json'
+        )
+    except:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
+# Export PILE-BWT as CSV
+@bp.route('/session/<session_id>/pile/export', methods=['GET'])
+def export_pile_csv(session_id):
+    """Export PILE-BWT data as CSV"""
+    db = current_app.db
+    try:
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+
+        bwt_data = session.get('bwt')
+        if bwt_data is None:
+            return jsonify({'error': 'No PILE-BWT data to export'}), 404
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        if isinstance(bwt_data, dict) and isinstance(bwt_data.get('comparisons'), list):
+            writer.writerow(['REFERENCE_CRITERION', 'ADJUSTED_CRITERION', 'DATA_VALUE', 'TYPE', 'GROUP'])
+            for comp in bwt_data.get('comparisons', []):
+                if isinstance(comp, dict):
+                    writer.writerow([
+                        comp.get('reference_criterion', ''),
+                        comp.get('adjusted_criterion', ''),
+                        comp.get('data_value', ''),
+                        comp.get('type', ''),
+                        comp.get('group', '')
+                    ])
+        else:
+            writer.writerow(['VALUE'])
+            writer.writerow([bwt_data])
+
+        output.seek(0)
+        return send_file(
+            io.BytesIO(output.getvalue().encode()),
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'pile_bwt_{session.get("name", session_id)}.csv'
+        )
+    except:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
+# Export PILE-BWT as JSON
+@bp.route('/session/<session_id>/pile/export-json', methods=['GET'])
+def export_pile_json(session_id):
+    """Export PILE-BWT data as JSON"""
+    db = current_app.db
+    try:
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+
+        bwt_data = session.get('bwt')
+        if bwt_data is None:
+            return jsonify({'error': 'No PILE-BWT data to export'}), 404
+
+        payload = {
+            'session_id': str(session.get('_id')),
+            'name': session.get('name'),
+            'pile_bwt': bwt_data,
+        }
+
+        return send_file(
+            io.BytesIO(json.dumps(payload, ensure_ascii=False, indent=2).encode()),
+            mimetype='application/json',
+            as_attachment=True,
+            download_name=f'pile_bwt_{session.get("name", session_id)}.json'
+        )
+    except:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
 # Export results as CSV
 @bp.route('/session/<session_id>/export', methods=['GET'])
 def export_csv(session_id):
@@ -465,7 +564,7 @@ def export_csv(session_id):
         values = [
             session.get('qualitative_indicators') or 0,
             session.get('value_functions') or 0,
-            session.get('pile_bwt') or 0
+            session.get('bwt') or 0
         ]
         total_sum = sum(values)
         division = total_sum / 3 if total_sum != 0 else 0
@@ -477,7 +576,7 @@ def export_csv(session_id):
         writer.writerow(['Name', session.get('name')])
         writer.writerow(['Qualitative Indicators', session.get('qualitative_indicators')])
         writer.writerow(['Value Functions', session.get('value_functions')])
-        writer.writerow(['PILE-BWT', session.get('pile_bwt')])
+        writer.writerow(['PILE-BWT', session.get('bwt')])
         writer.writerow(['Sum', total_sum])
         writer.writerow(['Division (Sum / 3)', division])
         

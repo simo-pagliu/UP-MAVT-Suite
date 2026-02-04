@@ -231,47 +231,64 @@ function PileBwtPage({ sessionId, onPageChange }) {
 
       const groupName = selectedGroup.name
       const groupComps = comparisons.filter((c) => c.group === groupName && c.type !== 'intra-best' && c.type !== 'intra-worst')
-      
-      if (groupComps.length === 0) {
+
+      const groupCriteria = selectedGroup.criteria
+      const hasLocalBestWorst =
+        step === 'evaluate-pairs' &&
+        bestCriterion &&
+        worstCriterion &&
+        groupCriteria.some((c) => c.criterion_name === bestCriterion.criterion_name) &&
+        groupCriteria.some((c) => c.criterion_name === worstCriterion.criterion_name)
+
+      if (groupComps.length === 0 && !hasLocalBestWorst) {
         setStep('select-criteria')
-      } else {
-        // Generate pairs for this group and load
-        const groupCriteria = selectedGroup.criteria
-        const { best, worst } = getGroupBestWorst(selectedGroupIndex)
-        if (best && worst) {
-          const others = groupCriteria.filter(
-            (c) => c.criterion_name !== best.criterion_name && c.criterion_name !== worst.criterion_name
-          )
-          const newPairs = [
-            { reference: worst, adjusted: best, type: 'best' },
-            ...others.map((other) => ({
-              reference: other,
-              adjusted: best,
-              type: 'standard',
-            })),
-            ...others.map((other) => ({
-              reference: worst,
-              adjusted: other,
-              type: 'standard',
-            })),
-          ]
-          setPairs(newPairs)
-          setBestCriterion(best)
-          setWorstCriterion(worst)
-          setStep('evaluate-pairs')
-          setCurrentPairIndex(0)
-          const firstPair = newPairs[0]
-          const existing = comparisons.find(
-            (c) =>
-              c.reference_criterion === firstPair.reference.criterion_name &&
-              c.adjusted_criterion === firstPair.adjusted.criterion_name &&
-              c.group === groupName
-          )
-          setSliderValue(existing ? existing.data_value : getDataRange(firstPair.adjusted).min)
-        }
+        return
+      }
+
+      // Generate pairs for this group and load
+      const resolvedBestWorst = groupComps.length > 0
+        ? getGroupBestWorst(selectedGroupIndex)
+        : { best: bestCriterion, worst: worstCriterion }
+
+      const { best, worst } = resolvedBestWorst
+      if (best && worst) {
+        const others = groupCriteria.filter(
+          (c) => c.criterion_name !== best.criterion_name && c.criterion_name !== worst.criterion_name
+        )
+        const newPairs = [
+          { reference: worst, adjusted: best, type: 'best' },
+          ...others.map((other) => ({
+            reference: other,
+            adjusted: best,
+            type: 'best',
+          })),
+          ...others.map((other) => ({
+            reference: worst,
+            adjusted: other,
+            type: 'worst',
+          })),
+        ]
+        setPairs(newPairs)
+        setBestCriterion(best)
+        setWorstCriterion(worst)
+        setStep('evaluate-pairs')
+
+        const nextIndex = step === 'evaluate-pairs'
+          ? Math.min(currentPairIndex, newPairs.length - 1)
+          : 0
+
+        setCurrentPairIndex(nextIndex)
+        const targetPair = newPairs[nextIndex]
+        const existing = comparisons.find(
+          (c) =>
+            c.reference_criterion === targetPair.reference.criterion_name &&
+            c.adjusted_criterion === targetPair.adjusted.criterion_name &&
+            c.group === groupName
+        )
+        setSliderValue(existing ? existing.data_value : getDataRange(targetPair.adjusted).min)
       }
     }
-  }, [loading, allGroups, selectedGroupIndex, comparisons])
+  }, [loading, allGroups, selectedGroupIndex, comparisons, currentPairIndex, step, bestCriterion, worstCriterion])
 
   useEffect(() => {
     if (Number.isFinite(sliderValue)) {
@@ -489,12 +506,12 @@ function PileBwtPage({ sessionId, onPageChange }) {
       ...others.map((other) => ({
         reference: other,
         adjusted: bestCriterion,
-        type: 'standard',
+        type: 'best',
       })),
       ...others.map((other) => ({
         reference: worstCriterion,
         adjusted: other,
-        type: 'standard',
+        type: 'worst',
       })),
     ]
 
