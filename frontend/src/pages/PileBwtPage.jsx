@@ -69,6 +69,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
   const [isSessionLocked, setIsSessionLocked] = useState(false)
   const { isOpen, onOpen, onClose } = useDisclosure()
   const cancelRef = useRef()
+  const mainContentRef = useRef(null)
   const toast = useToast()
 
   const getCriteriaSignature = (criteriaList) => {
@@ -446,6 +447,10 @@ function PileBwtPage({ sessionId, onPageChange }) {
         setCurrentPairIndex(currentPairIndex + 1)
         const nextComp = getComparisonForPair(currentPairIndex + 1, updatedComparisons)
         setSliderValue(nextComp ? nextComp.data_value : getDataRange(pairs[currentPairIndex + 1].adjusted).min)
+        // Scroll to top
+        if (mainContentRef.current) {
+          mainContentRef.current.scrollTop = 0
+        }
       } catch (error) {
         toast({
           title: 'Error',
@@ -457,7 +462,8 @@ function PileBwtPage({ sessionId, onPageChange }) {
         setSaving(false)
       }
     } else {
-      handleSaveAll(updatedComparisons)
+      // Last pair - just save, don't move to next group automatically
+      await handleSaveAll(updatedComparisons)
     }
   }
 
@@ -475,6 +481,10 @@ function PileBwtPage({ sessionId, onPageChange }) {
         setCurrentPairIndex(currentPairIndex - 1)
         const prevComp = getComparisonForPair(currentPairIndex - 1, updatedComparisons)
         setSliderValue(prevComp ? prevComp.data_value : getDataRange(pairs[currentPairIndex - 1].adjusted).min)
+        // Scroll to top
+        if (mainContentRef.current) {
+          mainContentRef.current.scrollTop = 0
+        }
       } catch (error) {
         toast({
           title: 'Error',
@@ -494,6 +504,14 @@ function PileBwtPage({ sessionId, onPageChange }) {
     try {
       await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
         value: buildBwtPayload(comps),
+      })
+      setComparisons(comps)
+      toast({
+        title: 'Saved',
+        description: 'Comparison saved successfully',
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
       })
     } catch (error) {
       toast({
@@ -836,49 +854,98 @@ function PileBwtPage({ sessionId, onPageChange }) {
           </HStack>
 
           <Box>
-            <HStack justify="flex-start" align="center" spacing={3} mb={2}>
-              <FormLabel mb={0} fontWeight="bold" fontSize="md">
-                Adjust "{pair.adjusted.criterion_name}" [{pair.adjusted.unit}]:
-              </FormLabel>
-              <NumberInput
-                value={sliderInputValue}
-                min={adjustedRange.min}
-                max={adjustedRange.max}
-                step={(adjustedRange.max - adjustedRange.min) / 100}
-                precision={2}
-                onChange={(valueString) => {
-                  setSliderInputValue(valueString)
-                }}
-                size="md"
-                maxW="160px"
-                variant="unstyled"
-              >
-                <NumberInputField
-                  textAlign="left"
-                  fontWeight="bold"
-                  fontSize="md"
-                  lineHeight="1.2"
-                  px={2}
-                  py={1}
-                  height="auto"
-                  mt="1px"
-                  border="1px solid"
-                  borderColor="gray.300"
-                  borderRadius="md"
-                  bg="white"
-                  _focus={{ borderColor: 'blue.400', boxShadow: '0 0 0 1px #63b3ed' }}
-                  onBlur={() => {
-                    const parsed = Number(sliderInputValue)
-                    if (Number.isFinite(parsed)) {
-                      const clamped = Math.min(adjustedRange.max, Math.max(adjustedRange.min, parsed))
-                      setSliderValue(clamped)
-                      setSliderInputValue(clamped.toFixed(2))
-                    } else {
-                      setSliderInputValue(Number.isFinite(sliderValue) ? sliderValue.toFixed(2) : adjustedRange.min.toFixed(2))
-                    }
+            <HStack justify="space-between" align="center" spacing={3} mb={2}>
+              <HStack spacing={3}>
+                <FormLabel mb={0} fontWeight="bold" fontSize="md">
+                  Adjust "{pair.adjusted.criterion_name}" [{pair.adjusted.unit}]:
+                </FormLabel>
+                <NumberInput
+                  value={sliderInputValue}
+                  min={adjustedRange.min}
+                  max={adjustedRange.max}
+                  step={(adjustedRange.max - adjustedRange.min) / 100}
+                  precision={2}
+                  onChange={(valueString) => {
+                    setSliderInputValue(valueString)
                   }}
-                />
-              </NumberInput>
+                  size="md"
+                  maxW="160px"
+                  variant="unstyled"
+                >
+                  <NumberInputField
+                    textAlign="left"
+                    fontWeight="bold"
+                    fontSize="md"
+                    lineHeight="1.2"
+                    px={2}
+                    py={1}
+                    height="auto"
+                    mt="1px"
+                    border="1px solid"
+                    borderColor="gray.300"
+                    borderRadius="md"
+                    bg="white"
+                    _focus={{ borderColor: 'blue.400', boxShadow: '0 0 0 1px #63b3ed' }}
+                    onBlur={() => {
+                      const parsed = Number(sliderInputValue)
+                      if (Number.isFinite(parsed)) {
+                        const clamped = Math.min(adjustedRange.max, Math.max(adjustedRange.min, parsed))
+                        setSliderValue(clamped)
+                        setSliderInputValue(clamped.toFixed(2))
+                      } else {
+                        setSliderInputValue(Number.isFinite(sliderValue) ? sliderValue.toFixed(2) : adjustedRange.min.toFixed(2))
+                      }
+                    }}
+                  />
+                </NumberInput>
+              </HStack>
+              <HStack spacing={4}>
+                <Button
+                  leftIcon={<ChevronLeftIcon />}
+                  isDisabled={currentPairIndex === 0}
+                  onClick={handlePrevPair}
+                  size="md"
+                >
+                  Previous
+                </Button>
+                <Button 
+                  colorScheme="blue" 
+                  rightIcon={<ChevronRightIcon />} 
+                  onClick={async () => {
+                    if (currentPairIndex === pairs.length - 1) {
+                      // On last pair - save and move to next group or output
+                      const updatedComparisons = upsertComparisonForPair(currentPairIndex, sliderValue)
+                      await handleSaveAll(updatedComparisons)
+                      
+                      if (selectedGroupIndex < groups.length - 1) {
+                        // Move to next group
+                        setSelectedGroupIndex(selectedGroupIndex + 1)
+                        setBestCriterion(null)
+                        setWorstCriterion(null)
+                        setPairs([])
+                        setStep('select-criteria')
+                        if (mainContentRef.current) {
+                          mainContentRef.current.scrollTop = 0
+                        }
+                      } else {
+                        // Last group - go to output
+                        if (onPageChange) {
+                          onPageChange('output')
+                        }
+                      }
+                    } else {
+                      // Not on last pair - just go to next
+                      await handleNextPair()
+                    }
+                  }} 
+                  isLoading={saving}
+                  size="md"
+                >
+                  {currentPairIndex === pairs.length - 1 
+                    ? (selectedGroupIndex === groups.length - 1 ? 'Complete & Go to Output' : 'Next Group') 
+                    : 'Next'}
+                </Button>
+              </HStack>
             </HStack>
             <Slider
               min={adjustedRange.min}
@@ -931,41 +998,6 @@ function PileBwtPage({ sessionId, onPageChange }) {
               <Text color="gray.500" textAlign="center" py={8}>
                 No VF data
               </Text>
-            )}
-          </Box>
-
-          <Box display="flex" justifyContent="space-between" alignItems="center">
-            <HStack spacing={4}>
-              <Button
-                leftIcon={<ChevronLeftIcon />}
-                isDisabled={currentPairIndex === 0}
-                onClick={handlePrevPair}
-              >
-                Previous
-              </Button>
-              <Button colorScheme="blue" rightIcon={<ChevronRightIcon />} onClick={handleNextPair} isLoading={saving}>
-                {currentPairIndex === pairs.length - 1 ? 'Complete' : 'Next Pair'}
-              </Button>
-            </HStack>
-            {isAllComplete && (
-              <Button 
-                colorScheme="blue"
-                onClick={() => {
-                  if (selectedGroupIndex < groups.length - 1) {
-                    setSelectedGroupIndex(selectedGroupIndex + 1)
-                    setBestCriterion(null)
-                    setWorstCriterion(null)
-                    setPairs([])
-                    setStep('select-criteria')
-                  } else {
-                    if (onPageChange) {
-                      onPageChange('output')
-                    }
-                  }
-                }}
-              >
-                {selectedGroupIndex === groups.length - 1 ? 'Go to Output' : 'Next Group'}
-              </Button>
             )}
           </Box>
         </VStack>
@@ -1072,6 +1104,10 @@ function PileBwtPage({ sessionId, onPageChange }) {
                                 setCurrentPairIndex(pairIdx)
                                 const targetComp = getComparisonForPair(pairIdx, updated)
                                 setSliderValue(targetComp ? targetComp.data_value : getDataRange(pairs[pairIdx].adjusted).min)
+                                // Scroll to top
+                                if (mainContentRef.current) {
+                                  mainContentRef.current.scrollTop = 0
+                                }
                               } catch (error) {
                                 toast({
                                   title: 'Error',
@@ -1106,7 +1142,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
       </Box>
 
       {/* Main Content */}
-      <Box flex={1} bg="white" p={4} overflow="auto">
+      <Box ref={mainContentRef} flex={1} bg="white" p={4} overflow="auto">
         {isSessionLocked && (
           <Box bg="yellow.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="yellow.400" mb={4}>
             <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
