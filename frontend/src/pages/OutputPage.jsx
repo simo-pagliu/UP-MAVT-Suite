@@ -7,22 +7,75 @@ const API_URL = 'http://localhost:5000/api'
 function OutputPage({ sessionId }) {
   const [loading, setLoading] = useState(false)
   const [sessionName, setSessionName] = useState('')
+  const [sessionData, setSessionData] = useState(null)
   const toast = useToast()
 
   useEffect(() => {
-    const fetchSessionName = async () => {
+    const fetchSessionData = async () => {
       if (!sessionId) return
       try {
         const response = await axios.get(`${API_URL}/session/${sessionId}`)
-        const name = response?.data?.name
+        const data = response?.data
+        const name = data?.name
         if (name) setSessionName(name)
+        if (data) setSessionData(data)
       } catch {
         // Silent fail: fallback to sessionId in filenames
       }
     }
 
-    fetchSessionName()
+    fetchSessionData()
   }, [sessionId])
+
+  const criteriaList = Array.isArray(sessionData?.criteria) ? sessionData.criteria : []
+  const hasAlternatives = criteriaList.length > 0 && criteriaList.every((crit) => {
+    const alts = Array.isArray(crit?.alternatives) ? crit.alternatives : []
+    return alts.length > 0 && alts.every((alt) => alt?.name && alt?.value !== undefined && alt?.value !== null)
+  })
+
+  const valueFunctions = sessionData?.value_functions
+  const vfCriteria = valueFunctions?.criteria || {}
+  const hasValueFunctions = criteriaList.length > 0 && criteriaList.every((crit) => {
+    const name = crit?.criterion_name
+    const cfg = name ? vfCriteria[name] : null
+    const points = Array.isArray(cfg?.points) ? cfg.points : []
+    return points.length > 0
+  })
+
+  const bwtData = sessionData?.bwt
+  const comparisons = Array.isArray(bwtData?.comparisons) ? bwtData.comparisons : []
+  const groupMap = criteriaList.reduce((acc, crit) => {
+    const groupName = crit?.group || 'Ungrouped'
+    if (!acc[groupName]) acc[groupName] = []
+    acc[groupName].push(crit)
+    return acc
+  }, {})
+
+  const baseGroups = Object.entries(groupMap).map(([name, criteria]) => ({
+    name,
+    criteria,
+  }))
+
+  const completedBaseGroups = baseGroups.every(({ name, criteria }) => {
+    const expected = Math.max(1, 2 * criteria.length - 3)
+    const groupComps = comparisons.filter((c) => c?.group === name)
+    return groupComps.length >= expected
+  })
+
+  const hasMultipleGroups = baseGroups.length > 1
+  const intraBCount = baseGroups.length
+  const intraWCount = baseGroups.length
+
+  const intraBExpected = hasMultipleGroups ? Math.max(1, 2 * intraBCount - 3) : 0
+  const intraWExpected = hasMultipleGroups ? Math.max(1, 2 * intraWCount - 3) : 0
+
+  const intraBComps = comparisons.filter((c) => c?.group === 'intra-B')
+  const intraWComps = comparisons.filter((c) => c?.group === 'intra-W')
+
+  const completedIntraB = !hasMultipleGroups || intraBComps.length >= intraBExpected
+  const completedIntraW = !hasMultipleGroups || intraWComps.length >= intraWExpected
+
+  const hasBwt = baseGroups.length > 0 && completedBaseGroups && completedIntraB && completedIntraW
 
   const handleDownload = async ({ endpoint, filename, successMessage, errorMessage }) => {
     setLoading(true)
@@ -71,6 +124,7 @@ function OutputPage({ sessionId }) {
               colorScheme="green"
               size="md"
               isLoading={loading}
+              isDisabled={!hasAlternatives}
               onClick={() => handleDownload({
                 endpoint: `/session/${sessionId}/export-input`,
                 filename: `alternatives_${sessionName || sessionId}.csv`,
@@ -84,6 +138,7 @@ function OutputPage({ sessionId }) {
               colorScheme="blue"
               size="md"
               isLoading={loading}
+              isDisabled={!hasAlternatives}
               onClick={() => handleDownload({
                 endpoint: `/session/${sessionId}/export-input-json`,
                 filename: `alternatives_${sessionName || sessionId}.json`,
@@ -94,6 +149,11 @@ function OutputPage({ sessionId }) {
               Download JSON
             </Button>
           </HStack>
+          {!hasAlternatives && (
+            <Text fontSize="sm" color="gray.500">
+              Complete the input step to enable downloads.
+            </Text>
+          )}
         </VStack>
 
         <VStack spacing={4} align="stretch">
@@ -103,6 +163,7 @@ function OutputPage({ sessionId }) {
               colorScheme="green"
               size="md"
               isLoading={loading}
+              isDisabled={!hasValueFunctions}
               onClick={() => handleDownload({
                 endpoint: `/session/${sessionId}/value-functions/export`,
                 filename: `value_functions_${sessionName || sessionId}.csv`,
@@ -116,6 +177,7 @@ function OutputPage({ sessionId }) {
               colorScheme="blue"
               size="md"
               isLoading={loading}
+              isDisabled={!hasValueFunctions}
               onClick={() => handleDownload({
                 endpoint: `/session/${sessionId}/value-functions/export-json`,
                 filename: `value_functions_${sessionName || sessionId}.json`,
@@ -126,6 +188,11 @@ function OutputPage({ sessionId }) {
               Download JSON
             </Button>
           </HStack>
+          {!hasValueFunctions && (
+            <Text fontSize="sm" color="gray.500">
+              Complete the value functions step to enable downloads.
+            </Text>
+          )}
         </VStack>
 
         <VStack spacing={4} align="stretch">
@@ -135,6 +202,7 @@ function OutputPage({ sessionId }) {
               colorScheme="green"
               size="md"
               isLoading={loading}
+              isDisabled={!hasBwt}
               onClick={() => handleDownload({
                 endpoint: `/session/${sessionId}/pile/export`,
                 filename: `pile_bwt_${sessionName || sessionId}.csv`,
@@ -148,6 +216,7 @@ function OutputPage({ sessionId }) {
               colorScheme="blue"
               size="md"
               isLoading={loading}
+              isDisabled={!hasBwt}
               onClick={() => handleDownload({
                 endpoint: `/session/${sessionId}/pile/export-json`,
                 filename: `pile_bwt_${sessionName || sessionId}.json`,
@@ -158,6 +227,11 @@ function OutputPage({ sessionId }) {
               Download JSON
             </Button>
           </HStack>
+          {!hasBwt && (
+            <Text fontSize="sm" color="gray.500">
+              Complete the PILE-BWT step to enable downloads.
+            </Text>
+          )}
         </VStack>
       </VStack>
     </Box>
