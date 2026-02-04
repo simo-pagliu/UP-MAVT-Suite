@@ -263,6 +263,7 @@ function ValueFunctionsPage({ sessionId }) {
   const [saving, setSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState(null)
   const [clampHint, setClampHint] = useState(null)
+  const [isSessionLocked, setIsSessionLocked] = useState(false)
   const toast = useToast()
 
   useEffect(() => {
@@ -270,6 +271,7 @@ function ValueFunctionsPage({ sessionId }) {
       try {
         const res = await axios.get(`${API_URL}/session/${sessionId}`)
         const session = res.data
+        setIsSessionLocked(session?.session_locked || false)
         const crits = Array.isArray(session.criteria) ? session.criteria : []
         setCriteria(crits)
 
@@ -349,8 +351,19 @@ function ValueFunctionsPage({ sessionId }) {
   }, [sessionId, toast])
 
   const dirtyRef = useRef(false)
+  const lockToastRef = useRef(false)
 
   const saveValueFunctions = async (payload) => {
+    if (isSessionLocked) {
+      toast({
+        title: 'Session locked',
+        description: 'This session is locked. You cannot modify value functions.',
+        status: 'warning',
+        duration: 3000,
+        isClosable: true,
+      })
+      return
+    }
     try {
       setSaving(true)
       await axios.put(`${API_URL}/session/${sessionId}/value`, {
@@ -389,6 +402,22 @@ function ValueFunctionsPage({ sessionId }) {
   }, [valueFunctions, loading])
 
   const markDirty = (updater) => {
+    if (isSessionLocked) {
+      if (!lockToastRef.current) {
+        lockToastRef.current = true
+        toast({
+          title: 'Session locked',
+          description: 'Editing is disabled while the session is locked.',
+          status: 'warning',
+          duration: 2000,
+          isClosable: true,
+        })
+        setTimeout(() => {
+          lockToastRef.current = false
+        }, 2000)
+      }
+      return
+    }
     setValueFunctions((prev) => {
       const next = typeof updater === 'function' ? updater(prev) : updater
       dirtyRef.current = true
@@ -620,6 +649,11 @@ function ValueFunctionsPage({ sessionId }) {
           )}
         </HStack>
       </HStack>
+      {isSessionLocked && (
+        <Text fontSize="sm" color="orange.600" mb={4}>
+          Session is locked. Editing is disabled.
+        </Text>
+      )}
       <Progress value={progress} colorScheme="blue" borderRadius="md" mb={6} />
       <Grid templateColumns={{ base: '1fr', md: '260px 1fr' }} gap={6} alignItems="start">
         <VStack align="stretch" spacing={3}>
@@ -910,7 +944,7 @@ function ValueFunctionsPage({ sessionId }) {
                 points={activeData.points}
                 thresholds={activeData.thresholds}
                 shape={activeData.shape}
-                draggable={activeData.mode === MODE.FREE && (activeData.shape === 'linear_increasing' || activeData.shape === 'linear_decreasing')}
+                draggable={!isSessionLocked && activeData.mode === MODE.FREE && (activeData.shape === 'linear_increasing' || activeData.shape === 'linear_decreasing')}
                 onDrag={activeData.mode === MODE.FREE ? handleDragPoint : undefined}
               />
 

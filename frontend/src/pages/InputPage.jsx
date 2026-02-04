@@ -34,8 +34,11 @@ function InputPage({ onSessionCreated, sessionId }) {
   const [isExistingSession, setIsExistingSession] = useState(false)
   const [showCodeInput, setShowCodeInput] = useState(false)
   const [isLocked, setIsLocked] = useState(false)
+  const [isSessionLocked, setIsSessionLocked] = useState(false)
+  const [hasModifiedInput, setHasModifiedInput] = useState(false)
   const toast = useToast()
   const fileInputRef = useRef(null)
+  const isInputLocked = isLocked || isSessionLocked
 
   const normalizeCriteria = (items) => {
     if (!Array.isArray(items)) return []
@@ -62,15 +65,22 @@ function InputPage({ onSessionCreated, sessionId }) {
                   setCriteria(normalizeCriteria(session.criteria))
           }
           setIsLocked(session.locked || false)
+          setIsSessionLocked(session.session_locked || false)
           setExistingSessionId(sessionId)
           setIsExistingSession(true)
+          setHasModifiedInput(false)
+          // Enable navigation if: locked OR (unlocked with complete criteria)
+          const isComplete = session.criteria && session.criteria.length > 0
+          if (session.locked || session.session_locked || isComplete) {
+            onSessionCreated(sessionId)
+          }
         } catch (error) {
           console.error('Failed to fetch session:', error)
         }
       }
       fetchSession()
     }
-  }, [sessionId])
+  }, [sessionId, onSessionCreated])
 
   const generateRandomCode = () => {
     const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
@@ -119,8 +129,10 @@ function InputPage({ onSessionCreated, sessionId }) {
           setCriteria(normalizeCriteria(data.criteria))
         }
         setIsLocked(data.locked || false)
+        setIsSessionLocked(data.session_locked || false)
         setExistingSessionId(data._id)
         setIsExistingSession(true)
+        setHasModifiedInput(false)
         toast({
           title: 'Session found',
           description: 'Loaded existing criteria for this session code',
@@ -128,10 +140,17 @@ function InputPage({ onSessionCreated, sessionId }) {
           duration: 3000,
           isClosable: true,
         })
+        // Enable navigation if: locked OR (unlocked with complete criteria)
+        const isComplete = data.criteria && data.criteria.length > 0
+        if (data.locked || data.session_locked || isComplete) {
+          onSessionCreated(data._id)
+        }
       } else {
         // New session
         setIsExistingSession(false)
         setIsLocked(false)
+        setIsSessionLocked(false)
+        setHasModifiedInput(false)
         setCriteria([])
         toast({
           title: 'New session',
@@ -156,10 +175,12 @@ function InputPage({ onSessionCreated, sessionId }) {
   }
 
   const handleFileUpload = (event) => {
-    if (isLocked) {
+    if (isInputLocked) {
       toast({
         title: 'Error',
-        description: 'This session is locked. You cannot modify the criteria.',
+        description: isSessionLocked
+          ? 'This session is locked. You cannot modify the criteria.'
+          : 'This input is locked. You cannot modify the criteria.',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -285,6 +306,7 @@ function InputPage({ onSessionCreated, sessionId }) {
       })
 
       setCriteria(parsedCriteria)
+      setHasModifiedInput(true)
       toast({
         title: 'File loaded',
         description: `${criterionNames.length} criteria and ${alternativeRows.length} alternatives imported`,
@@ -313,6 +335,7 @@ function InputPage({ onSessionCreated, sessionId }) {
       updated[criterionIdx] = { ...updated[criterionIdx], [field]: value }
       return updated
     })
+    setHasModifiedInput(true)
   }
 
   const handleAlternativeChange = (criterionIdx, altIdx, value) => {
@@ -323,6 +346,7 @@ function InputPage({ onSessionCreated, sessionId }) {
       updated[criterionIdx] = { ...updated[criterionIdx], alternatives: updatedAlts }
       return updated
     })
+    setHasModifiedInput(true)
   }
 
   const handleAlternativeNameChange = (altIdx, value) => {
@@ -334,6 +358,7 @@ function InputPage({ onSessionCreated, sessionId }) {
         )
       }))
     })
+    setHasModifiedInput(true)
   }
 
   const handleAddAlternative = () => {
@@ -351,6 +376,7 @@ function InputPage({ onSessionCreated, sessionId }) {
       ...criterion,
       alternatives: [...criterion.alternatives, { name: '', value: '' }]
     })))
+    setHasModifiedInput(true)
   }
 
   const handleAddCriterion = () => {
@@ -377,6 +403,7 @@ function InputPage({ onSessionCreated, sessionId }) {
       }))
     }
     setCriteria((prev) => [...prev, newCriterion])
+    setHasModifiedInput(true)
   }
 
   const handleRemoveAlternative = (altIdx) => {
@@ -384,6 +411,7 @@ function InputPage({ onSessionCreated, sessionId }) {
       ...criterion,
       alternatives: criterion.alternatives.filter((_, idx) => idx !== altIdx)
     })))
+    setHasModifiedInput(true)
   }
 
   const downloadCSV = () => {
@@ -496,10 +524,12 @@ function InputPage({ onSessionCreated, sessionId }) {
     try {
       if (isExistingSession && existingSessionId) {
         // If locked, just proceed without updating
-        if (isLocked) {
+        if (isInputLocked) {
           toast({
             title: 'Proceeding',
-            description: 'Session is locked, proceeding to elicitation',
+            description: isSessionLocked
+              ? 'Session is locked, proceeding to elicitation'
+              : 'Input is locked, proceeding to elicitation',
             status: 'info',
             duration: 2,
             isClosable: true,
@@ -515,11 +545,16 @@ function InputPage({ onSessionCreated, sessionId }) {
             duration: 2,
             isClosable: true,
           })
+          setHasModifiedInput(false)
           onSessionCreated(existingSessionId)
         }
       } else {
         // Create new session
         const response = await axios.post(`${API_URL}/session`, { name, criteria })
+        const newSessionId = response.data.session_id
+        setExistingSessionId(newSessionId)
+        setIsExistingSession(true)
+        setHasModifiedInput(false)
         toast({
           title: 'Success',
           description: 'Session created',
@@ -527,7 +562,7 @@ function InputPage({ onSessionCreated, sessionId }) {
           duration: 2,
           isClosable: true,
         })
-        onSessionCreated(response.data.session_id)
+        onSessionCreated(newSessionId)
       }
     } catch (error) {
       toast({
@@ -547,19 +582,28 @@ function InputPage({ onSessionCreated, sessionId }) {
       <VStack spacing={6} align="stretch">
         <HStack justify="space-between" align="center" mb={4}>
           <Heading as="h1" size="lg">Input</Heading>
-          {nameChecked && (
+          {nameChecked && !isInputLocked && (hasModifiedInput || !isExistingSession || criteria.length === 0) && (
             <Button
               colorScheme="blue"
               isLoading={loading}
               onClick={handleSubmit}
               size="lg"
             >
-              Continue
+              Confirm input to continue
             </Button>
           )}
         </HStack>
+        {nameChecked && isSessionLocked && (
+          <Text color="orange.600" fontSize="sm">
+            Session is locked. You can proceed, but changes are disabled.
+          </Text>
+        )}
+        {nameChecked && !isSessionLocked && isLocked && (
+          <Text color="orange.600" fontSize="sm">
+            Input is locked. You can proceed, but changes are disabled.
+          </Text>
+        )}
         <FormControl>
-          <FormLabel>Session Code</FormLabel>
           
           {!nameChecked && !showCodeInput && (
             <VStack spacing={4} align="stretch">
@@ -649,10 +693,12 @@ function InputPage({ onSessionCreated, sessionId }) {
           <>
             <Divider />
 
-            {isLocked && (
+            {isInputLocked && (
               <Box bg="yellow.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="yellow.400">
                 <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
-                  🔒 This session is locked. You can view the criteria but cannot modify them.
+                  🔒 {isSessionLocked
+                    ? 'This session is locked. You can view the criteria but cannot modify them.'
+                    : 'This input is locked. You can view the criteria but cannot modify them.'}
                 </Text>
               </Box>
             )}
@@ -662,7 +708,7 @@ function InputPage({ onSessionCreated, sessionId }) {
           <Text fontSize="sm" color="gray.600">
             Upload a CSV where the first column contains alternative names, other columns are criteria. First row has criterion names, last row has units.
           </Text>
-          {!isLocked && (
+          {!isInputLocked && (
             <FormControl>
               <FormLabel>Upload CSV</FormLabel>
               <Input 
@@ -689,7 +735,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                 leftIcon={<AddIcon />} 
                 size="sm" 
                 onClick={handleAddAlternative}
-                isDisabled={isLocked}
+                isDisabled={isInputLocked}
               >
                 Add Alternative
               </Button>
@@ -697,7 +743,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                 leftIcon={<AddIcon />} 
                 size="sm" 
                 onClick={handleAddCriterion}
-                isDisabled={isLocked}
+                isDisabled={isInputLocked}
               >
                 Add Criterion
               </Button>
@@ -723,7 +769,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                             size="sm"
                             fontWeight="bold"
                             bg="white"
-                            isDisabled={isLocked}
+                            isDisabled={isInputLocked}
                           />
                           <Input
                             value={criterion.group || ''}
@@ -732,7 +778,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                             size="sm"
                             fontSize="xs"
                             bg="white"
-                            isDisabled={isLocked}
+                            isDisabled={isInputLocked}
                           />
                           <Input
                             value={criterion.description || ''}
@@ -741,7 +787,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                             size="sm"
                             fontSize="xs"
                             bg="white"
-                            isDisabled={isLocked}
+                            isDisabled={isInputLocked}
                           />
                           <Input
                             value={criterion.unit}
@@ -750,7 +796,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                             size="sm"
                             fontSize="xs"
                             bg="white"
-                            isDisabled={isLocked}
+                            isDisabled={isInputLocked}
                           />
                         </VStack>
                       </Th>
@@ -767,7 +813,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                           onChange={(e) => handleAlternativeNameChange(altIdx, e.target.value)}
                           placeholder="Alternative name"
                           size="sm"
-                          isDisabled={isLocked}
+                          isDisabled={isInputLocked}
                         />
                       </Td>
                       {criteria.map((criterion, critIdx) => (
@@ -778,7 +824,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                             placeholder="Value"
                             size="sm"
                             type="number"
-                            isDisabled={isLocked}
+                            isDisabled={isInputLocked}
                           />
                         </Td>
                       ))}
@@ -790,7 +836,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                           variant="ghost"
                           colorScheme="red"
                           onClick={() => handleRemoveAlternative(altIdx)}
-                          isDisabled={isLocked}
+                          isDisabled={isInputLocked}
                         />
                       </Td>
                     </Tr>

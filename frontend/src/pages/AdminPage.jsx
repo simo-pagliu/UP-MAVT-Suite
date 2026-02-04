@@ -24,8 +24,20 @@ import {
   VStack,
   Input,
   FormControl,
-  FormLabel
+  FormLabel,
+  IconButton,
+  Drawer,
+  DrawerBody,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerOverlay,
+  DrawerContent,
+  DrawerCloseButton,
+  Badge,
+  Tooltip,
+  Icon
 } from '@chakra-ui/react'
+import { LockIcon, UnlockIcon, SettingsIcon } from '@chakra-ui/icons'
 import { useRef } from 'react'
 
 function AdminPage() {
@@ -36,8 +48,14 @@ function AdminPage() {
   const [password, setPassword] = useState('')
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const { isOpen, onOpen, onClose } = useDisclosure()
+  const {
+    isOpen: isDrawerOpen,
+    onOpen: onDrawerOpen,
+    onClose: onDrawerClose,
+  } = useDisclosure()
   const cancelRef = useRef()
   const toast = useToast()
+  const [selectedSession, setSelectedSession] = useState(null)
 
   // Check if already authenticated on mount
   useEffect(() => {
@@ -103,6 +121,10 @@ function AdminPage() {
       if (!response.ok) throw new Error('Failed to fetch sessions')
       const data = await response.json()
       setSessions(data)
+      if (selectedSession) {
+        const updated = data.find((s) => s._id === selectedSession._id)
+        setSelectedSession(updated || null)
+      }
     } catch (error) {
       toast({
         title: 'Error',
@@ -125,6 +147,11 @@ function AdminPage() {
   const handleDeleteClick = (sessionId) => {
     setDeleteId(sessionId)
     onOpen()
+  }
+
+  const handleRowClick = (session) => {
+    setSelectedSession(session)
+    onDrawerOpen()
   }
 
   const handleDeleteConfirm = async () => {
@@ -176,7 +203,7 @@ function AdminPage() {
     window.open(`http://localhost:5000/api/session/${sessionId}/bwt/export`, '_blank')
   }
 
-  const handleToggleLock = async (sessionId) => {
+  const handleToggleInputLock = async (sessionId) => {
     try {
       const response = await fetch(`http://localhost:5000/api/session/${sessionId}/lock`, {
         method: 'PUT',
@@ -188,7 +215,7 @@ function AdminPage() {
       
       toast({
         title: 'Success',
-        description: data.locked ? 'Session locked' : 'Session unlocked',
+        description: data.locked ? 'Input locked' : 'Input unlocked',
         status: 'success',
         duration: 2000,
         isClosable: true,
@@ -200,6 +227,37 @@ function AdminPage() {
       toast({
         title: 'Error',
         description: 'Failed to toggle lock',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+    }
+  }
+
+  const handleToggleSessionLock = async (sessionId) => {
+    try {
+      const response = await fetch(`http://localhost:5000/api/session/${sessionId}/lock-session`, {
+        method: 'PUT',
+      })
+
+      if (!response.ok) throw new Error('Failed to toggle session lock')
+
+      const data = await response.json()
+
+      toast({
+        title: 'Success',
+        description: data.session_locked ? 'Session locked' : 'Session unlocked',
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
+      })
+
+      // Refresh the sessions list
+      fetchSessions()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: 'Failed to toggle session lock',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -264,63 +322,56 @@ function AdminPage() {
                 <Th>Name</Th>
                 <Th>Created At</Th>
                 <Th>Criteria Count</Th>
-                <Th>Locked</Th>
+                <Th>Locks</Th>
                 <Th>Qualitative</Th>
                 <Th>Value Functions</Th>
                 <Th>BWT</Th>
                 <Th>PILE-BWT</Th>
-                <Th>Actions</Th>
+                <Th></Th>
               </Tr>
             </Thead>
             <Tbody>
               {sessions.map((session) => (
-                <Tr key={session._id}>
+                <Tr key={session._id} _hover={{ bg: 'gray.50' }}>
                   <Td>{session.name}</Td>
                   <Td>{formatDate(session.created_at)}</Td>
                   <Td>{session.criteria?.length || 0}</Td>
-                  <Td>{session.locked ? '🔒 Locked' : '🔓 Unlocked'}</Td>
+                  <Td>
+                    <HStack spacing={2}>
+                      <Tooltip
+                        label={
+                          session.session_locked
+                            ? 'Session locked: all edits disabled; downloads allowed.'
+                            : session.locked
+                              ? 'Input locked: criteria edits disabled; other steps allowed.'
+                              : 'Unlocked.'
+                        }
+                        hasArrow
+                      >
+                        <Badge
+                          colorScheme={session.session_locked ? 'red' : session.locked ? 'orange' : 'green'}
+                          display="inline-flex"
+                          alignItems="center"
+                          gap={1}
+                        >
+                          <Icon as={session.session_locked || session.locked ? LockIcon : UnlockIcon} boxSize={3} />
+                          {session.session_locked ? 'Session' : session.locked ? 'Input' : 'Unlocked'}
+                        </Badge>
+                      </Tooltip>
+                    </HStack>
+                  </Td>
                   <Td>{session.qualitative_indicators !== null ? '✓' : '—'}</Td>
                   <Td>{session.value_functions !== null ? '✓' : '—'}</Td>
                   <Td>{session.bwt !== null ? '✓' : '—'}</Td>
                   <Td>{session.pile_bwt !== null ? '✓' : '—'}</Td>
                   <Td>
-                    <HStack spacing={2}>
-                      <Button
-                        colorScheme={session.locked ? 'orange' : 'yellow'}
-                        size="sm"
-                        onClick={() => handleToggleLock(session._id)}
-                      >
-                        {session.locked ? 'Unlock' : 'Lock'}
-                      </Button>
-                      <Button
-                        colorScheme="blue"
-                        size="sm"
-                        onClick={() => handleDownloadInput(session._id, session.name)}
-                      >
-                        Input
-                      </Button>
-                      <Button
-                        colorScheme="green"
-                        size="sm"
-                        onClick={() => handleDownloadOutput(session._id, session.name)}
-                      >
-                        Output
-                      </Button>
-                      <Button
-                        colorScheme="purple"
-                        size="sm"
-                        onClick={() => handleDownloadBWT(session._id, session.name)}
-                      >
-                        BWT
-                      </Button>
-                      <Button
-                        colorScheme="red"
-                        size="sm"
-                        onClick={() => handleDeleteClick(session._id)}
-                      >
-                        Delete
-                      </Button>
-                    </HStack>
+                    <IconButton
+                      aria-label="Open session menu"
+                      icon={<SettingsIcon />}
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => handleRowClick(session)}
+                    />
                   </Td>
                 </Tr>
               ))}
@@ -355,6 +406,105 @@ function AdminPage() {
           </AlertDialogContent>
         </AlertDialogOverlay>
       </AlertDialog>
+
+      <Drawer isOpen={isDrawerOpen} placement="right" onClose={onDrawerClose} size="md">
+        <DrawerOverlay />
+        <DrawerContent>
+          <DrawerCloseButton />
+          <DrawerHeader>Session Details</DrawerHeader>
+          <DrawerBody>
+            {selectedSession ? (
+              <VStack align="stretch" spacing={4}>
+                <Box>
+                  <Text fontSize="sm" color="gray.500" textAlign="left">Session Code</Text>
+                  <Heading size="md" textAlign="left">{selectedSession.name}</Heading>
+                </Box>
+                <Text fontSize="sm" color="gray.500" textAlign="left">
+                  Created {formatDate(selectedSession.created_at)}
+                </Text>
+
+                <Box as="hr" borderColor="gray.200" />
+
+                <Box>
+                  <Text fontSize="sm" color="gray.500" mb={2} textAlign="left">Locks</Text>
+                  <VStack spacing={2} align="stretch">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleToggleInputLock(selectedSession._id)}
+                      isDisabled={selectedSession.session_locked}
+                      justifyContent="flex-start"
+                    >
+                      {selectedSession.session_locked
+                        ? 'Input locked by session'
+                        : (selectedSession.locked ? 'Unlock Input' : 'Lock Input')}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleToggleSessionLock(selectedSession._id)}
+                      justifyContent="flex-start"
+                    >
+                      {selectedSession.session_locked ? 'Unlock Session' : 'Lock Session'}
+                    </Button>
+                  </VStack>
+                </Box>
+
+                <Box as="hr" borderColor="gray.200" />
+
+                <Box>
+                  <Text fontSize="sm" color="gray.500" mb={2} textAlign="left">Downloads</Text>
+                  <VStack spacing={2} align="stretch">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDownloadInput(selectedSession._id, selectedSession.name)}
+                      justifyContent="flex-start"
+                    >
+                      Input
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDownloadOutput(selectedSession._id, selectedSession.name)}
+                      justifyContent="flex-start"
+                    >
+                      Output
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleDownloadBWT(selectedSession._id, selectedSession.name)}
+                      justifyContent="flex-start"
+                    >
+                      BWT
+                    </Button>
+                  </VStack>
+                </Box>
+
+                <Box as="hr" borderColor="gray.200" />
+
+                <Box>
+                  <Text fontSize="sm" color="gray.500" mb={2} textAlign="left">Danger Zone</Text>
+                  <Button
+                    colorScheme="red"
+                    size="sm"
+                    onClick={() => handleDeleteClick(selectedSession._id)}
+                    justifyContent="flex-start"
+                  >
+                    Delete Session
+                  </Button>
+                </Box>
+              </VStack>
+            ) : (
+              <Text>Select a session to view details.</Text>
+            )}
+          </DrawerBody>
+          <DrawerFooter>
+            <Button variant="outline" onClick={onDrawerClose}>Close</Button>
+          </DrawerFooter>
+        </DrawerContent>
+      </Drawer>
     </Box>
   )
 }

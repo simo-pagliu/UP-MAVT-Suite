@@ -18,7 +18,7 @@ function App() {
 
   const handleSessionCreated = (id) => {
     setSessionId(id)
-    setCurrentPage('qualitative')
+    // Don't auto-navigate, just enable navigation by setting sessionId
   }
 
   return (

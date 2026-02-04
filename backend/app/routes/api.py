@@ -67,6 +67,7 @@ def create_session():
         'bwt': None,
         'pile_bwt': None,
         'locked': False,
+        'session_locked': False,
         'created_at': datetime.utcnow()
     }
 
@@ -153,12 +154,18 @@ def update_criteria(session_id):
 
     db = current_app.db
     try:
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        if session.get('session_locked', False):
+            return jsonify({'error': 'Session is locked'}), 423
+        if session.get('locked', False):
+            return jsonify({'error': 'Input is locked'}), 423
+
         result = db.sessions.update_one(
             {'_id': ObjectId(session_id)},
             {'$set': {'criteria': criteria}}
         )
-        if result.matched_count == 0:
-            return jsonify({'error': 'Session not found'}), 404
         return jsonify({'status': 'updated'}), 200
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
@@ -185,6 +192,28 @@ def toggle_session_lock(session_id):
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
 
+# Toggle session lock
+@bp.route('/session/<session_id>/lock-session', methods=['PUT'])
+def toggle_full_session_lock(session_id):
+    """Toggle the lock status of a session (all fields)"""
+    db = current_app.db
+    try:
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+
+        current_locked = session.get('session_locked', False)
+        new_locked = not current_locked
+
+        db.sessions.update_one(
+            {'_id': ObjectId(session_id)},
+            {'$set': {'session_locked': new_locked}}
+        )
+
+        return jsonify({'session_locked': new_locked}), 200
+    except:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
 # Update qualitative indicators
 @bp.route('/session/<session_id>/qualitative', methods=['PUT'])
 def update_qualitative(session_id):
@@ -197,12 +226,16 @@ def update_qualitative(session_id):
     
     db = current_app.db
     try:
-        result = db.sessions.update_one(
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        if session.get('session_locked', False):
+            return jsonify({'error': 'Session is locked'}), 423
+
+        db.sessions.update_one(
             {'_id': ObjectId(session_id)},
             {'$set': {'qualitative_indicators': value}}
         )
-        if result.matched_count == 0:
-            return jsonify({'error': 'Session not found'}), 404
         return jsonify({'status': 'updated'}), 200
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
@@ -219,12 +252,16 @@ def update_value(session_id):
     
     db = current_app.db
     try:
-        result = db.sessions.update_one(
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        if session.get('session_locked', False):
+            return jsonify({'error': 'Session is locked'}), 423
+
+        db.sessions.update_one(
             {'_id': ObjectId(session_id)},
             {'$set': {'value_functions': value}}
         )
-        if result.matched_count == 0:
-            return jsonify({'error': 'Session not found'}), 404
         return jsonify({'status': 'updated'}), 200
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
@@ -289,12 +326,16 @@ def update_bwt(session_id):
     
     db = current_app.db
     try:
-        result = db.sessions.update_one(
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        if session.get('session_locked', False):
+            return jsonify({'error': 'Session is locked'}), 423
+
+        db.sessions.update_one(
             {'_id': ObjectId(session_id)},
             {'$set': {'bwt': value}}
         )
-        if result.matched_count == 0:
-            return jsonify({'error': 'Session not found'}), 404
         return jsonify({'status': 'updated'}), 200
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
@@ -350,12 +391,16 @@ def update_pile(session_id):
     
     db = current_app.db
     try:
-        result = db.sessions.update_one(
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+        if session.get('session_locked', False):
+            return jsonify({'error': 'Session is locked'}), 423
+
+        db.sessions.update_one(
             {'_id': ObjectId(session_id)},
             {'$set': {'pile_bwt': value}}
         )
-        if result.matched_count == 0:
-            return jsonify({'error': 'Session not found'}), 404
         return jsonify({'status': 'updated'}), 200
     except:
         return jsonify({'error': 'Invalid session ID'}), 400

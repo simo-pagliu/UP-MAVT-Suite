@@ -66,6 +66,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
   const [bwtSignature, setBwtSignature] = useState(null)
   const [criteriaMismatch, setCriteriaMismatch] = useState(false)
   const [criteriaMismatchAcknowledged, setCriteriaMismatchAcknowledged] = useState(false)
+  const [isSessionLocked, setIsSessionLocked] = useState(false)
   const { isOpen, onOpen, onClose } = useDisclosure()
   const cancelRef = useRef()
   const toast = useToast()
@@ -91,6 +92,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
         const response = await axios.get(`${API_URL}/session/${sessionId}`)
         const session = response.data
         setCriteria(Array.isArray(session.criteria) ? session.criteria : [])
+        setIsSessionLocked(session?.session_locked || false)
 
         if (session.value_functions?.criteria) {
           setValueFunction(session.value_functions.criteria)
@@ -222,7 +224,19 @@ function PileBwtPage({ sessionId, onPageChange }) {
     criteria_signature: criteriaSignature,
   })
 
+  const ensureSessionUnlocked = () => {
+    if (!isSessionLocked) return true
+    toast({
+      title: 'Session locked',
+      description: 'This session is locked. You cannot modify BWT data.',
+      status: 'warning',
+      isClosable: true,
+    })
+    return false
+  }
+
   const handleCriteriaMismatchReset = async () => {
+    if (!ensureSessionUnlocked()) return
     setSaving(true)
     try {
       await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
@@ -284,6 +298,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
   }
 
   const handleResetGroup = async () => {
+    if (!ensureSessionUnlocked()) return
     const groupName = groups[selectedGroupIndex].name
     const newComparisons = comparisons.filter((c) => c.group !== groupName)
     setComparisons(newComparisons)
@@ -417,6 +432,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
   }
 
   const handleNextPair = async () => {
+    if (!ensureSessionUnlocked()) return
     const updatedComparisons = upsertComparisonForPair(currentPairIndex, sliderValue)
     
     if (currentPairIndex < pairs.length - 1) {
@@ -446,6 +462,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
   }
 
   const handlePrevPair = async () => {
+    if (!ensureSessionUnlocked()) return
     if (currentPairIndex > 0) {
       const updatedComparisons = upsertComparisonForPair(currentPairIndex, sliderValue)
       
@@ -472,6 +489,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
   }
 
   const handleSaveAll = async (comps = comparisons) => {
+    if (!ensureSessionUnlocked()) return
     setSaving(true)
     try {
       await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
@@ -976,6 +994,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
             size="sm"
             onClick={onOpen}
             variant="outline"
+            isDisabled={isSessionLocked}
           >
             Reset All BWT Data
           </Button>
@@ -1042,6 +1061,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
                             cursor="pointer"
                             onClick={async () => {
                               if (pairIdx === currentPairIndex) return
+                              if (!ensureSessionUnlocked()) return
                               const updated = upsertComparisonForPair(currentPairIndex, sliderValue)
                               setSaving(true)
                               try {
@@ -1087,6 +1107,13 @@ function PileBwtPage({ sessionId, onPageChange }) {
 
       {/* Main Content */}
       <Box flex={1} bg="white" p={4} overflow="auto">
+        {isSessionLocked && (
+          <Box bg="yellow.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="yellow.400" mb={4}>
+            <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
+              🔒 Session is locked. Editing is disabled.
+            </Text>
+          </Box>
+        )}
         {renderContent()}
       </Box>
 
