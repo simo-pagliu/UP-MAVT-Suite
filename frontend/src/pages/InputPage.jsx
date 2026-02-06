@@ -582,7 +582,7 @@ function InputPage({ onSessionCreated, sessionId }) {
   }
 
   return (
-    <Box bg="white" p={8} borderRadius="lg" boxShadow="sm">
+    <Box bg="white" p={6} borderRadius="lg" boxShadow="sm">
       <VStack spacing={6} align="stretch">
         <HStack justify="space-between" align="center" mb={4}>
           <Heading as="h1" size="lg">Input</Heading>

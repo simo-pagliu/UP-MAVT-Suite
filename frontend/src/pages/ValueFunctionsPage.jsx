@@ -638,63 +638,88 @@ function ValueFunctionsPage({ sessionId }) {
   }
 
   return (
-    <Box bg="white" p={6} borderRadius="lg" boxShadow="sm">
-      <HStack justify="space-between" align="center" mb={4}>
-        <Heading size="lg">Value Functions</Heading>
-        <HStack spacing={3}>
-          <Tag colorScheme={saving ? 'orange' : 'green'}>
-            <TagLabel>{saving ? 'Saving...' : 'Auto-saved'}</TagLabel>
-            <TagRightIcon as={saving ? WarningIcon : CheckCircleIcon} />
-          </Tag>
-          {lastSaved && (
-            <Text fontSize="sm" color="gray.500">Last saved {new Date(lastSaved).toLocaleTimeString()}</Text>
+    <HStack align="stretch" spacing={0} h="100vh" overflow="hidden">
+      {/* Left Sidebar */}
+      <Box
+        w="320px"
+        bg="gray.100"
+        p={4}
+        borderRight="1px"
+        borderColor="gray.300"
+        maxH="100vh"
+        overflowY="auto"
+      >
+        <VStack spacing={4} align="stretch" mb={6}>
+          <Heading size="md">Value Functions</Heading>
+          <Text fontSize="sm" color="gray.600">
+            Define value function for criterion levels through mid-value splitting method or free design.
+          </Text>
+          {isSessionLocked && (
+            <Text fontSize="xs" color="orange.600">
+              Session is locked. Editing is disabled.
+            </Text>
           )}
-        </HStack>
-      </HStack>
-      {isSessionLocked && (
-        <Text fontSize="sm" color="orange.600" mb={4}>
-          Session is locked. Editing is disabled.
-        </Text>
-      )}
-      <Progress value={progress} colorScheme="blue" borderRadius="md" mb={6} />
-      <Grid templateColumns={{ base: '1fr', md: '260px 1fr' }} gap={6} alignItems="start">
-        <VStack align="stretch" spacing={3}>
-          <Text fontWeight="semibold">Criteria</Text>
-          <Box border="1px solid" borderColor="gray.200" borderRadius="md" maxH="480px" overflowY="auto">
-            <VStack align="stretch" spacing={1} p={2}>
-              {criteria.filter(c => !c.is_qualitative).map((criterion, idx) => {
-                const name = criterion.criterion_name || `Criterion ${idx + 1}`
-                const entry = valueFunctions[name]
-                
-                // Mark as done based on mode:
-                // - Mid-splitting: user skipped or filled indifference points
-                // - Free edit: user actively chose this mode (can't skip in free edit)
-                const done = entry && (
-                  (entry.mode === 'mid-splitting' && (
-                    entry.midSplit?.skipFirst === true || 
-                    entry.midSplit?.step1 !== null
-                  )) ||
-                  (entry.mode === 'free-edit')
-                )
-                
-                return (
-                  <Button
-                    key={name}
-                    variant={active === name ? 'solid' : 'ghost'}
-                    colorScheme="blue"
-                    justifyContent="space-between"
-                    onClick={() => setActive(name)}
-                    rightIcon={done ? <CheckCircleIcon color="green.500" /> : <CloseIcon color="red.500" boxSize={3} />}
-                  >
-                    <Text noOfLines={1}>{idx + 1}. {name}</Text>
-                  </Button>
-                )
-              })}
-            </VStack>
-          </Box>
         </VStack>
-        <Box>
-          {activeData ? (
+        <VStack spacing={3} align="stretch">
+          {criteria.filter(c => !c.is_qualitative).map((criterion, idx) => {
+            const name = criterion.criterion_name || `Criterion ${idx + 1}`
+            const entry = valueFunctions[name]
+            const isActive = active === name
+            
+            // Mark as done based on mode:
+            // - Mid-splitting: user skipped or filled indifference points
+            // - Free edit: user actively chose this mode (can't skip in free edit)
+            const done = entry && (
+              (entry.mode === 'mid-splitting' && (
+                entry.midSplit?.skipFirst === true || 
+                entry.midSplit?.step1 !== null
+              )) ||
+              (entry.mode === 'free-edit')
+            )
+            
+            return (
+              <Box
+                key={name}
+                p={3}
+                borderRadius="md"
+                cursor="pointer"
+                bg={isActive ? 'blue.500' : done ? 'green.100' : 'white'}
+                borderWidth="1px"
+                borderColor={isActive ? 'blue.600' : done ? 'green.300' : 'gray.300'}
+                _hover={{ shadow: 'sm' }}
+                onClick={() => setActive(name)}
+              >
+                <HStack justify="space-between">
+                  <Text
+                    fontWeight="bold"
+                    color={isActive ? 'white' : 'black'}
+                    fontSize="sm"
+                    isTruncated
+                    flex={1}
+                  >
+                    {idx + 1}. {name}
+                  </Text>
+                  {done ? (
+                    <CheckCircleIcon w={4} h={4} color={isActive ? 'white' : 'green.500'} />
+                  ) : (
+                    <CloseIcon w={3} h={3} color={isActive ? 'whiteAlpha.800' : 'red.500'} />
+                  )}
+                </HStack>
+              </Box>
+            )
+          })}
+        </VStack>
+      </Box>
+
+      {/* Main Content */}
+      <Box
+        flex={1}
+        bg="white"
+        p={4}
+        maxH="100vh"
+        overflowY="auto"
+      >
+        {activeData ? (
             <VStack align="stretch" spacing={5}>
               <VStack align="stretch" spacing={3}>
                 <Heading size="md">{active}</Heading>
@@ -970,11 +995,15 @@ function ValueFunctionsPage({ sessionId }) {
               </Box>
             </VStack>
           ) : (
-            <Text>Select a criterion to begin.</Text>
+            <VStack spacing={4} align="center" justify="center" minH="60vh">
+              <Heading size="lg">Select a Criterion to Begin</Heading>
+              <Text color="gray.600" fontSize="lg">
+                Click on a criterion in the sidebar to define its value function
+              </Text>
+            </VStack>
           )}
-        </Box>
-      </Grid>
-    </Box>
+      </Box>
+    </HStack>
   )
 }
 

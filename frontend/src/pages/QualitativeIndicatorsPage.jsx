@@ -303,7 +303,7 @@ function QualitativeValuePlot({ ranking, isIncreasing, adjustedValues }) {
     .join(' ')
 
   return (
-    <Box border="1px solid" borderColor="gray.200" borderRadius="md" p={4} bg="gray.50">
+    <Box border="1px solid" borderColor="gray.200" borderRadius="lg" p={4} bg="gray.50">
       <svg ref={svgRef} width="100%" height={height} viewBox={`0 0 ${width} ${height}`}>
         <rect x={0} y={0} width={width} height={height} fill="transparent" />
         {/* Axes */}
@@ -711,23 +711,38 @@ function QualitativeIndicatorsPage({ sessionId }) {
   }
 
   return (
-    <Box bg="white" p={0} borderRadius="lg" boxShadow="sm" overflow="hidden">
-      <Grid templateColumns="250px 1fr" minH="600px">
-        {/* Left Sidebar */}
-        <GridItem bg="gray.50" p={4} borderRight="1px solid" borderColor="gray.200" overflowY="auto">
-          <VStack spacing={2} align="stretch">
-            <Heading size="sm">Indicators</Heading>
-            <Divider />
-            {qualitativeCriteria.map((criterion, idx) => {
-              const isComplete = qualitativeData[criterion.criterion_name] !== undefined
-              return (
-                <Card
-                  key={idx}
-                  cursor="pointer"
-                  bg={activeIndicatorIdx === idx ? 'blue.50' : 'white'}
-                  borderColor={activeIndicatorIdx === idx ? 'blue.300' : 'gray.200'}
-                  borderWidth={1}
-                  onClick={() => {
+    <HStack align="stretch" spacing={0} h="100vh" overflow="hidden">
+      {/* Left Sidebar */}
+      <Box
+        w="320px"
+        bg="gray.100"
+        p={4}
+        borderRight="1px"
+        borderColor="gray.300"
+        maxH="100vh"
+        overflowY="auto"
+      >
+        <VStack spacing={4} align="stretch" mb={6}>
+          <Heading size="md">Qualitative Indicators</Heading>
+          <Text fontSize="sm" color="gray.600">
+            Rank alternatives from best to worst, then adjust value functions to quantify distance between ranks.
+          </Text>
+        </VStack>
+        <VStack spacing={3} align="stretch">
+          {qualitativeCriteria.map((criterion, idx) => {
+            const isComplete = qualitativeData[criterion.criterion_name] !== undefined
+            const isActive = activeIndicatorIdx === idx
+            return (
+              <Box
+                key={idx}
+                p={3}
+                borderRadius="md"
+                cursor="pointer"
+                bg={isActive ? 'blue.500' : isComplete ? 'green.100' : 'white'}
+                borderWidth="1px"
+                borderColor={isActive ? 'blue.600' : isComplete ? 'green.300' : 'gray.300'}
+                _hover={{ shadow: 'sm' }}
+                onClick={() => {
                     // Check if there's saved data for this indicator
                     const savedData = qualitativeData[qualitativeCriteria[idx].criterion_name]
                     if (savedData) {
@@ -749,22 +764,34 @@ function QualitativeIndicatorsPage({ sessionId }) {
                     }
                   }}
                 >
-                  <CardBody p={2}>
-                    <HStack spacing={2} justify="space-between">
-                      <Box flex={1}>
-                        <Text fontSize="sm" fontWeight="medium" isTruncated>{criterion.criterion_name}</Text>
-                        {isComplete && <CheckCircleIcon w={4} h={4} color="green.500" mt={1} />}
-                      </Box>
-                    </HStack>
-                  </CardBody>
-                </Card>
+                  <HStack justify="space-between">
+                    <Text
+                      fontWeight="bold"
+                      color={isActive ? 'white' : 'black'}
+                      fontSize="sm"
+                      isTruncated
+                      flex={1}
+                    >
+                      {idx + 1}. {criterion.criterion_name}
+                    </Text>
+                    {isComplete && (
+                      <CheckCircleIcon w={4} h={4} color={isActive ? 'white' : 'green.500'} />
+                    )}
+                  </HStack>
+                </Box>
               )
             })}
           </VStack>
-        </GridItem>
+      </Box>
 
-        {/* Right Main Area */}
-        <GridItem p={6} overflowY="auto">
+      {/* Right Main Area */}
+      <Box
+        flex={1}
+        bg="white"
+        p={4}
+        maxH="100vh"
+        overflowY="auto"
+      >
           {isSessionLocked && (
             <Box bg="yellow.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="yellow.400" mb={4}>
               <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
@@ -774,14 +801,18 @@ function QualitativeIndicatorsPage({ sessionId }) {
           )}
 
           {qualitativeCriteria.length === 0 ? (
-            <VStack spacing={4} align="center" justify="center" h="100%">
-              <Heading size="md" color="gray.400">No Qualitative Indicators</Heading>
-              <Text color="gray.400">Please add qualitative criteria from the Input page.</Text>
+            <VStack spacing={4} align="center" justify="center" minH="60vh">
+              <Heading size="lg">No Qualitative Indicators</Heading>
+              <Text color="gray.600" fontSize="lg">
+                Please add qualitative criteria from the Input page
+              </Text>
             </VStack>
           ) : !activeIndicator ? (
-            <VStack spacing={4} align="center" justify="center" h="100%">
-              <Heading size="md" color="gray.400">Select an Indicator</Heading>
-              <Text color="gray.400">Click on an indicator in the left panel to start elicitation.</Text>
+            <VStack spacing={4} align="center" justify="center" minH="60vh">
+              <Heading size="lg">Select an Indicator</Heading>
+              <Text color="gray.600" fontSize="lg">
+                Click on an indicator in the sidebar to start elicitation
+              </Text>
             </VStack>
           ) : (
             <>
@@ -819,26 +850,16 @@ function QualitativeIndicatorsPage({ sessionId }) {
                             variant="outline"
                             rightIcon={<ArrowForwardIcon />}
                             onClick={() => {
-                              // If there are more indicators, go to next, otherwise go to adjustment
-                              if (activeIndicatorIdx < qualitativeCriteria.length - 1) {
-                                setActiveIndicatorIdx(activeIndicatorIdx + 1)
-                                setPhase('ranking')
-                                setCurrentRanking(null)
+                              if (!currentRanking) return
+                              // Ranking complete: go to adjustment for the current indicator
+                              const savedData = qualitativeData[activeIndicator.criterion_name]
+                              if (savedData && JSON.stringify(savedData.ranking) !== JSON.stringify(currentRanking)) {
                                 setSavedValues(null)
                                 setSavedIsIncreasing(null)
-                              } else if (currentRanking) {
-                                // Last indicator and ranking is complete, go to adjustment
-                                // Check if ranking has changed - if so, clear saved values
-                                const savedData = qualitativeData[activeIndicator.criterion_name]
-                                if (savedData && JSON.stringify(savedData.ranking) !== JSON.stringify(currentRanking)) {
-                                  // Ranking changed, clear saved values
-                                  setSavedValues(null)
-                                  setSavedIsIncreasing(null)
-                                }
-                                setPhase('adjustment')
                               }
+                              setPhase('adjustment')
                             }}
-                            isDisabled={!currentRanking && activeIndicatorIdx === qualitativeCriteria.length - 1}
+                            isDisabled={!currentRanking}
                           >
                             Next
                           </Button>
@@ -903,9 +924,8 @@ function QualitativeIndicatorsPage({ sessionId }) {
               </VStack>
             </>
           )}
-        </GridItem>
-      </Grid>
-    </Box>
+      </Box>
+    </HStack>
   )
 }
 

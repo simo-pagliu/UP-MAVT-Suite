@@ -1383,7 +1383,10 @@ function PileBwtPage({ sessionId, onPageChange }) {
         overflowY="auto"
       >
         <VStack spacing={4} align="stretch" mb={6}>
-          <Heading size="md">Groups</Heading>
+          <Heading size="md">Weights</Heading>
+          <Text fontSize="sm" color="gray.600">
+            Apply the PILE-BWT method, perform pairwise comparisons to determine the weights of each criteria.
+          </Text>
         </VStack>
         <VStack spacing={3} align="stretch">
           {allGroups.map((group, idx) => {

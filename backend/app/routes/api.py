@@ -5,6 +5,7 @@ import csv
 import io
 import json
 import os
+import zipfile
 
 bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -302,25 +303,176 @@ def update_value(session_id):
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
 
-# Export value functions as CSV
-@bp.route('/session/<session_id>/value-functions/export', methods=['GET'])
-def export_value_functions_csv(session_id):
-    """Export value functions as CSV with serialized point lists"""
-    db = current_app.db
+def _is_qualitative_complete(criteria, qualitative_indicators):
+    if not isinstance(criteria, list):
+        return False
+    if not isinstance(qualitative_indicators, dict):
+        return False
+    for criterion in criteria:
+        if not isinstance(criterion, dict) or not criterion.get('is_qualitative'):
+            continue
+        name = criterion.get('criterion_name')
+        data = qualitative_indicators.get(name) if name else None
+        if not isinstance(data, dict):
+            return False
+        ranking = data.get('ranking')
+        values = data.get('values')
+        if not isinstance(ranking, dict) or not isinstance(values, dict):
+            return False
+        if len(ranking) == 0 or len(values) == 0:
+            return False
+    return True
+
+def _is_value_functions_complete(criteria, value_functions):
+    if not isinstance(criteria, list):
+        return False
+    criteria_map = value_functions.get('criteria') if isinstance(value_functions, dict) else {}
+    if not isinstance(criteria_map, dict):
+        criteria_map = {}
+    for criterion in criteria:
+        if not isinstance(criterion, dict) or criterion.get('is_qualitative'):
+            continue
+        name = criterion.get('criterion_name')
+        cfg = criteria_map.get(name) if name else None
+        points = cfg.get('points') if isinstance(cfg, dict) else None
+        if not isinstance(points, list) or len(points) == 0:
+            return False
+    return True
+
+def _get_qualitative_alt_value(qualitative_indicators, criterion_name, alt_name):
+    if not isinstance(qualitative_indicators, dict):
+        return ''
+    data = qualitative_indicators.get(criterion_name) if criterion_name else None
+    if not isinstance(data, dict):
+        return ''
+    ranking = data.get('ranking')
+    values = data.get('values')
+    if not isinstance(ranking, dict) or not isinstance(values, dict):
+        return ''
+    rank = ranking.get(alt_name)
+    if rank is None:
+        return ''
+    if rank in values:
+        return values.get(rank)
+    rank_str = str(rank)
+    if rank_str in values:
+        return values.get(rank_str)
     try:
-        session = db.sessions.find_one({'_id': ObjectId(session_id)})
-        if not session:
-            return jsonify({'error': 'Session not found'}), 404
+        rank_int = int(rank)
+    except (TypeError, ValueError):
+        return ''
+    return values.get(rank_int, values.get(str(rank_int), ''))
 
-        value_functions = session.get('value_functions') or {}
-        criteria_map = value_functions.get('criteria') if isinstance(value_functions, dict) else None
-        if not criteria_map or not isinstance(criteria_map, dict):
-            return jsonify({'error': 'No value functions to export'}), 404
+def _build_input_raw_csv(criteria):
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Criterion', 'Unit', 'Alternative', 'Value'])
+    for criterion in criteria:
+        if not isinstance(criterion, dict):
+            continue
+        criterion_name = criterion.get('criterion_name', '')
+        unit = criterion.get('unit', '')
+        alternatives = criterion.get('alternatives', [])
+        for alt in alternatives:
+            if not isinstance(alt, dict):
+                continue
+            writer.writerow([
+                criterion_name,
+                unit,
+                alt.get('name', ''),
+                alt.get('value', ''),
+            ])
+    return output.getvalue()
 
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['CRITERION_NAME', 'LIST OF POINTS'])
+def _build_alternatives_csv(criteria, qualitative_indicators):
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['Criterion', 'Unit', 'Alternative', 'Value'])
+    for criterion in criteria:
+        if not isinstance(criterion, dict):
+            continue
+        criterion_name = criterion.get('criterion_name', '')
+        unit = criterion.get('unit', '')
+        alternatives = criterion.get('alternatives', [])
+        for alt in alternatives:
+            if not isinstance(alt, dict):
+                continue
+            alt_value = alt.get('value', '')
+            if criterion.get('is_qualitative'):
+                alt_value = _get_qualitative_alt_value(
+                    qualitative_indicators,
+                    criterion_name,
+                    alt.get('name')
+                )
+            writer.writerow([
+                criterion_name,
+                unit,
+                alt.get('name', ''),
+                alt_value,
+            ])
+    return output.getvalue()
 
+def _build_qualitative_csv(criteria, qualitative_indicators):
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['CRITERION_NAME', 'ALTERNATIVE', 'RANK', 'VALUE'])
+    for criterion in criteria:
+        if not isinstance(criterion, dict) or not criterion.get('is_qualitative'):
+            continue
+        name = criterion.get('criterion_name', '')
+        data = qualitative_indicators.get(name, {}) if name else {}
+        ranking = data.get('ranking') if isinstance(data, dict) else None
+        if not isinstance(ranking, dict):
+            continue
+        alternatives = criterion.get('alternatives', [])
+        for alt in alternatives:
+            if not isinstance(alt, dict):
+                continue
+            alt_name = alt.get('name')
+            if not alt_name:
+                continue
+            rank = ranking.get(alt_name)
+            value = _get_qualitative_alt_value(qualitative_indicators, name, alt_name)
+            writer.writerow([name, alt_name, rank if rank is not None else '', value])
+    return output.getvalue()
+
+def _build_value_functions_csv(criteria, criteria_map):
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['CRITERION_NAME', 'LIST OF POINTS'])
+
+    if isinstance(criteria, list) and len(criteria) > 0:
+        for criterion in criteria:
+            if not isinstance(criterion, dict):
+                continue
+            name = criterion.get('criterion_name')
+            if not name:
+                continue
+            if criterion.get('is_qualitative'):
+                points = [
+                    {'x': 0, 'y': 0},
+                    {'x': 1, 'y': 1},
+                ]
+            else:
+                cfg = criteria_map.get(name) if isinstance(criteria_map, dict) else None
+                points = cfg.get('points') if isinstance(cfg, dict) else []
+            serialized = ''
+            if isinstance(points, list):
+                parts = []
+                for p in points:
+                    if not isinstance(p, dict):
+                        continue
+                    x = p.get('x')
+                    y = p.get('y')
+                    if x is None or y is None:
+                        continue
+                    try:
+                        parts.append(f"{float(x)}:{float(y)}")
+                    except (TypeError, ValueError):
+                        continue
+                serialized = ';'.join(parts)
+            writer.writerow([name, serialized])
+    else:
         for name, cfg in criteria_map.items():
             points = cfg.get('points') if isinstance(cfg, dict) else []
             serialized = ''
@@ -339,10 +491,51 @@ def export_value_functions_csv(session_id):
                         continue
                 serialized = ';'.join(parts)
             writer.writerow([name, serialized])
+    return output.getvalue()
 
-        output.seek(0)
+def _build_pile_bwt_csv(bwt_data):
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    if isinstance(bwt_data, dict) and isinstance(bwt_data.get('comparisons'), list):
+        writer.writerow(['REFERENCE_CRITERION', 'ADJUSTED_CRITERION', 'DATA_VALUE', 'TYPE', 'GROUP'])
+        for comp in bwt_data.get('comparisons', []):
+            if isinstance(comp, dict):
+                writer.writerow([
+                    comp.get('reference_criterion', ''),
+                    comp.get('adjusted_criterion', ''),
+                    comp.get('data_value', ''),
+                    comp.get('type', ''),
+                    comp.get('group', ''),
+                ])
+    else:
+        writer.writerow(['VALUE'])
+        writer.writerow([bwt_data])
+
+    return output.getvalue()
+
+# Export value functions as CSV
+@bp.route('/session/<session_id>/value-functions/export', methods=['GET'])
+def export_value_functions_csv(session_id):
+    """Export value functions as CSV with serialized point lists"""
+    db = current_app.db
+    try:
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+
+        criteria = session.get('criteria', [])
+        value_functions = session.get('value_functions') or {}
+        if not _is_value_functions_complete(criteria, value_functions):
+            return jsonify({'error': 'Complete value functions before export'}), 400
+
+        criteria_map = value_functions.get('criteria') if isinstance(value_functions, dict) else {}
+        if not isinstance(criteria_map, dict):
+            criteria_map = {}
+
+        output = _build_value_functions_csv(criteria, criteria_map)
         return send_file(
-            io.BytesIO(output.getvalue().encode()),
+            io.BytesIO(output.encode()),
             mimetype='text/csv',
             as_attachment=True,
             download_name=f'value_functions_{session.get("name", session_id)}.csv'
@@ -360,14 +553,43 @@ def export_value_functions_json(session_id):
         if not session:
             return jsonify({'error': 'Session not found'}), 404
 
+        criteria = session.get('criteria', [])
         value_functions = session.get('value_functions') or {}
-        if not value_functions:
-            return jsonify({'error': 'No value functions to export'}), 404
+        if not _is_value_functions_complete(criteria, value_functions):
+            return jsonify({'error': 'Complete value functions before export'}), 400
+
+        criteria_map = value_functions.get('criteria') if isinstance(value_functions, dict) else {}
+        if not isinstance(criteria_map, dict):
+            criteria_map = {}
+
+        combined_criteria = {}
+        if isinstance(criteria, list) and len(criteria) > 0:
+            for criterion in criteria:
+                if not isinstance(criterion, dict):
+                    continue
+                name = criterion.get('criterion_name')
+                if not name:
+                    continue
+                if criterion.get('is_qualitative'):
+                    combined_criteria[name] = {
+                        'points': [
+                            {'x': 0, 'y': 0},
+                            {'x': 1, 'y': 1},
+                        ]
+                    }
+                else:
+                    if name in criteria_map:
+                        combined_criteria[name] = criteria_map[name]
+        else:
+            combined_criteria = criteria_map
+
+        exported_value_functions = dict(value_functions) if isinstance(value_functions, dict) else {}
+        exported_value_functions['criteria'] = combined_criteria
 
         payload = {
             'session_id': str(session.get('_id')),
             'name': session.get('name'),
-            'value_functions': value_functions,
+            'value_functions': exported_value_functions,
         }
 
         return send_file(
@@ -453,36 +675,16 @@ def export_input_csv(session_id):
         session = db.sessions.find_one({'_id': ObjectId(session_id)})
         if not session:
             return jsonify({'error': 'Session not found'}), 404
-        
-        # Create CSV in memory
-        output = io.StringIO()
-        writer = csv.writer(output)
-        
-        # Header row
-        writer.writerow(['Session Name', session.get('name')])
-        writer.writerow([])  # Empty row
-        
-        # Criteria and alternatives
+
         criteria = session.get('criteria', [])
-        if criteria:
-            writer.writerow(['Criterion', 'Unit', 'Alternative', 'Value'])
-            for criterion in criteria:
-                criterion_name = criterion.get('criterion_name', '')
-                unit = criterion.get('unit', '')
-                alternatives = criterion.get('alternatives', [])
-                
-                for alt in alternatives:
-                    writer.writerow([
-                        criterion_name,
-                        unit,
-                        alt.get('name', ''),
-                        alt.get('value', '')
-                    ])
+        qualitative_indicators = session.get('qualitative_indicators') or {}
+        value_functions = session.get('value_functions') or {}
+        if not _is_qualitative_complete(criteria, qualitative_indicators) or not _is_value_functions_complete(criteria, value_functions):
+            return jsonify({'error': 'Complete qualitative indicators and value functions before export'}), 400
         
-        # Convert to bytes
-        output.seek(0)
+        output = _build_alternatives_csv(criteria, qualitative_indicators)
         return send_file(
-            io.BytesIO(output.getvalue().encode()),
+            io.BytesIO(output.encode()),
             mimetype='text/csv',
             as_attachment=True,
             download_name=f'input_{session.get("name", session_id)}.csv'
@@ -500,10 +702,38 @@ def export_input_json(session_id):
         if not session:
             return jsonify({'error': 'Session not found'}), 404
 
+        criteria = session.get('criteria', [])
+        qualitative_indicators = session.get('qualitative_indicators') or {}
+        value_functions = session.get('value_functions') or {}
+        if not _is_qualitative_complete(criteria, qualitative_indicators) or not _is_value_functions_complete(criteria, value_functions):
+            return jsonify({'error': 'Complete qualitative indicators and value functions before export'}), 400
+
+        updated_criteria = []
+        if isinstance(criteria, list):
+            for criterion in criteria:
+                if not isinstance(criterion, dict):
+                    continue
+                updated = dict(criterion)
+                alternatives = updated.get('alternatives')
+                if isinstance(alternatives, list) and updated.get('is_qualitative'):
+                    new_alts = []
+                    for alt in alternatives:
+                        if not isinstance(alt, dict):
+                            continue
+                        new_alt = dict(alt)
+                        new_alt['value'] = _get_qualitative_alt_value(
+                            qualitative_indicators,
+                            updated.get('criterion_name'),
+                            alt.get('name')
+                        )
+                        new_alts.append(new_alt)
+                    updated['alternatives'] = new_alts
+                updated_criteria.append(updated)
+
         payload = {
             'session_id': str(session.get('_id')),
             'name': session.get('name'),
-            'criteria': session.get('criteria', []),
+            'criteria': updated_criteria,
         }
 
         return send_file(
@@ -511,6 +741,55 @@ def export_input_json(session_id):
             mimetype='application/json',
             as_attachment=True,
             download_name=f'input_{session.get("name", session_id)}.json'
+        )
+    except:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
+# Export raw input data as CSV
+@bp.route('/session/<session_id>/export-input-raw', methods=['GET'])
+def export_input_raw_csv(session_id):
+    """Export raw session input data (criteria and alternatives) as CSV"""
+    db = current_app.db
+    try:
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+
+        criteria = session.get('criteria', [])
+        if not isinstance(criteria, list) or len(criteria) == 0:
+            return jsonify({'error': 'No input data to export'}), 404
+
+        output = _build_input_raw_csv(criteria)
+        return send_file(
+            io.BytesIO(output.encode()),
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'input_raw_{session.get("name", session_id)}.csv'
+        )
+    except:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
+# Export qualitative indicators as CSV
+@bp.route('/session/<session_id>/qualitative/export', methods=['GET'])
+def export_qualitative_csv(session_id):
+    """Export qualitative indicator rankings and values as CSV"""
+    db = current_app.db
+    try:
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+
+        criteria = session.get('criteria', [])
+        qualitative_indicators = session.get('qualitative_indicators') or {}
+        if not _is_qualitative_complete(criteria, qualitative_indicators):
+            return jsonify({'error': 'Complete qualitative indicators before export'}), 400
+
+        output = _build_qualitative_csv(criteria, qualitative_indicators)
+        return send_file(
+            io.BytesIO(output.encode()),
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'qualitative_indicators_{session.get("name", session_id)}.csv'
         )
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
@@ -529,27 +808,9 @@ def export_pile_csv(session_id):
         if bwt_data is None:
             return jsonify({'error': 'No PILE-BWT data to export'}), 404
 
-        output = io.StringIO()
-        writer = csv.writer(output)
-
-        if isinstance(bwt_data, dict) and isinstance(bwt_data.get('comparisons'), list):
-            writer.writerow(['REFERENCE_CRITERION', 'ADJUSTED_CRITERION', 'DATA_VALUE', 'TYPE', 'GROUP'])
-            for comp in bwt_data.get('comparisons', []):
-                if isinstance(comp, dict):
-                    writer.writerow([
-                        comp.get('reference_criterion', ''),
-                        comp.get('adjusted_criterion', ''),
-                        comp.get('data_value', ''),
-                        comp.get('type', ''),
-                        comp.get('group', '')
-                    ])
-        else:
-            writer.writerow(['VALUE'])
-            writer.writerow([bwt_data])
-
-        output.seek(0)
+        output = _build_pile_bwt_csv(bwt_data)
         return send_file(
-            io.BytesIO(output.getvalue().encode()),
+            io.BytesIO(output.encode()),
             mimetype='text/csv',
             as_attachment=True,
             download_name=f'pile_bwt_{session.get("name", session_id)}.csv'
@@ -582,6 +843,52 @@ def export_pile_json(session_id):
             mimetype='application/json',
             as_attachment=True,
             download_name=f'pile_bwt_{session.get("name", session_id)}.json'
+        )
+    except:
+        return jsonify({'error': 'Invalid session ID'}), 400
+
+# Export combined outputs as ZIP
+@bp.route('/session/<session_id>/export-all', methods=['GET'])
+def export_all_outputs_zip(session_id):
+    """Export alternatives, value functions, and PILE-BWT as a ZIP file"""
+    db = current_app.db
+    try:
+        session = db.sessions.find_one({'_id': ObjectId(session_id)})
+        if not session:
+            return jsonify({'error': 'Session not found'}), 404
+
+        criteria = session.get('criteria', [])
+        qualitative_indicators = session.get('qualitative_indicators') or {}
+        value_functions = session.get('value_functions') or {}
+        bwt_data = session.get('bwt')
+
+        if not _is_qualitative_complete(criteria, qualitative_indicators) or not _is_value_functions_complete(criteria, value_functions):
+            return jsonify({'error': 'Complete qualitative indicators and value functions before export'}), 400
+
+        if bwt_data is None:
+            return jsonify({'error': 'Complete PILE-BWT before export'}), 400
+
+        criteria_map = value_functions.get('criteria') if isinstance(value_functions, dict) else {}
+        if not isinstance(criteria_map, dict):
+            criteria_map = {}
+
+        alternatives_csv = _build_alternatives_csv(criteria, qualitative_indicators)
+        value_functions_csv = _build_value_functions_csv(criteria, criteria_map)
+        pile_csv = _build_pile_bwt_csv(bwt_data)
+
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, 'w', zipfile.ZIP_DEFLATED) as zf:
+            session_name = session.get('name', session_id)
+            zf.writestr(f'alternatives_{session_name}.csv', alternatives_csv)
+            zf.writestr(f'value_functions_{session_name}.csv', value_functions_csv)
+            zf.writestr(f'pile_bwt_{session_name}.csv', pile_csv)
+
+        output.seek(0)
+        return send_file(
+            output,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=f'outputs_{session.get("name", session_id)}.zip'
         )
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
