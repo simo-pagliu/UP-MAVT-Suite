@@ -333,8 +333,7 @@ function ValueFunctionsPage({ sessionId }) {
           }
         })
         setValueFunctions(vf)
-        const firstNonQual = crits.find(c => !c.is_qualitative)
-        setActive(firstNonQual ? (firstNonQual.criterion_name || 'Criterion 1') : null)
+        setActive(null)
       } catch (error) {
         toast({
           title: 'Error',
