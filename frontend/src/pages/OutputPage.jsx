@@ -33,14 +33,27 @@ function OutputPage({ sessionId }) {
     return alts.length > 0 && alts.every((alt) => alt?.name && alt?.value !== undefined && alt?.value !== null)
   })
 
+  const qualitativeIndicators = sessionData?.qualitative_indicators || {}
+  const qualitativeCriteria = criteriaList.filter((crit) => crit?.is_qualitative)
+  const hasQualitativeIndicators = qualitativeCriteria.length === 0 || qualitativeCriteria.every((crit) => {
+    const name = crit?.criterion_name
+    const data = name ? qualitativeIndicators[name] : null
+    const ranking = data?.ranking
+    const values = data?.values
+    return ranking && values && Object.keys(ranking).length > 0 && Object.keys(values).length > 0
+  })
+
   const valueFunctions = sessionData?.value_functions
   const vfCriteria = valueFunctions?.criteria || {}
-  const hasValueFunctions = criteriaList.length > 0 && criteriaList.every((crit) => {
+  const nonQualitativeCriteria = criteriaList.filter((crit) => !crit?.is_qualitative)
+  const hasValueFunctions = nonQualitativeCriteria.length === 0 || nonQualitativeCriteria.every((crit) => {
     const name = crit?.criterion_name
     const cfg = name ? vfCriteria[name] : null
     const points = Array.isArray(cfg?.points) ? cfg.points : []
     return points.length > 0
   })
+
+  const hasAlternativesExport = hasAlternatives && hasQualitativeIndicators && hasValueFunctions
 
   const bwtData = sessionData?.bwt
   const comparisons = Array.isArray(bwtData?.comparisons) ? bwtData.comparisons : []
@@ -76,6 +89,7 @@ function OutputPage({ sessionId }) {
   const completedIntraW = !hasMultipleGroups || intraWComps.length >= intraWExpected
 
   const hasBwt = baseGroups.length > 0 && completedBaseGroups && completedIntraB && completedIntraW
+  const hasMainExports = hasAlternativesExport && hasBwt
 
   const handleDownload = async ({ endpoint, filename, successMessage, errorMessage }) => {
     setLoading(true)
@@ -113,18 +127,17 @@ function OutputPage({ sessionId }) {
   }
 
   return (
-    <Box bg="white" p={8} borderRadius="lg" boxShadow="sm">
+    <Box bg="white" p={6} borderRadius="lg" boxShadow="sm">
       <VStack spacing={6} align="stretch">
         <Heading as="h1" size="lg">Output</Heading>
 
         <VStack spacing={4} align="stretch">
-          <Text fontWeight="semibold">Alternatives</Text>
+          <Text fontWeight="semibold">Main Downloads</Text>
           <HStack spacing={3} flexWrap="wrap">
             <Button
-              colorScheme="green"
               size="md"
               isLoading={loading}
-              isDisabled={!hasAlternatives}
+              isDisabled={!hasAlternativesExport}
               onClick={() => handleDownload({
                 endpoint: `/session/${sessionId}/export-input`,
                 filename: `alternatives_${sessionName || sessionId}.csv`,
@@ -132,35 +145,9 @@ function OutputPage({ sessionId }) {
                 errorMessage: 'Failed to download alternatives CSV',
               })}
             >
-              Download CSV
+              Alternatives
             </Button>
             <Button
-              colorScheme="blue"
-              size="md"
-              isLoading={loading}
-              isDisabled={!hasAlternatives}
-              onClick={() => handleDownload({
-                endpoint: `/session/${sessionId}/export-input-json`,
-                filename: `alternatives_${sessionName || sessionId}.json`,
-                successMessage: 'Alternatives JSON downloaded',
-                errorMessage: 'Failed to download alternatives JSON',
-              })}
-            >
-              Download JSON
-            </Button>
-          </HStack>
-          {!hasAlternatives && (
-            <Text fontSize="sm" color="gray.500">
-              Complete the input step to enable downloads.
-            </Text>
-          )}
-        </VStack>
-
-        <VStack spacing={4} align="stretch">
-          <Text fontWeight="semibold">Value Functions</Text>
-          <HStack spacing={3} flexWrap="wrap">
-            <Button
-              colorScheme="green"
               size="md"
               isLoading={loading}
               isDisabled={!hasValueFunctions}
@@ -171,35 +158,9 @@ function OutputPage({ sessionId }) {
                 errorMessage: 'Failed to download value functions CSV',
               })}
             >
-              Download CSV
+              Value Functions
             </Button>
             <Button
-              colorScheme="blue"
-              size="md"
-              isLoading={loading}
-              isDisabled={!hasValueFunctions}
-              onClick={() => handleDownload({
-                endpoint: `/session/${sessionId}/value-functions/export-json`,
-                filename: `value_functions_${sessionName || sessionId}.json`,
-                successMessage: 'Value functions JSON downloaded',
-                errorMessage: 'Failed to download value functions JSON',
-              })}
-            >
-              Download JSON
-            </Button>
-          </HStack>
-          {!hasValueFunctions && (
-            <Text fontSize="sm" color="gray.500">
-              Complete the value functions step to enable downloads.
-            </Text>
-          )}
-        </VStack>
-
-        <VStack spacing={4} align="stretch">
-          <Text fontWeight="semibold">PILE-BWT</Text>
-          <HStack spacing={3} flexWrap="wrap">
-            <Button
-              colorScheme="green"
               size="md"
               isLoading={loading}
               isDisabled={!hasBwt}
@@ -210,26 +171,62 @@ function OutputPage({ sessionId }) {
                 errorMessage: 'Failed to download PILE-BWT CSV',
               })}
             >
-              Download CSV
+              PILE-BWT
             </Button>
             <Button
-              colorScheme="blue"
               size="md"
               isLoading={loading}
-              isDisabled={!hasBwt}
+              isDisabled={!hasMainExports}
               onClick={() => handleDownload({
-                endpoint: `/session/${sessionId}/pile/export-json`,
-                filename: `pile_bwt_${sessionName || sessionId}.json`,
-                successMessage: 'PILE-BWT JSON downloaded',
-                errorMessage: 'Failed to download PILE-BWT JSON',
+                endpoint: `/session/${sessionId}/export-all`,
+                filename: `outputs_${sessionName || sessionId}.zip`,
+                successMessage: 'Outputs ZIP downloaded',
+                errorMessage: 'Failed to download outputs ZIP',
               })}
             >
-              Download JSON
+              Download All (ZIP)
             </Button>
           </HStack>
-          {!hasBwt && (
+          {!hasMainExports && (
             <Text fontSize="sm" color="gray.500">
-              Complete the PILE-BWT step to enable downloads.
+              Complete input, qualitative indicators, value functions, and PILE-BWT to enable all downloads.
+            </Text>
+          )}
+        </VStack>
+
+        <VStack spacing={4} align="stretch">
+          <Text fontWeight="semibold">Raw Data</Text>
+          <HStack spacing={3} flexWrap="wrap">
+            <Button
+              size="md"
+              isLoading={loading}
+              isDisabled={!hasAlternatives}
+              onClick={() => handleDownload({
+                endpoint: `/session/${sessionId}/export-input-raw`,
+                filename: `input_raw_${sessionName || sessionId}.csv`,
+                successMessage: 'Input table CSV downloaded',
+                errorMessage: 'Failed to download input table CSV',
+              })}
+            >
+              Input Table
+            </Button>
+            <Button
+              size="md"
+              isLoading={loading}
+              isDisabled={!hasQualitativeIndicators}
+              onClick={() => handleDownload({
+                endpoint: `/session/${sessionId}/qualitative/export`,
+                filename: `qualitative_indicators_${sessionName || sessionId}.csv`,
+                successMessage: 'Qualitative indicators CSV downloaded',
+                errorMessage: 'Failed to download qualitative indicators CSV',
+              })}
+            >
+              Qualitative Indicators
+            </Button>
+          </HStack>
+          {(!hasAlternatives || !hasQualitativeIndicators) && (
+            <Text fontSize="sm" color="gray.500">
+              Complete input data and qualitative indicators to enable raw downloads.
             </Text>
           )}
         </VStack>
