@@ -162,9 +162,45 @@ def update_criteria(session_id):
         if session.get('locked', False):
             return jsonify({'error': 'Input is locked'}), 423
 
+        # Check for criteria that became qualitative/non-qualitative and update accordingly
+        old_criteria = session.get('criteria', [])
+        value_functions = session.get('value_functions') or {}
+        qualitative_indicators = session.get('qualitative_indicators') or {}
+        
+        # Build maps of criterion names to is_qualitative status
+        old_qualitative_map = {c.get('criterion_name'): c.get('is_qualitative', False) for c in old_criteria}
+        new_qualitative_map = {c.get('criterion_name'): c.get('is_qualitative', False) for c in criteria}
+        
+        # Find criteria that changed from non-qualitative to qualitative (remove from value_functions)
+        became_qualitative = []
+        # Find criteria that changed from qualitative to non-qualitative (remove from qualitative_indicators)
+        became_non_qualitative = []
+        
+        for criterion_name, was_qualitative in old_qualitative_map.items():
+            is_now_qualitative = new_qualitative_map.get(criterion_name, False)
+            if not was_qualitative and is_now_qualitative:
+                became_qualitative.append(criterion_name)
+            elif was_qualitative and not is_now_qualitative:
+                became_non_qualitative.append(criterion_name)
+        
+        # Remove from value_functions if criteria became qualitative
+        if became_qualitative and isinstance(value_functions, dict):
+            criteria_map = value_functions.get('criteria', {})
+            if isinstance(criteria_map, dict):
+                for criterion_name in became_qualitative:
+                    if criterion_name in criteria_map:
+                        del criteria_map[criterion_name]
+                value_functions['criteria'] = criteria_map
+        
+        # Remove from qualitative_indicators if criteria became non-qualitative
+        if became_non_qualitative and isinstance(qualitative_indicators, dict):
+            for criterion_name in became_non_qualitative:
+                if criterion_name in qualitative_indicators:
+                    del qualitative_indicators[criterion_name]
+
         result = db.sessions.update_one(
             {'_id': ObjectId(session_id)},
-            {'$set': {'criteria': criteria}}
+            {'$set': {'criteria': criteria, 'value_functions': value_functions, 'qualitative_indicators': qualitative_indicators}}
         )
         return jsonify({'status': 'updated'}), 200
     except:

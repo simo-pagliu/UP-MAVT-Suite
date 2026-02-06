@@ -69,6 +69,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
   const [criteriaMismatch, setCriteriaMismatch] = useState(false)
   const [criteriaMismatchAcknowledged, setCriteriaMismatchAcknowledged] = useState(false)
   const [isSessionLocked, setIsSessionLocked] = useState(false)
+  const [qualitativeIncomplete, setQualitativeIncomplete] = useState(false)
   const { isOpen, onOpen, onClose } = useDisclosure()
   const cancelRef = useRef()
   const mainContentRef = useRef(null)
@@ -146,6 +147,16 @@ function PileBwtPage({ sessionId, onPageChange }) {
         const session = response.data
         setCriteria(Array.isArray(session.criteria) ? session.criteria : [])
         setIsSessionLocked(session?.session_locked || false)
+
+        // Check if qualitative indicators are incomplete
+        const qualitativeCriteria = (session.criteria || []).filter((c) => c.is_qualitative)
+        if (qualitativeCriteria.length > 0) {
+          const qualitativeData = session.qualitative_indicators || {}
+          const incompleteIndicators = qualitativeCriteria.some(
+            (c) => qualitativeData[c.criterion_name] === undefined
+          )
+          setQualitativeIncomplete(incompleteIndicators)
+        }
 
         if (session.value_functions?.criteria) {
           setValueFunction(session.value_functions.criteria)
@@ -665,6 +676,26 @@ function PileBwtPage({ sessionId, onPageChange }) {
   }
 
   const renderContent = () => {
+    if (qualitativeIncomplete) {
+      return (
+        <Box display="flex" justifyContent="center" alignItems="center" minH="60vh">
+          <VStack spacing={4} textAlign="center" maxW="500px">
+            <Heading size="lg" color="orange.600">Qualitative Indicators Required</Heading>
+            <Text color="gray.700" fontSize="md">
+              You must complete the elicitation of all qualitative indicators before proceeding with the PILE-BWT analysis.
+            </Text>
+            <Button
+              colorScheme="blue"
+              size="lg"
+              onClick={() => onPageChange('qualitative')}
+            >
+              Go to Qualitative Indicators
+            </Button>
+          </VStack>
+        </Box>
+      )
+    }
+
     const selectedGroup = selectedGroupIndex !== null ? allGroups[selectedGroupIndex] : null
     if (selectedGroup?.isIntra && !selectedGroup.isReady) {
       return (
@@ -1531,6 +1562,26 @@ function PileBwtPage({ sessionId, onPageChange }) {
               🔒 Session is locked. Editing is disabled.
             </Text>
           </Box>
+        )}
+        {qualitativeIncomplete && (
+          <Alert
+            status="warning"
+            variant="subtle"
+            flexDirection="column"
+            alignItems="flex-start"
+            mb={4}
+            borderRadius="md"
+          >
+            <HStack alignItems="flex-start">
+              <AlertIcon mt={1} />
+              <Box>
+                <AlertTitle>Qualitative Indicators Required</AlertTitle>
+                <AlertDescription>
+                  Please complete the elicitation of all qualitative indicators before proceeding with the PILE-BWT analysis.
+                </AlertDescription>
+              </Box>
+            </HStack>
+          </Alert>
         )}
         {renderContent()}
       </Box>

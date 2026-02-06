@@ -333,7 +333,8 @@ function ValueFunctionsPage({ sessionId }) {
           }
         })
         setValueFunctions(vf)
-        setActive(crits[0] ? (crits[0].criterion_name || 'Criterion 1') : null)
+        const firstNonQual = crits.find(c => !c.is_qualitative)
+        setActive(firstNonQual ? (firstNonQual.criterion_name || 'Criterion 1') : null)
       } catch (error) {
         toast({
           title: 'Error',
@@ -608,13 +609,15 @@ function ValueFunctionsPage({ sessionId }) {
   }
 
   const progress = useMemo(() => {
-    if (!criteria.length) return 0
-    const filled = criteria.filter((c) => {
+    // Only count non-qualitative criteria
+    const nonQualCriteria = criteria.filter(c => !c.is_qualitative)
+    if (!nonQualCriteria.length) return 0
+    const filled = nonQualCriteria.filter((c) => {
       const name = c.criterion_name || `Criterion ${criteria.indexOf(c) + 1}`
       const entry = valueFunctions[name]
       return entry && Array.isArray(entry.points) && entry.points.length >= 2
     }).length
-    return Math.round((filled / criteria.length) * 100)
+    return Math.round((filled / nonQualCriteria.length) * 100)
   }, [criteria, valueFunctions])
 
   if (loading) {
@@ -660,7 +663,7 @@ function ValueFunctionsPage({ sessionId }) {
           <Text fontWeight="semibold">Criteria</Text>
           <Box border="1px solid" borderColor="gray.200" borderRadius="md" maxH="480px" overflowY="auto">
             <VStack align="stretch" spacing={1} p={2}>
-              {criteria.map((criterion, idx) => {
+              {criteria.filter(c => !c.is_qualitative).map((criterion, idx) => {
                 const name = criterion.criterion_name || `Criterion ${idx + 1}`
                 const entry = valueFunctions[name]
                 

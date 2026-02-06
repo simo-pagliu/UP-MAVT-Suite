@@ -19,6 +19,7 @@ import {
   HStack,
   Text,
   Divider,
+  Checkbox,
 } from '@chakra-ui/react'
 import axios from 'axios'
 import { useState, useEffect } from 'react'
@@ -47,6 +48,7 @@ function InputPage({ onSessionCreated, sessionId }) {
       unit: c.unit || '',
       group: c.group || '',
       description: c.description || '',
+      is_qualitative: c.is_qualitative || false,
       alternatives: Array.isArray(c.alternatives) ? c.alternatives : [],
     }))
   }
@@ -301,6 +303,7 @@ function InputPage({ onSessionCreated, sessionId }) {
           group: groups[idx] || '',
           description: descriptions[idx] || '',
           unit: units[idx],
+          is_qualitative: false,
           alternatives
         }
       })
@@ -396,6 +399,7 @@ function InputPage({ onSessionCreated, sessionId }) {
       criterion_name: '',
       group: '',
       description: '',
+      is_qualitative: false,
       unit: '',
       alternatives: Array(alternativeCount).fill(null).map((_, idx) => ({
         name: criteria[0].alternatives[idx].name,
@@ -760,7 +764,7 @@ function InputPage({ onSessionCreated, sessionId }) {
                   <Tr>
                     <Th minW="150px">Alternative</Th>
                     {criteria.map((criterion, idx) => (
-                      <Th key={idx} minW="180px">
+                      <Th key={idx} minW="220px">
                         <VStack spacing={2} align="stretch">
                           <Input
                             value={criterion.criterion_name}
@@ -798,6 +802,14 @@ function InputPage({ onSessionCreated, sessionId }) {
                             bg="white"
                             isDisabled={isInputLocked}
                           />
+                          <Checkbox
+                            isChecked={criterion.is_qualitative}
+                            onChange={(e) => handleCellChange(idx, 'is_qualitative', e.target.checked)}
+                            isDisabled={isInputLocked}
+                            size="sm"
+                          >
+                            <Text fontSize="xs">Qualitative</Text>
+                          </Checkbox>
                         </VStack>
                       </Th>
                     ))}
