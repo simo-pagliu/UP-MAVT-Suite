@@ -413,25 +413,47 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
 
     let minVal, maxVal
 
-    // Better ranks (lower rank numbers) should always have higher or equal utility values
-    // Rank 0 (best) should be >= all others, rank N-1 (worst) should be <= all others
-    // value[rank_i] >= value[rank_j] where rank_i < rank_j
-    
-    // Lower bound: must be >= any worse ranked alternative's value
-    // Worse ranks have higher rank numbers (later in uniqueRanks array)
-    minVal = 0
-    for (let i = rankIndex + 1; i < uniqueRanks.length; i++) {
-      if (adjustedValues[uniqueRanks[i]] !== undefined) {
-        minVal = Math.max(minVal, adjustedValues[uniqueRanks[i]])
+    if (isIncreasing) {
+      // Increasing: Better ranks (lower rank numbers) should have HIGHER utility values
+      // value[rank_i] >= value[rank_j] where rank_i < rank_j
+      
+      // Lower bound: must be >= any worse ranked alternative's value
+      // Worse ranks have higher rank numbers (later in uniqueRanks array)
+      minVal = 0
+      for (let i = rankIndex + 1; i < uniqueRanks.length; i++) {
+        if (adjustedValues[uniqueRanks[i]] !== undefined) {
+          minVal = Math.max(minVal, adjustedValues[uniqueRanks[i]])
+        }
       }
-    }
-    
-    // Upper bound: must be <= any better ranked alternative's value
-    // Better ranks have lower rank numbers (earlier in uniqueRanks array)
-    maxVal = 1
-    for (let i = 0; i < rankIndex; i++) {
-      if (adjustedValues[uniqueRanks[i]] !== undefined) {
-        maxVal = Math.min(maxVal, adjustedValues[uniqueRanks[i]])
+      
+      // Upper bound: must be <= any better ranked alternative's value
+      // Better ranks have lower rank numbers (earlier in uniqueRanks array)
+      maxVal = 1
+      for (let i = 0; i < rankIndex; i++) {
+        if (adjustedValues[uniqueRanks[i]] !== undefined) {
+          maxVal = Math.min(maxVal, adjustedValues[uniqueRanks[i]])
+        }
+      }
+    } else {
+      // Decreasing: Better ranks (lower rank numbers) should have LOWER utility values
+      // value[rank_i] <= value[rank_j] where rank_i < rank_j
+      
+      // Upper bound: must be <= any worse ranked alternative's value
+      // Worse ranks have higher rank numbers (later in uniqueRanks array)
+      maxVal = 1
+      for (let i = rankIndex + 1; i < uniqueRanks.length; i++) {
+        if (adjustedValues[uniqueRanks[i]] !== undefined) {
+          maxVal = Math.min(maxVal, adjustedValues[uniqueRanks[i]])
+        }
+      }
+      
+      // Lower bound: must be >= any better ranked alternative's value
+      // Better ranks have lower rank numbers (earlier in uniqueRanks array)
+      minVal = 0
+      for (let i = 0; i < rankIndex; i++) {
+        if (adjustedValues[uniqueRanks[i]] !== undefined) {
+          minVal = Math.max(minVal, adjustedValues[uniqueRanks[i]])
+        }
       }
     }
 
@@ -440,12 +462,22 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
   }
 
   const handleToggleDirection = () => {
-    // Invert all values
-    const inverted = {}
-    Object.entries(adjustedValues).forEach(([rank, val]) => {
-      inverted[rank] = 1 - val
+    // Reset to linear interpolation when toggling direction
+    const totalPoints = uniqueRanks.length + 2 // hypothetical worst + ranks + hypothetical best
+    const linearValues = {}
+    
+    uniqueRanks.forEach((rank, idx) => {
+      const xPos = uniqueRanks.length - idx // rank 0→xPos=N, rank N-1→xPos=1
+      let linearY = xPos / (totalPoints - 1)
+      
+      // If currently increasing and switching to decreasing, invert the linear values
+      if (isIncreasing) {
+        linearY = 1 - linearY
+      }
+      linearValues[rank] = linearY
     })
-    setAdjustedValues(inverted)
+    
+    setAdjustedValues(linearValues)
     setIsIncreasing(!isIncreasing)
   }
 
@@ -569,11 +601,48 @@ function QualitativeIndicatorsPage({ sessionId }) {
     fetchSession()
   }, [sessionId, toast])
 
+  // Helper function to detect if ranking order has changed
+  const hasRankingOrderChanged = (oldRanking, newRanking) => {
+    if (!oldRanking || !newRanking) return false
+    
+    // Get ordered lists of alternatives by rank
+    const oldOrder = Object.entries(oldRanking)
+      .sort((a, b) => a[1] - b[1])
+      .map(([alt]) => alt)
+    
+    const newOrder = Object.entries(newRanking)
+      .sort((a, b) => a[1] - b[1])
+      .map(([alt]) => alt)
+    
+    return JSON.stringify(oldOrder) !== JSON.stringify(newOrder)
+  }
+
+  // Helper function to load indicator data from DB
+  // Accepts dataStore parameter to handle cases where we need to use updated data before state renders
+  const loadIndicatorData = (idx, criterionName, dataStore = null) => {
+    const store = dataStore !== null ? dataStore : qualitativeData
+    const savedData = store[criterionName]
+    
+    if (savedData && savedData.ranking) {
+      // Data exists in DB - load it and go to adjustment phase
+      setCurrentRanking(savedData.ranking)
+      setSavedValues(savedData.values || null)
+      setSavedIsIncreasing(savedData.isIncreasing !== undefined ? savedData.isIncreasing : null)
+      setPhase('adjustment')
+    } else {
+      // No data in DB - start fresh from ranking phase
+      setCurrentRanking(null)
+      setSavedValues(null)
+      setSavedIsIncreasing(null)
+      setPhase('ranking')
+    }
+  }
+
   const handlePhase1Complete = (ranking) => {
-    // Check if ranking has changed compared to saved data
+    // Check if ranking order has changed compared to saved data
     const savedData = qualitativeData[activeIndicator.criterion_name]
-    if (savedData && JSON.stringify(savedData.ranking) !== JSON.stringify(ranking)) {
-      // Ranking changed, clear saved values
+    if (savedData && hasRankingOrderChanged(savedData.ranking, ranking)) {
+      // Ranking order changed, clear saved values so user re-elicits them
       setSavedValues(null)
       setSavedIsIncreasing(null)
     }
@@ -662,11 +731,9 @@ function QualitativeIndicatorsPage({ sessionId }) {
 
       // Move to next indicator or finish
       if (activeIndicatorIdx !== null && activeIndicatorIdx < qualitativeCriteria.length - 1) {
-        setActiveIndicatorIdx(activeIndicatorIdx + 1)
-        setPhase('ranking')
-        setCurrentRanking(null)
-        setSavedValues(null)
-        setSavedIsIncreasing(null)
+        const newIdx = activeIndicatorIdx + 1
+        setActiveIndicatorIdx(newIdx)
+        loadIndicatorData(newIdx, qualitativeCriteria[newIdx].criterion_name, updatedData)
       } else {
         toast({
           title: 'Complete',
@@ -686,6 +753,61 @@ function QualitativeIndicatorsPage({ sessionId }) {
       })
     } finally {
       setSaving(false)
+    }
+  }
+
+  // Handle sidebar navigation - save current indicator before switching
+  const handleSidebarNavigate = async (idx) => {
+    // If currently in adjustment phase with data, save before navigating
+    if (phase === 'adjustment' && currentRanking && activeIndicator) {
+      if (isSessionLocked) {
+        toast({
+          title: 'Session locked',
+          description: 'This session is locked. You cannot save changes.',
+          status: 'warning',
+          duration: 3,
+          isClosable: true,
+        })
+        return
+      }
+
+      setSaving(true)
+      try {
+        const data = {
+          ranking: currentRanking,
+          values: currentAdjustedValues,
+          isIncreasing: currentIsIncreasing,
+        }
+        
+        const updatedData = {
+          ...qualitativeData,
+          [activeIndicator.criterion_name]: data,
+        }
+        
+        await axios.put(`${API_URL}/session/${sessionId}/qualitative`, {
+          value: updatedData,
+        })
+
+        setQualitativeData(updatedData)
+        
+        // Now load the clicked indicator with updated data
+        setActiveIndicatorIdx(idx)
+        loadIndicatorData(idx, qualitativeCriteria[idx].criterion_name, updatedData)
+      } catch (error) {
+        toast({
+          title: 'Error',
+          description: error.response?.data?.error || 'Failed to save',
+          status: 'error',
+          duration: 3,
+          isClosable: true,
+        })
+      } finally {
+        setSaving(false)
+      }
+    } else {
+      // Not in adjustment phase or no data to save, just navigate
+      setActiveIndicatorIdx(idx)
+      loadIndicatorData(idx, qualitativeCriteria[idx].criterion_name)
     }
   }
 
@@ -742,27 +864,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
                 borderWidth="1px"
                 borderColor={isActive ? 'blue.600' : isComplete ? 'green.300' : 'gray.300'}
                 _hover={{ shadow: 'sm' }}
-                onClick={() => {
-                    // Check if there's saved data for this indicator
-                    const savedData = qualitativeData[qualitativeCriteria[idx].criterion_name]
-                    if (savedData) {
-                      // Restore saved state including values and direction
-                      setActiveIndicatorIdx(idx)
-                      setCurrentRanking(savedData.ranking)
-                      setSavedValues(savedData.values)
-                      setSavedIsIncreasing(savedData.isIncreasing)
-                      setPhase('adjustment')
-                    } else {
-                      // New indicator - start fresh only if switching to a different indicator
-                      if (idx !== activeIndicatorIdx) {
-                        setActiveIndicatorIdx(idx)
-                        setPhase('ranking')
-                        setCurrentRanking(null)
-                        setSavedValues(null)
-                        setSavedIsIncreasing(null)
-                      }
-                    }
-                  }}
+                onClick={() => handleSidebarNavigate(idx)}
                 >
                   <HStack justify="space-between">
                     <Text
@@ -834,11 +936,9 @@ function QualitativeIndicatorsPage({ sessionId }) {
                             leftIcon={<ArrowBackIcon />}
                             onClick={() => {
                               if (activeIndicatorIdx > 0) {
-                                setActiveIndicatorIdx(activeIndicatorIdx - 1)
-                                setPhase('ranking')
-                                setCurrentRanking(null)
-                                setSavedValues(null)
-                                setSavedIsIncreasing(null)
+                                const newIdx = activeIndicatorIdx - 1
+                                setActiveIndicatorIdx(newIdx)
+                                loadIndicatorData(newIdx, qualitativeCriteria[newIdx].criterion_name)
                               }
                             }}
                             isDisabled={activeIndicatorIdx === 0}
@@ -853,7 +953,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
                               if (!currentRanking) return
                               // Ranking complete: go to adjustment for the current indicator
                               const savedData = qualitativeData[activeIndicator.criterion_name]
-                              if (savedData && JSON.stringify(savedData.ranking) !== JSON.stringify(currentRanking)) {
+                              if (savedData && hasRankingOrderChanged(savedData.ranking, currentRanking)) {
                                 setSavedValues(null)
                                 setSavedIsIncreasing(null)
                               }
@@ -897,6 +997,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
 
                 {phase === 'ranking' ? (
                   <TierlistPhase
+                    key={`tierlist_${activeIndicator.criterion_name}`}
                     alternatives={activeIndicator.alternatives.map((alt) => alt.name)}
                     onComplete={handlePhase1Complete}
                     isDisabled={isSessionLocked}
@@ -908,6 +1009,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
                   />
                 ) : (
                   <SliderPhase
+                    key={`slider_${activeIndicator.criterion_name}`}
                     ranking={currentRanking}
                     alternatives={activeIndicator.alternatives.map((alt) => alt.name)}
                     onComplete={handlePhase2Complete}
