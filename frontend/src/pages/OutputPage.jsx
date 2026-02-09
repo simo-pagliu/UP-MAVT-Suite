@@ -1,14 +1,20 @@
 import { Box, Button, Heading, HStack, Text, VStack, useToast } from '@chakra-ui/react'
 import axios from 'axios'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
 
 const API_URL = 'http://localhost:5000/api'
 
-function OutputPage({ sessionId }) {
+function OutputPage({ sessionId }, ref) {
   const [loading, setLoading] = useState(false)
   const [sessionName, setSessionName] = useState('')
   const [sessionData, setSessionData] = useState(null)
   const toast = useToast()
+
+  useImperativeHandle(ref, () => ({
+    async saveBeforeNavigate() {
+      // OutputPage does not have persistent state
+    },
+  }))
 
   useEffect(() => {
     const fetchSessionData = async () => {
@@ -235,4 +241,4 @@ function OutputPage({ sessionId }) {
   )
 }
 
-export default OutputPage
+export default forwardRef(OutputPage)

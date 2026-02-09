@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, forwardRef, useImperativeHandle } from 'react'
 import {
   Box,
   Heading,
@@ -40,7 +40,7 @@ import {
 import { LockIcon, UnlockIcon, SettingsIcon } from '@chakra-ui/icons'
 import { useRef } from 'react'
 
-function AdminPage() {
+function AdminPage(props, ref) {
   const [sessions, setSessions] = useState([])
   const [loading, setLoading] = useState(true)
   const [deleteId, setDeleteId] = useState(null)
@@ -56,6 +56,12 @@ function AdminPage() {
   const cancelRef = useRef()
   const toast = useToast()
   const [selectedSession, setSelectedSession] = useState(null)
+
+  useImperativeHandle(ref, () => ({
+    async saveBeforeNavigate() {
+      // AdminPage does not have persistent state
+    },
+  }))
 
   // Check if already authenticated on mount
   useEffect(() => {
@@ -509,4 +515,4 @@ function AdminPage() {
   )
 }
 
-export default AdminPage
+export default forwardRef(AdminPage)

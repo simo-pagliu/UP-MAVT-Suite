@@ -31,7 +31,7 @@ import {
 } from '@chakra-ui/react'
 import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
 import axios from 'axios'
-import { useEffect, useMemo, useState, useRef } from 'react'
+import { useEffect, useMemo, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import {
   LineChart,
   Line,
@@ -48,11 +48,12 @@ import {
 
 const API_URL = 'http://localhost:5000/api'
 
-function PileBwtPage({ sessionId, onPageChange }) {
+function PileBwtPage({ sessionId, onPageChange }, ref) {
   const [criteria, setCriteria] = useState([])
   const [valueFunction, setValueFunction] = useState({})
   const [loading, setLoading] = useState(true)
   const [groups, setGroups] = useState([])
+  const [qualitativeIndicators, setQualitativeIndicators] = useState({})
   const [selectedGroupIndex, setSelectedGroupIndex] = useState(null)
   const [step, setStep] = useState('idle')
   const [selectionStep, setSelectionStep] = useState(null) // 'select-best' or 'select-worst'
@@ -74,6 +75,15 @@ function PileBwtPage({ sessionId, onPageChange }) {
   const cancelRef = useRef()
   const mainContentRef = useRef(null)
   const toast = useToast()
+  const lastIntraMissingKeyRef = useRef(null)
+
+  // Expose save method for navigation
+  useImperativeHandle(ref, () => ({
+    async saveBeforeNavigate() {
+      // PileBwtPage auto-saves on every action, so nothing extra needed
+      // This method is here for consistency with other pages
+    },
+  }))
 
   const getCriteriaSignature = (criteriaList) => {
     const normalized = (criteriaList || []).map((crit) => ({
@@ -140,6 +150,51 @@ function PileBwtPage({ sessionId, onPageChange }) {
     ]
   }, [groups, comparisons, criteria])
 
+  const buildQualitativeValueFunctionMap = (criteriaList, qualitativeData) => {
+    const vfMap = {}
+    const list = Array.isArray(criteriaList) ? criteriaList : []
+
+    list.forEach((criterion) => {
+      if (!criterion?.is_qualitative) return
+      const name = criterion.criterion_name
+      if (!name) return
+      const qData = qualitativeData?.[name]
+      if (!qData || !qData.values || !qData.ranking) return
+
+      const ranks = Object.values(qData.ranking)
+        .map((rank) => Number(rank))
+        .filter((rank) => Number.isFinite(rank))
+
+      if (!ranks.length) return
+
+      const uniqueRanks = Array.from(new Set(ranks)).sort((a, b) => a - b)
+      const worstToBest = [...uniqueRanks].reverse()
+      const denom = Math.max(worstToBest.length - 1, 1)
+      const isIncreasing = qData.isIncreasing !== undefined ? qData.isIncreasing : true
+
+      const points = worstToBest
+        .map((rank, idx) => {
+          const value = Number(qData.values?.[rank])
+          if (!Number.isFinite(value)) return null
+          const x = denom === 0 ? 0.5 : idx / denom
+          return { x, y: value }
+        })
+        .filter(Boolean)
+
+      // Add hypothetical extremes for qualitative value functions
+      const minPoint = { x: 0, y: isIncreasing ? 0 : 1 }
+      const maxPoint = { x: 1, y: isIncreasing ? 1 : 0 }
+      const withoutEndpoints = points.filter((p) => p.x !== 0 && p.x !== 1)
+      const withExtremes = [minPoint, ...withoutEndpoints, maxPoint]
+
+      if (withExtremes.length > 0) {
+        vfMap[name] = { points: withExtremes }
+      }
+    })
+
+    return vfMap
+  }
+
   useEffect(() => {
     const fetchSession = async () => {
       try {
@@ -156,11 +211,17 @@ function PileBwtPage({ sessionId, onPageChange }) {
             (c) => qualitativeData[c.criterion_name] === undefined
           )
           setQualitativeIncomplete(incompleteIndicators)
+          setQualitativeIndicators(qualitativeData)
+        } else {
+          setQualitativeIndicators({})
         }
 
-        if (session.value_functions?.criteria) {
-          setValueFunction(session.value_functions.criteria)
-        }
+        const existingValueFunctions = session.value_functions?.criteria || {}
+        const qualitativeVfMap = buildQualitativeValueFunctionMap(session.criteria, session.qualitative_indicators || {})
+        setValueFunction({
+          ...existingValueFunctions,
+          ...qualitativeVfMap,
+        })
 
         const groupedCriteria = {}
         session.criteria.forEach((crit) => {
@@ -230,6 +291,40 @@ function PileBwtPage({ sessionId, onPageChange }) {
       }
     }
   }, [loading, bwtSignature, criteriaSignature, comparisons.length])
+
+  const buildBwtPayload = (comps) => ({
+    comparisons: comps,
+    criteria_signature: criteriaSignature,
+  })
+
+  // Clean up intra-group comparisons ONLY when intra-groups report missing group data
+  useEffect(() => {
+    if (selectedGroupIndex === null || allGroups.length === 0) return
+
+    const selectedGroup = allGroups[selectedGroupIndex]
+    if (!selectedGroup?.isIntra || selectedGroup.isReady) return
+
+    const missingKey = `${selectedGroup.name}:${(selectedGroup.missingGroups || []).join(',')}`
+    if (lastIntraMissingKeyRef.current === missingKey) return
+
+    lastIntraMissingKeyRef.current = missingKey
+
+    const groupsToClean = allGroups.filter((g) => g.isIntra).map((g) => g.name)
+    const cleanedComparisons = comparisons.filter((c) => !groupsToClean.includes(c.group))
+
+    const saveCleanedData = async () => {
+      try {
+        await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
+          value: buildBwtPayload(cleanedComparisons),
+        })
+      } catch (error) {
+        console.error('Failed to save cleaned BWT data:', error)
+      }
+    }
+
+    saveCleanedData()
+    setComparisons(cleanedComparisons)
+  }, [allGroups, comparisons, selectedGroupIndex, sessionId])
 
   useEffect(() => {
     if (!loading && allGroups.length > 0 && selectedGroupIndex !== null) {
@@ -307,11 +402,6 @@ function PileBwtPage({ sessionId, onPageChange }) {
     }
   }, [sliderValue])
 
-  const buildBwtPayload = (comps) => ({
-    comparisons: comps,
-    criteria_signature: criteriaSignature,
-  })
-
   const ensureSessionUnlocked = () => {
     if (!isSessionLocked) return true
     toast({
@@ -339,6 +429,7 @@ function PileBwtPage({ sessionId, onPageChange }) {
       setCriteriaMismatch(false)
       setCriteriaMismatchAcknowledged(false)
       setBwtSignature(criteriaSignature)
+      lastIntraMissingKeyRef.current = null
       toast({
         title: 'BWT reset',
         description: 'Please redo the elicitation process.',
@@ -418,6 +509,9 @@ function PileBwtPage({ sessionId, onPageChange }) {
   }
 
   const getDataRange = (criterion) => {
+    if (criterion?.is_qualitative) {
+      return { min: 0, max: 1 }
+    }
     const alternatives = criterion.alternatives || []
     const values = alternatives.map((alt) => Number(alt.value)).filter((v) => isFinite(v))
     if (values.length === 0) return { min: 0, max: 1 }
@@ -1592,4 +1686,4 @@ function PileBwtPage({ sessionId, onPageChange }) {
   )
 }
 
-export default PileBwtPage
+export default forwardRef(PileBwtPage)

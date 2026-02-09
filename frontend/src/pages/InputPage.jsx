@@ -1,5 +1,5 @@
 import { AddIcon, DeleteIcon } from '@chakra-ui/icons'
-import { useRef } from 'react'
+import { useRef, forwardRef, useImperativeHandle } from 'react'
 import {
   Box,
   Button,
@@ -26,7 +26,7 @@ import { useState, useEffect } from 'react'
 
 const API_URL = 'http://localhost:5000/api'
 
-function InputPage({ onSessionCreated, sessionId }) {
+function InputPage({ onSessionCreated, sessionId }, ref) {
   const [name, setName] = useState('')
   const [criteria, setCriteria] = useState([])
   const [loading, setLoading] = useState(false)
@@ -37,8 +37,16 @@ function InputPage({ onSessionCreated, sessionId }) {
   const [isLocked, setIsLocked] = useState(false)
   const [isSessionLocked, setIsSessionLocked] = useState(false)
   const [hasModifiedInput, setHasModifiedInput] = useState(false)
+  
   const toast = useToast()
   const fileInputRef = useRef(null)
+  
+  useImperativeHandle(ref, () => ({
+    async saveBeforeNavigate() {
+      // InputPage does not have persistent state
+    },
+  }))
+  
   const isInputLocked = isLocked || isSessionLocked
 
   const normalizeCriteria = (items) => {
@@ -869,4 +877,4 @@ function InputPage({ onSessionCreated, sessionId }) {
   )
 }
 
-export default InputPage
+export default forwardRef(InputPage)
