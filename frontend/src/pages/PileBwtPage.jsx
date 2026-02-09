@@ -75,7 +75,6 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   const cancelRef = useRef()
   const mainContentRef = useRef(null)
   const toast = useToast()
-  const lastIntraMissingKeyRef = useRef(null)
 
   // Expose save method for navigation
   useImperativeHandle(ref, () => ({
@@ -297,35 +296,6 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     criteria_signature: criteriaSignature,
   })
 
-  // Clean up intra-group comparisons ONLY when intra-groups report missing group data
-  useEffect(() => {
-    if (selectedGroupIndex === null || allGroups.length === 0) return
-
-    const selectedGroup = allGroups[selectedGroupIndex]
-    if (!selectedGroup?.isIntra || selectedGroup.isReady) return
-
-    const missingKey = `${selectedGroup.name}:${(selectedGroup.missingGroups || []).join(',')}`
-    if (lastIntraMissingKeyRef.current === missingKey) return
-
-    lastIntraMissingKeyRef.current = missingKey
-
-    const groupsToClean = allGroups.filter((g) => g.isIntra).map((g) => g.name)
-    const cleanedComparisons = comparisons.filter((c) => !groupsToClean.includes(c.group))
-
-    const saveCleanedData = async () => {
-      try {
-        await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
-          value: buildBwtPayload(cleanedComparisons),
-        })
-      } catch (error) {
-        console.error('Failed to save cleaned BWT data:', error)
-      }
-    }
-
-    saveCleanedData()
-    setComparisons(cleanedComparisons)
-  }, [allGroups, comparisons, selectedGroupIndex, sessionId])
-
   useEffect(() => {
     if (!loading && allGroups.length > 0 && selectedGroupIndex !== null) {
       const selectedGroup = allGroups[selectedGroupIndex]
@@ -391,7 +361,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             c.adjusted_criterion === targetPair.adjusted.criterion_name &&
             c.group === groupName
         )
-        setSliderValue(existing ? existing.data_value : getDataRange(targetPair.adjusted).min)
+        setSliderValue(existing ? existing.data_value : getWorstDataValue(targetPair.adjusted))
       }
     }
   }, [loading, allGroups, selectedGroupIndex, comparisons, currentPairIndex, step, bestCriterion, worstCriterion])
@@ -429,7 +399,6 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       setCriteriaMismatch(false)
       setCriteriaMismatchAcknowledged(false)
       setBwtSignature(criteriaSignature)
-      lastIntraMissingKeyRef.current = null
       toast({
         title: 'BWT reset',
         description: 'Please redo the elicitation process.',
@@ -480,7 +449,14 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     if (!ensureSessionUnlocked()) return
     const groupName = allGroups[selectedGroupIndex]?.name
     if (!groupName) return
-    const newComparisons = comparisons.filter((c) => c.group !== groupName)
+    
+    // When resetting a base group, also clear intra-groups since they depend on base groups
+    const groupsToRemove = [groupName]
+    if (groupName !== 'intra-B' && groupName !== 'intra-W') {
+      groupsToRemove.push('intra-B', 'intra-W')
+    }
+    
+    const newComparisons = comparisons.filter((c) => !groupsToRemove.includes(c.group))
     setComparisons(newComparisons)
     setBestCriterion(null)
     setWorstCriterion(null)
