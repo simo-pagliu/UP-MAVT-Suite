@@ -363,6 +363,40 @@ def _get_qualitative_alt_value(qualitative_indicators, criterion_name, alt_name)
         return ''
     return values.get(rank_int, values.get(str(rank_int), ''))
 
+def _get_qualitative_x_value(qualitative_indicators, criterion_name, alt_name):
+    """Get the X value (normalized position) for a qualitative alternative based on its rank"""
+    if not isinstance(qualitative_indicators, dict):
+        return ''
+    data = qualitative_indicators.get(criterion_name) if criterion_name else None
+    if not isinstance(data, dict):
+        return ''
+    ranking = data.get('ranking')
+    if not isinstance(ranking, dict):
+        return ''
+    
+    # Get the rank for this alternative
+    rank = ranking.get(alt_name)
+    if rank is None:
+        return ''
+    
+    # Get all unique ranks to calculate position
+    unique_ranks = sorted(set(ranking.values()))
+    if len(unique_ranks) == 0:
+        return ''
+    
+    total_points = len(unique_ranks) + 2  # hypothetical worst + ranks + hypothetical best
+    
+    # Find the position of this rank (reversed because worst=rank N-1, best=rank 0)
+    rank_list = list(reversed(unique_ranks))
+    if rank not in rank_list:
+        return ''
+    
+    idx = rank_list.index(rank)
+    x_pos = idx + 1
+    x_normalized = x_pos / (total_points - 1)
+    
+    return x_normalized
+
 def _build_input_raw_csv(criteria):
     output = io.StringIO()
     writer = csv.writer(output)
@@ -397,13 +431,23 @@ def _build_alternatives_csv(criteria, qualitative_indicators):
         for alt in alternatives:
             if not isinstance(alt, dict):
                 continue
-            alt_value = alt.get('value', '')
+            # For qualitative criteria, use X from value functions; for others, use original value
             if criterion.get('is_qualitative'):
-                alt_value = _get_qualitative_alt_value(
+                alt_value = _get_qualitative_x_value(
                     qualitative_indicators,
                     criterion_name,
                     alt.get('name')
                 )
+            else:
+                alt_value = alt.get('value', '')
+            
+            # Round numeric values to 3 decimal places
+            if alt_value != '' and alt_value is not None:
+                try:
+                    alt_value = round(float(alt_value), 3)
+                except (TypeError, ValueError):
+                    pass
+            
             writer.writerow([
                 criterion_name,
                 unit,
@@ -436,7 +480,64 @@ def _build_qualitative_csv(criteria, qualitative_indicators):
             writer.writerow([name, alt_name, rank if rank is not None else '', value])
     return output.getvalue()
 
-def _build_value_functions_csv(criteria, criteria_map):
+def _generate_qualitative_value_function(qualitative_indicators, criterion_name):
+    """Generate value function points for a qualitative indicator from its ranking and values"""
+    if not isinstance(qualitative_indicators, dict):
+        return []
+    
+    data = qualitative_indicators.get(criterion_name) if criterion_name else None
+    if not isinstance(data, dict):
+        return []
+    
+    ranking = data.get('ranking')
+    values = data.get('values')
+    is_increasing = data.get('isIncreasing', True)
+    
+    if not isinstance(ranking, dict) or not isinstance(values, dict):
+        return []
+    
+    # Get unique ranks and sort them
+    unique_ranks = sorted(set(ranking.values()))
+    
+    if len(unique_ranks) == 0:
+        return []
+    
+    points = []
+    total_points = len(unique_ranks) + 2  # hypothetical worst + ranks + hypothetical best
+    
+    # Add hypothetical worst point at x=0
+    if is_increasing:
+        points.append({'x': 0, 'y': 0})
+    else:
+        points.append({'x': 0, 'y': 1})
+    
+    # Add ranked alternatives (equally spaced on x-axis)
+    # X-axis goes from left to right: worst (rank N-1) → best (rank 0)
+    for idx, rank in enumerate(reversed(unique_ranks)):
+        x_pos = idx + 1
+        # Convert to normalized x-value (0 to 1 range)
+        x_normalized = x_pos / (total_points - 1)
+        
+        # Get the adjusted y-value for this rank
+        y_value = values.get(rank)
+        if y_value is None:
+            # Try with string key
+            y_value = values.get(str(rank))
+        if y_value is None:
+            # Fallback to linear interpolation
+            y_value = x_normalized
+        
+        points.append({'x': x_normalized, 'y': y_value})
+    
+    # Add hypothetical best point at x=1
+    if is_increasing:
+        points.append({'x': 1, 'y': 1})
+    else:
+        points.append({'x': 1, 'y': 0})
+    
+    return points
+
+def _build_value_functions_csv(criteria, criteria_map, qualitative_indicators=None):
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(['CRITERION_NAME', 'LIST OF POINTS'])
@@ -449,10 +550,8 @@ def _build_value_functions_csv(criteria, criteria_map):
             if not name:
                 continue
             if criterion.get('is_qualitative'):
-                points = [
-                    {'x': 0, 'y': 0},
-                    {'x': 1, 'y': 1},
-                ]
+                # For qualitative indicators, generate value function from ranking and values
+                points = _generate_qualitative_value_function(qualitative_indicators, name)
             else:
                 cfg = criteria_map.get(name) if isinstance(criteria_map, dict) else None
                 points = cfg.get('points') if isinstance(cfg, dict) else []
@@ -467,7 +566,9 @@ def _build_value_functions_csv(criteria, criteria_map):
                     if x is None or y is None:
                         continue
                     try:
-                        parts.append(f"{float(x)}:{float(y)}")
+                        x_rounded = round(float(x), 3)
+                        y_rounded = round(float(y), 3)
+                        parts.append(f"{x_rounded}:{y_rounded}")
                     except (TypeError, ValueError):
                         continue
                 serialized = ';'.join(parts)
@@ -486,7 +587,9 @@ def _build_value_functions_csv(criteria, criteria_map):
                     if x is None or y is None:
                         continue
                     try:
-                        parts.append(f"{float(x)}:{float(y)}")
+                        x_rounded = round(float(x), 3)
+                        y_rounded = round(float(y), 3)
+                        parts.append(f"{x_rounded}:{y_rounded}")
                     except (TypeError, ValueError):
                         continue
                 serialized = ';'.join(parts)
@@ -501,10 +604,17 @@ def _build_pile_bwt_csv(bwt_data):
         writer.writerow(['REFERENCE_CRITERION', 'ADJUSTED_CRITERION', 'DATA_VALUE', 'TYPE', 'GROUP'])
         for comp in bwt_data.get('comparisons', []):
             if isinstance(comp, dict):
+                data_value = comp.get('data_value', '')
+                # Round numeric values to 3 decimal places
+                if data_value != '' and data_value is not None:
+                    try:
+                        data_value = round(float(data_value), 3)
+                    except (TypeError, ValueError):
+                        pass
                 writer.writerow([
                     comp.get('reference_criterion', ''),
                     comp.get('adjusted_criterion', ''),
-                    comp.get('data_value', ''),
+                    data_value,
                     comp.get('type', ''),
                     comp.get('group', ''),
                 ])
@@ -525,6 +635,7 @@ def export_value_functions_csv(session_id):
             return jsonify({'error': 'Session not found'}), 404
 
         criteria = session.get('criteria', [])
+        qualitative_indicators = session.get('qualitative_indicators') or {}
         value_functions = session.get('value_functions') or {}
         if not _is_value_functions_complete(criteria, value_functions):
             return jsonify({'error': 'Complete value functions before export'}), 400
@@ -533,7 +644,7 @@ def export_value_functions_csv(session_id):
         if not isinstance(criteria_map, dict):
             criteria_map = {}
 
-        output = _build_value_functions_csv(criteria, criteria_map)
+        output = _build_value_functions_csv(criteria, criteria_map, qualitative_indicators)
         return send_file(
             io.BytesIO(output.encode()),
             mimetype='text/csv',
@@ -873,7 +984,7 @@ def export_all_outputs_zip(session_id):
             criteria_map = {}
 
         alternatives_csv = _build_alternatives_csv(criteria, qualitative_indicators)
-        value_functions_csv = _build_value_functions_csv(criteria, criteria_map)
+        value_functions_csv = _build_value_functions_csv(criteria, criteria_map, qualitative_indicators)
         pile_csv = _build_pile_bwt_csv(bwt_data)
 
         output = io.BytesIO()
