@@ -16,6 +16,7 @@ import {
   Progress,
   Radio,
   RadioGroup,
+  Select,
   SimpleGrid,
   Spinner,
   Stack,
@@ -32,7 +33,7 @@ import {
   VStack,
   useToast,
 } from '@chakra-ui/react'
-import { CheckCircleIcon, WarningIcon, CloseIcon } from '@chakra-ui/icons'
+import { CheckCircleIcon, WarningIcon, CloseIcon, QuestionIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
@@ -165,12 +166,25 @@ const buildThresholdAnchors = (shape, thresholds, range) => {
   return []
 }
 
-function ValueFunctionPlot({ range, points, thresholds, onDrag, draggable, shape }) {
+function ValueFunctionPlot({ range, points, thresholds, onDrag, draggable, shape, confidence = 4 }) {
   const svgRef = useRef(null)
+  const clipIdRef = useRef(`plot-clip-${Math.random().toString(36).substr(2, 9)}`)
   const [dragIndex, setDragIndex] = useState(null)
 
   const width = 620
   const height = 260
+
+  // Calculate confidence margin based on confidence level
+  const getConfidenceMargin = (conf) => {
+    if (conf === 4) return 0
+    if (conf === 3) return 0.025
+    if (conf === 2) return 0.05
+    if (conf === 1) return 0.075
+    if (conf === 0) return 0.1
+    return 0
+  }
+
+  const margin = getConfidenceMargin(confidence)
 
   const toSvgX = (x) => ((x - range.min) / (range.max - range.min || 1)) * (width - 40) + 20
   const toSvgY = (y) => height - 20 - y * (height - 40)
@@ -212,27 +226,55 @@ function ValueFunctionPlot({ range, points, thresholds, onDrag, draggable, shape
     .map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${toSvgX(p.x)} ${toSvgY(p.y)}`)
     .join(' ')
 
+  // Create upper and lower paths for confidence band
+  // Don't clamp - let the SVG naturally clip at boundaries to maintain band width
+  const upperPath = points
+    .map((p, idx) => {
+      const yUpper = p.y + margin
+      return `${idx === 0 ? 'M' : 'L'} ${toSvgX(p.x)} ${toSvgY(yUpper)}`
+    })
+    .join(' ')
+
+  const lowerPath = points
+    .slice()
+    .reverse()
+    .map((p) => {
+      const yLower = p.y - margin
+      return `L ${toSvgX(p.x)} ${toSvgY(yLower)}`
+    })
+    .join(' ')
+
+  const bandPath = margin > 0 ? `${upperPath} ${lowerPath} Z` : ''
+
   const thresholdXs = [thresholds?.low, thresholds?.high].filter((v) => Number.isFinite(v))
 
   return (
     <Box border="1px solid" borderColor="gray.200" borderRadius="md" p={4} bg="gray.50">
       <svg ref={svgRef} width="100%" height={height} viewBox={`0 0 ${width} ${height}`}>
+        <defs>
+          <clipPath id={clipIdRef.current}>
+            <rect x={20} y={20} width={width - 40} height={height - 40} />
+          </clipPath>
+        </defs>
         <rect x={0} y={0} width={width} height={height} fill="transparent" />
         <line x1={20} y1={height - 20} x2={width - 20} y2={height - 20} stroke="#A0AEC0" strokeWidth="1" />
         <line x1={20} y1={20} x2={20} y2={height - 20} stroke="#A0AEC0" strokeWidth="1" />
-        {thresholdXs.map((xVal, idx) => (
-          <line
-            key={`th-${idx}`}
-            x1={toSvgX(xVal)}
-            x2={toSvgX(xVal)}
-            y1={20}
-            y2={height - 20}
-            stroke={idx === 0 ? '#4FD1C5' : '#63B3ED'}
-            strokeDasharray="4 3"
-            strokeWidth="1.5"
-          />
-        ))}
-        <path d={linePath} stroke="#2B6CB0" strokeWidth="2" fill="none" />
+        <g clipPath={`url(#${clipIdRef.current})`}>
+          {thresholdXs.map((xVal, idx) => (
+            <line
+              key={`th-${idx}`}
+              x1={toSvgX(xVal)}
+              x2={toSvgX(xVal)}
+              y1={20}
+              y2={height - 20}
+              stroke={idx === 0 ? '#4FD1C5' : '#63B3ED'}
+              strokeDasharray="4 3"
+              strokeWidth="1.5"
+            />
+          ))}
+          {bandPath && <path d={bandPath} fill="rgba(43, 108, 176, 0.15)" stroke="none" />}
+          <path d={linePath} stroke="#2B6CB0" strokeWidth="2" fill="none" />
+        </g>
         {points.map((p, idx) => (
           <g key={`${p.x}-${idx}`}>
             <circle
@@ -296,6 +338,7 @@ function ValueFunctionsPage({ sessionId }) {
             low: clamp(persisted.thresholds?.low ?? range.min, range.min, range.max),
             high: clamp(persisted.thresholds?.high ?? range.max, range.min, range.max),
           }
+          const confidence = persisted.confidence ?? 4
           const midSplit = {
             step1: persisted.midSplit?.step1 ?? null,
             step2: persisted.midSplit?.step2 ?? null,
@@ -329,6 +372,7 @@ function ValueFunctionsPage({ sessionId }) {
             gaussian,
             points: clampPointsToRange(points, range),
             range,
+            confidence,
             lastUpdated: persisted.lastUpdated || null,
           }
         })
@@ -607,6 +651,16 @@ function ValueFunctionsPage({ sessionId }) {
     })
   }
 
+  const handleConfidenceChange = (valueStr) => {
+    if (!activeData) return
+    const confidence = parseInt(valueStr, 10)
+    if (confidence < 0 || confidence > 4) return
+    markDirty((prev) => ({
+      ...prev,
+      [active]: { ...prev[active], confidence },
+    }))
+  }
+
   const progress = useMemo(() => {
     // Only count non-qualitative criteria
     const nonQualCriteria = criteria.filter(c => !c.is_qualitative)
@@ -752,33 +806,71 @@ function ValueFunctionsPage({ sessionId }) {
 
               <Box>
                 <FormLabel fontWeight="bold" mb={3}>Editing Method</FormLabel>
-                <HStack spacing={2}>
-                  <Button
-                    variant={activeData.mode === MODE.MID ? 'solid' : 'outline'}
-                    colorScheme="blue"
-                    isDisabled={activeData.shape.startsWith('gaussian')}
-                    onClick={() => {
-                      markDirty((prev) => ({
-                        ...prev,
-                        [active]: { ...prev[active], mode: MODE.MID },
+                <Flex justify="space-between" align="flex-end" gap={4}>
+                  <HStack spacing={2}>
+                    <Button
+                      variant={activeData.mode === MODE.MID ? 'solid' : 'outline'}
+                      colorScheme="blue"
+                      isDisabled={activeData.shape.startsWith('gaussian')}
+                      onClick={() => {
+                        markDirty((prev) => ({
+                          ...prev,
+                          [active]: { ...prev[active], mode: MODE.MID },
+                        }))
+                      }}
+                    >
+                      Mid-splitting
+                    </Button>
+                    <Button
+                      variant={activeData.mode === MODE.FREE ? 'solid' : 'outline'}
+                      colorScheme="blue"
+                      onClick={() => {
+                        markDirty((prev) => ({
+                          ...prev,
+                          [active]: { ...prev[active], mode: MODE.FREE },
                       }))
-                    }}
-                  >
-                    Mid-splitting
-                  </Button>
-                  <Button
-                    variant={activeData.mode === MODE.FREE ? 'solid' : 'outline'}
-                    colorScheme="blue"
-                    onClick={() => {
-                      markDirty((prev) => ({
-                        ...prev,
-                        [active]: { ...prev[active], mode: MODE.FREE },
-                      }))
-                    }}
-                  >
-                    Free Edit
-                  </Button>
-                </HStack>
+                      }}
+                    >
+                      Free Edit
+                    </Button>
+                  </HStack>
+                  
+                  <HStack spacing={2} align="flex-end">
+                    <VStack spacing={0} align="flex-start">
+                      <HStack spacing={1} mb={1}>
+                        <Text fontSize="sm" fontWeight="medium">Confidence</Text>
+                        <Tooltip
+                          label={
+                            <Box>
+                              <Text fontWeight="bold" mb={1}>Confidence Levels:</Text>
+                              <Text>0 - Not confident at all (±10%)</Text>
+                              <Text>1 - Low confidence (±7.5%)</Text>
+                              <Text>2 - Medium confidence (±5%)</Text>
+                              <Text>3 - High confidence (±2.5%)</Text>
+                              <Text>4 - Fully confident (no uncertainty)</Text>
+                            </Box>
+                          }
+                          placement="left"
+                          hasArrow
+                        >
+                          <QuestionIcon color="gray.500" boxSize={3} cursor="help" />
+                        </Tooltip>
+                      </HStack>
+                      <Select
+                        value={activeData.confidence ?? 4}
+                        onChange={(e) => handleConfidenceChange(e.target.value)}
+                        size="md"
+                        minW="220px"
+                      >
+                        <option value="0">0 - Not confident (±10%)</option>
+                        <option value="1">1 - Low (±7.5%)</option>
+                        <option value="2">2 - Medium (±5%)</option>
+                        <option value="3">3 - High (±2.5%)</option>
+                        <option value="4">4 - Fully confident</option>
+                      </Select>
+                    </VStack>
+                  </HStack>
+                </Flex>
               </Box>
 
               <Box>
@@ -971,6 +1063,7 @@ function ValueFunctionsPage({ sessionId }) {
                 points={activeData.points}
                 thresholds={activeData.thresholds}
                 shape={activeData.shape}
+                confidence={activeData.confidence ?? 4}
                 draggable={!isSessionLocked && activeData.mode === MODE.FREE && (activeData.shape === 'linear_increasing' || activeData.shape === 'linear_decreasing')}
                 onDrag={activeData.mode === MODE.FREE ? handleDragPoint : undefined}
               />

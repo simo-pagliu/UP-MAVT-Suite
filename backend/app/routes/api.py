@@ -540,7 +540,7 @@ def _generate_qualitative_value_function(qualitative_indicators, criterion_name)
 def _build_value_functions_csv(criteria, criteria_map, qualitative_indicators=None):
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['CRITERION_NAME', 'LIST OF POINTS'])
+    writer.writerow(['CRITERION_NAME', 'CONFIDENCE', 'LIST OF POINTS'])
 
     if isinstance(criteria, list) and len(criteria) > 0:
         for criterion in criteria:
@@ -552,9 +552,11 @@ def _build_value_functions_csv(criteria, criteria_map, qualitative_indicators=No
             if criterion.get('is_qualitative'):
                 # For qualitative indicators, generate value function from ranking and values
                 points = _generate_qualitative_value_function(qualitative_indicators, name)
+                confidence = 4  # Default for qualitative
             else:
                 cfg = criteria_map.get(name) if isinstance(criteria_map, dict) else None
                 points = cfg.get('points') if isinstance(cfg, dict) else []
+                confidence = cfg.get('confidence', 4) if isinstance(cfg, dict) else 4
             serialized = ''
             if isinstance(points, list):
                 parts = []
@@ -572,10 +574,11 @@ def _build_value_functions_csv(criteria, criteria_map, qualitative_indicators=No
                     except (TypeError, ValueError):
                         continue
                 serialized = ';'.join(parts)
-            writer.writerow([name, serialized])
+            writer.writerow([name, confidence, serialized])
     else:
         for name, cfg in criteria_map.items():
             points = cfg.get('points') if isinstance(cfg, dict) else []
+            confidence = cfg.get('confidence', 4) if isinstance(cfg, dict) else 4
             serialized = ''
             if isinstance(points, list):
                 parts = []
@@ -593,7 +596,7 @@ def _build_value_functions_csv(criteria, criteria_map, qualitative_indicators=No
                     except (TypeError, ValueError):
                         continue
                 serialized = ';'.join(parts)
-            writer.writerow([name, serialized])
+            writer.writerow([name, confidence, serialized])
     return output.getvalue()
 
 def _build_pile_bwt_csv(bwt_data):
