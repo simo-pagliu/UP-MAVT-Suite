@@ -71,6 +71,10 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   const [criteriaMismatchAcknowledged, setCriteriaMismatchAcknowledged] = useState(false)
   const [isSessionLocked, setIsSessionLocked] = useState(false)
   const [qualitativeIncomplete, setQualitativeIncomplete] = useState(false)
+  // Consistency checking state
+  const [bestToWorstValue, setBestToWorstValue] = useState(null) // Value from BEST-to-WORST comparison
+  const [consistencyConstraints, setConsistencyConstraints] = useState({}) // Track constraints for each criterion
+  const [isConsistencyError, setIsConsistencyError] = useState(false) // Whether current position violates consistency
   const { isOpen, onOpen, onClose } = useDisclosure()
   const cancelRef = useRef()
   const mainContentRef = useRef(null)
@@ -321,56 +325,77 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         return
       }
 
-      // Generate pairs for this group and load
-      const resolvedBestWorst = groupComps.length > 0
-        ? getGroupBestWorst(selectedGroupIndex)
-        : { best: bestCriterion, worst: worstCriterion }
+      // Only regenerate pairs if we don't have them yet or if step changed to evaluate-pairs
+      if (pairs.length === 0 || step !== 'evaluate-pairs') {
+        // Generate pairs for this group and load
+        const resolvedBestWorst = groupComps.length > 0
+          ? getGroupBestWorst(selectedGroupIndex)
+          : { best: bestCriterion, worst: worstCriterion }
 
-      const { best, worst } = resolvedBestWorst
-      if (best && worst) {
-        const others = groupCriteria.filter(
-          (c) => c.criterion_name !== best.criterion_name && c.criterion_name !== worst.criterion_name
-        )
-        const newPairs = [
-          { reference: worst, adjusted: best, type: 'best' },
-          ...others.map((other) => ({
-            reference: other,
-            adjusted: best,
-            type: 'best',
-          })),
-          ...others.map((other) => ({
-            reference: worst,
-            adjusted: other,
-            type: 'worst',
-          })),
-        ]
-        setPairs(newPairs)
-        setBestCriterion(best)
-        setWorstCriterion(worst)
-        setStep('evaluate-pairs')
+        const { best, worst } = resolvedBestWorst
+        if (best && worst) {
+          const others = groupCriteria.filter(
+            (c) => c.criterion_name !== best.criterion_name && c.criterion_name !== worst.criterion_name
+          )
+          const newPairs = [
+            { reference: worst, adjusted: best, type: 'best' },
+            ...others.map((other) => ({
+              reference: other,
+              adjusted: best,
+              type: 'best',
+            })),
+            ...others.map((other) => ({
+              reference: worst,
+              adjusted: other,
+              type: 'worst',
+            })),
+          ]
+          setPairs(newPairs)
+          setBestCriterion(best)
+          setWorstCriterion(worst)
+          setStep('evaluate-pairs')
 
-        const nextIndex = step === 'evaluate-pairs'
-          ? Math.min(currentPairIndex, newPairs.length - 1)
-          : 0
+          // Restore bestToWorstValue from DB if it exists
+          const firstPair = newPairs[0]
+          const bestToWorstComp = groupComps.find(
+            (c) =>
+              c.reference_criterion === firstPair.reference.criterion_name &&
+              c.adjusted_criterion === firstPair.adjusted.criterion_name &&
+              c.type === 'best'
+          )
+          if (bestToWorstComp) {
+            const vfValue = interpolateVF(firstPair.adjusted.criterion_name, bestToWorstComp.data_value)
+            setBestToWorstValue(vfValue)
+          } else {
+            setBestToWorstValue(null)
+          }
 
-        setCurrentPairIndex(nextIndex)
-        const targetPair = newPairs[nextIndex]
-        const existing = comparisons.find(
-          (c) =>
-            c.reference_criterion === targetPair.reference.criterion_name &&
-            c.adjusted_criterion === targetPair.adjusted.criterion_name &&
-            c.group === groupName
-        )
-        setSliderValue(existing ? existing.data_value : getWorstDataValue(targetPair.adjusted))
+          const nextIndex = 0
+
+          setCurrentPairIndex(nextIndex)
+          const targetPair = newPairs[nextIndex]
+          const existing = comparisons.find(
+            (c) =>
+              c.reference_criterion === targetPair.reference.criterion_name &&
+              c.adjusted_criterion === targetPair.adjusted.criterion_name &&
+              c.group === groupName
+          )
+          setSliderValue(existing ? existing.data_value : getWorstDataValue(targetPair.adjusted))
+        }
       }
     }
-  }, [loading, allGroups, selectedGroupIndex, comparisons, currentPairIndex, step, bestCriterion, worstCriterion])
+  }, [loading, allGroups, selectedGroupIndex, step, bestCriterion, worstCriterion])
 
   useEffect(() => {
     if (Number.isFinite(sliderValue)) {
       setSliderInputValue(sliderValue.toFixed(2))
+      // Check consistency whenever slider value changes
+      if (currentPairIndex !== null && pairs[currentPairIndex]) {
+        const { isConsistent } = checkConsistency(currentPairIndex, sliderValue, comparisons)
+        setIsConsistencyError(!isConsistent)
+      }
     }
-  }, [sliderValue])
+  }, [sliderValue, currentPairIndex, pairs, comparisons, bestToWorstValue])
 
   const ensureSessionUnlocked = () => {
     if (!isSessionLocked) return true
@@ -399,6 +424,10 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       setCriteriaMismatch(false)
       setCriteriaMismatchAcknowledged(false)
       setBwtSignature(criteriaSignature)
+      // Reset consistency tracking
+      setBestToWorstValue(null)
+      setConsistencyConstraints({})
+      setIsConsistencyError(false)
       toast({
         title: 'BWT reset',
         description: 'Please redo the elicitation process.',
@@ -462,6 +491,10 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     setWorstCriterion(null)
     setPairs([])
     setStep('select-criteria')
+    // Reset consistency tracking for this group
+    setBestToWorstValue(null)
+    setConsistencyConstraints({})
+    setIsConsistencyError(false)
     setSaving(true)
     try {
       await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
@@ -544,6 +577,123 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     return sorted[sorted.length - 1].y > sorted[0].y
   }
 
+  // Inverse value function: given a y value, find the x (data) value
+  const inverseValueFunction = (criterionName, targetY) => {
+    if (!valueFunction[criterionName]) return null
+    const points = valueFunction[criterionName].points || []
+    if (!points || points.length === 0) return null
+
+    // Clamp targetY to [0, 1]
+    const clampedY = Math.max(0, Math.min(1, targetY))
+
+    const sorted = [...points].sort((a, b) => a.x - b.x)
+    
+    // Find min and max y values in the entire sorted array
+    const yValues = sorted.map(p => p.y)
+    const minY = Math.min(...yValues)
+    const maxY = Math.max(...yValues)
+    
+    // If target is outside the range, return the x at the boundary
+    if (clampedY <= minY) {
+      // Find the point with minY
+      return sorted.find(p => p.y === minY)?.x || sorted[0].x
+    }
+    if (clampedY >= maxY) {
+      // Find the point with maxY
+      return sorted.find(p => p.y === maxY)?.x || sorted[sorted.length - 1].x
+    }
+
+    // Linear interpolation to find x for given y
+    // This works for both increasing and decreasing segments
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const p1 = sorted[i]
+      const p2 = sorted[i + 1]
+      
+      // Check if clampedY is between p1.y and p2.y (regardless of order)
+      const minSegmentY = Math.min(p1.y, p2.y)
+      const maxSegmentY = Math.max(p1.y, p2.y)
+      
+      if (clampedY >= minSegmentY && clampedY <= maxSegmentY) {
+        if (Math.abs(p2.y - p1.y) < 1e-10) {
+          // Flat segment - return midpoint
+          return (p1.x + p2.x) / 2
+        }
+        const ratio = (clampedY - p1.y) / (p2.y - p1.y)
+        return p1.x + ratio * (p2.x - p1.x)
+      }
+    }
+    
+    // Should not reach here if logic is correct
+    return sorted[sorted.length - 1].x
+  }
+
+  // Get consistency threshold for the current pair
+  // Returns the minimum value function value required for consistency
+  const getConsistencyThreshold = (pairIndex, comps = comparisons) => {
+    if (pairIndex === 0 && pairs[pairIndex]?.type === 'best') {
+      // First comparison (BEST-to-WORST) has no constraint
+      return null
+    }
+
+    const pair = pairs[pairIndex]
+    if (!pair) return null
+
+    if (pair.type === 'best') {
+      // Phase 2: BEST-to-OTHERS - must be >= bestToWorstValue
+      return bestToWorstValue
+    } else {
+      // Phase 3: OTHERS-to-WORST - ordinal consistency
+      // Must be >= the maximum of all previous OTHERS-to-WORST comparisons
+      const groupName = allGroups[selectedGroupIndex]?.name
+      if (!groupName) return null
+      
+      // Find all previous OTHERS-to-WORST comparisons in this group
+      const previousWorstComps = []
+      for (let i = 0; i < pairIndex; i++) {
+        if (pairs[i]?.type === 'worst') {
+          const comp = comps.find(
+            (c) =>
+              c.reference_criterion === pairs[i].reference.criterion_name &&
+              c.adjusted_criterion === pairs[i].adjusted.criterion_name &&
+              c.type === 'worst' &&
+              c.group === groupName
+          )
+          if (comp) {
+            const vfValue = interpolateVF(pairs[i].adjusted.criterion_name, comp.data_value)
+            previousWorstComps.push(vfValue)
+          }
+        }
+      }
+      
+      if (previousWorstComps.length > 0) {
+        // Must be >= the maximum of previous OTHERS-to-WORST
+        return Math.max(...previousWorstComps)
+      } else {
+        // First OTHERS-to-WORST comparison: must be >= bestToWorstValue
+        return bestToWorstValue
+      }
+    }
+  }
+
+  // Check if current slider value is consistent
+  const checkConsistency = (pairIndex, dataValue, comps = comparisons) => {
+    const pair = pairs[pairIndex]
+    if (!pair) return { isConsistent: true, threshold: null, thresholdDataValue: null }
+
+    const currentVFValue = interpolateVF(pair.adjusted.criterion_name, dataValue)
+    const threshold = getConsistencyThreshold(pairIndex, comps)
+
+    if (threshold === null) {
+      // No constraint
+      return { isConsistent: true, threshold: null, thresholdDataValue: null }
+    }
+
+    const isConsistent = currentVFValue >= threshold - 1e-10 // Small epsilon for floating point
+    const thresholdDataValue = inverseValueFunction(pair.adjusted.criterion_name, threshold)
+
+    return { isConsistent, threshold, thresholdDataValue }
+  }
+
   const getBarChartData = (groupCriteria) => {
     return groupCriteria.map((crit) => {
       const range = getDataRange(crit)
@@ -624,7 +774,19 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
 
   const handleNextPair = async () => {
     if (!ensureSessionUnlocked()) return
+    
+    // Don't save if there's a consistency error
+    if (isConsistencyError) {
+      return
+    }
+
     const updatedComparisons = upsertComparisonForPair(currentPairIndex, sliderValue)
+    
+    // Capture the value from the first (BEST-to-WORST) comparison
+    if (currentPairIndex === 0 && pairs[0]?.type === 'best' && bestToWorstValue === null) {
+      const vfValue = interpolateVF(pairs[0].adjusted.criterion_name, sliderValue)
+      setBestToWorstValue(vfValue)
+    }
     
     if (currentPairIndex < pairs.length - 1) {
       // Save and then navigate to next pair
@@ -636,6 +798,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         setComparisons(updatedComparisons)
         setCurrentPairIndex(currentPairIndex + 1)
         setSliderTouched(false)
+        setIsConsistencyError(false)
         const nextComp = getComparisonForPair(currentPairIndex + 1, updatedComparisons)
         setSliderValue(nextComp ? nextComp.data_value : getDataRange(pairs[currentPairIndex + 1].adjusted).min)
         // Scroll to top
@@ -661,31 +824,41 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   const handlePrevPair = async () => {
     if (!ensureSessionUnlocked()) return
     if (currentPairIndex > 0) {
-      const updatedComparisons = upsertComparisonForPair(currentPairIndex, sliderValue)
+      let latestComparisons = comparisons
       
-      setSaving(true)
-      try {
-        await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
-          value: buildBwtPayload(updatedComparisons),
-        })
-        setComparisons(updatedComparisons)
-        setCurrentPairIndex(currentPairIndex - 1)
-        setSliderTouched(false)
-        const prevComp = getComparisonForPair(currentPairIndex - 1, updatedComparisons)
-        setSliderValue(prevComp ? prevComp.data_value : getDataRange(pairs[currentPairIndex - 1].adjusted).min)
-        // Scroll to top
-        if (mainContentRef.current) {
-          mainContentRef.current.scrollTop = 0
+      // Don't save if there's a consistency error
+      if (!isConsistencyError) {
+        const updated = upsertComparisonForPair(currentPairIndex, sliderValue)
+        
+        setSaving(true)
+        try {
+          await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
+            value: buildBwtPayload(updated),
+          })
+          setComparisons(updated)
+          latestComparisons = updated
+        } catch (error) {
+          toast({
+            title: 'Error',
+            description: error.response?.data?.error || 'Failed to save comparison',
+            status: 'error',
+            isClosable: true,
+          })
+          setSaving(false)
+          return
+        } finally {
+          setSaving(false)
         }
-      } catch (error) {
-        toast({
-          title: 'Error',
-          description: error.response?.data?.error || 'Failed to save comparison',
-          status: 'error',
-          isClosable: true,
-        })
-      } finally {
-        setSaving(false)
+      }
+      
+      setCurrentPairIndex(currentPairIndex - 1)
+      setSliderTouched(false)
+      setIsConsistencyError(false)
+      const prevComp = getComparisonForPair(currentPairIndex - 1, latestComparisons)
+      setSliderValue(prevComp ? prevComp.data_value : getDataRange(pairs[currentPairIndex - 1].adjusted).min)
+      // Scroll to top
+      if (mainContentRef.current) {
+        mainContentRef.current.scrollTop = 0
       }
     }
   }
@@ -1342,9 +1515,17 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                   rightIcon={<ChevronRightIcon />} 
                   onClick={async () => {
                     if (currentPairIndex === pairs.length - 1) {
-                      // On last pair - save and move to next group or output
-                      const updatedComparisons = upsertComparisonForPair(currentPairIndex, sliderValue)
-                      await handleSaveAll(updatedComparisons)
+                      // Capture the value from the first (BEST-to-WORST) comparison if not already captured
+                      if (currentPairIndex === 0 && pairs[0]?.type === 'best' && bestToWorstValue === null) {
+                        const vfValue = interpolateVF(pairs[0].adjusted.criterion_name, sliderValue)
+                        setBestToWorstValue(vfValue)
+                      }
+
+                      // Don't save if there's a consistency error
+                      if (!isConsistencyError) {
+                        const updatedComparisons = upsertComparisonForPair(currentPairIndex, sliderValue)
+                        await handleSaveAll(updatedComparisons)
+                      }
                       
                       if (selectedGroupIndex < allGroups.length - 1) {
                         // Move to next group
@@ -1353,6 +1534,10 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                         setWorstCriterion(null)
                         setPairs([])
                         setStep('select-criteria')
+                        // Reset consistency tracking for new group
+                        setBestToWorstValue(null)
+                        setConsistencyConstraints({})
+                        setIsConsistencyError(false)
                         if (mainContentRef.current) {
                           mainContentRef.current.scrollTop = 0
                         }
@@ -1367,7 +1552,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                       await handleNextPair()
                     }
                   }} 
-                  isDisabled={!sliderTouched}
+                  isDisabled={!sliderTouched || isConsistencyError}
                   isLoading={saving}
                   size="md"
                 >
@@ -1387,8 +1572,25 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                 setSliderTouched(true)
               }}
             >
-              <SliderTrack>
-                <SliderFilledTrack />
+              <SliderTrack bg="gray.200">
+                {/* Red zone indicator for inconsistent region */}
+                {isConsistencyError && (
+                  <Box
+                    position="absolute"
+                    left="0"
+                    top="0"
+                    bottom="0"
+                    bg="rgba(220, 38, 38, 0.3)"
+                    borderRadius="full"
+                    pointerEvents="none"
+                    style={{
+                      width: `${
+                        ((Math.min(sliderValue, checkConsistency(currentPairIndex, sliderValue, comparisons).thresholdDataValue || adjustedRange.min) - adjustedRange.min) / (adjustedRange.max - adjustedRange.min)) * 100
+                      }%`,
+                    }}
+                  />
+                )}
+                <SliderFilledTrack bg={isConsistencyError ? 'red.500' : 'blue.500'} />
               </SliderTrack>
               <SliderThumb />
             </Slider>
@@ -1397,6 +1599,52 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               <Box flex={1} />
               <Text>{adjustedRange.max.toFixed(2)}</Text>
             </HStack>
+            
+            {/* Error tooltip for consistency violation */}
+            {isConsistencyError && (
+              <Box
+                bg="red.50"
+                border="2px"
+                borderColor="red.400"
+                borderRadius="md"
+                p={3}
+                mt={2}
+              >
+                <HStack spacing={2} alignItems="flex-start">
+                  <Box color="red.600" fontSize="lg">⚠️</Box>
+                  <VStack align="start" spacing={1} flex={1}>
+                    <Text fontWeight="bold" color="red.700" fontSize="sm">
+                      Inconsistent judgment
+                    </Text>
+                    {(() => {
+                      const pair = pairs[currentPairIndex]
+                      const { threshold, thresholdDataValue } = checkConsistency(currentPairIndex, sliderValue, comparisons)
+                      const isIncreasing = isVFIncreasing(pair.adjusted.criterion_name)
+                      const adjective = isIncreasing ? 'at least' : 'at most'
+                      
+                      if (pair?.type === 'best') {
+                        return (
+                          <Text color="red.600" fontSize="sm">
+                            Must adjust <strong>{pair.adjusted.criterion_name}</strong> to {adjective} {' '}
+                            <strong>{thresholdDataValue?.toFixed(2)}</strong> {pair.adjusted.unit}{' '}
+                            to be consistent with <strong>{bestCriterion.criterion_name}</strong>-<strong>{worstCriterion.criterion_name}</strong> comparison
+                          </Text>
+                        )
+                      } else {
+                        // OTHERS-to-WORST
+                        return (
+                          <Text color="red.600" fontSize="sm">
+                            Must adjust <strong>{pair.adjusted.criterion_name}</strong> to {adjective} {' '}
+                            <strong>{thresholdDataValue?.toFixed(2)}</strong> {pair.adjusted.unit}{' '}
+                            to maintain consistency with previous comparisons
+                          </Text>
+                        )
+                      }
+                    })()}
+                  </VStack>
+                </HStack>
+              </Box>
+            )}
           </Box>
 
           <Box border="1px" borderColor="gray.200" borderRadius="md" p={4}>
@@ -1510,50 +1758,76 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                       {pairs.map((pair, pairIdx) => {
                         const comp = getComparisonForPair(pairIdx)
                         const isActivePair = currentPairIndex === pairIdx
+                        
+                        // Find first incomplete pair
+                        let firstIncompletePairIndex = pairs.length // Default to all complete
+                        for (let i = 0; i < pairs.length; i++) {
+                          if (!getComparisonForPair(i)) {
+                            firstIncompletePairIndex = i
+                            break
+                          }
+                        }
+                        
+                        // Disable pairs after the first incomplete one
+                        const isDisabled = pairIdx > firstIncompletePairIndex
+                        
                         return (
                           <Box
                             key={pairIdx}
                             p={2}
                             borderRadius="sm"
-                            bg={isActivePair ? 'blue.400' : comp ? 'green.50' : 'white'}
+                            bg={isDisabled ? 'gray.100' : isActivePair ? 'blue.400' : comp ? 'green.50' : 'white'}
                             border="1px"
-                            borderColor={isActivePair ? 'blue.500' : comp ? 'green.300' : 'gray.200'}
-                            cursor="pointer"
+                            borderColor={isDisabled ? 'gray.200' : isActivePair ? 'blue.500' : comp ? 'green.300' : 'gray.200'}
+                            cursor={isDisabled ? 'not-allowed' : 'pointer'}
+                            opacity={isDisabled ? 0.5 : 1}
                             onClick={async () => {
                               if (pairIdx === currentPairIndex) return
+                              if (isDisabled) return
                               if (!ensureSessionUnlocked()) return
-                              const updated = upsertComparisonForPair(currentPairIndex, sliderValue)
-                              setSaving(true)
-                              try {
-                                await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
-                                  value: buildBwtPayload(updated),
-                                })
-                                setComparisons(updated)
-                                setCurrentPairIndex(pairIdx)
-                                const targetComp = getComparisonForPair(pairIdx, updated)
-                                setSliderValue(targetComp ? targetComp.data_value : getDataRange(pairs[pairIdx].adjusted).min)
-                                // Scroll to top
-                                if (mainContentRef.current) {
-                                  mainContentRef.current.scrollTop = 0
+                              
+                              let latestComparisons = comparisons
+                              
+                              // Don't save if current pair has consistency error
+                              if (!isConsistencyError) {
+                                const updated = upsertComparisonForPair(currentPairIndex, sliderValue)
+                                setSaving(true)
+                                try {
+                                  await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
+                                    value: buildBwtPayload(updated),
+                                  })
+                                  setComparisons(updated)
+                                  latestComparisons = updated
+                                } catch (error) {
+                                  toast({
+                                    title: 'Error',
+                                    description: 'Failed to save comparison',
+                                    status: 'error',
+                                    isClosable: true,
+                                  })
+                                  setSaving(false)
+                                  return
+                                } finally {
+                                  setSaving(false)
                                 }
-                              } catch (error) {
-                                toast({
-                                  title: 'Error',
-                                  description: 'Failed to save and navigate',
-                                  status: 'error',
-                                  isClosable: true,
-                                })
-                              } finally {
-                                setSaving(false)
+                              }
+                              
+                              setCurrentPairIndex(pairIdx)
+                              setIsConsistencyError(false)
+                              const targetComp = getComparisonForPair(pairIdx, latestComparisons)
+                              setSliderValue(targetComp ? targetComp.data_value : getDataRange(pairs[pairIdx].adjusted).min)
+                              // Scroll to top
+                              if (mainContentRef.current) {
+                                mainContentRef.current.scrollTop = 0
                               }
                             }}
-                            _hover={{ shadow: 'sm' }}
+                            _hover={isDisabled ? {} : { shadow: 'sm' }}
                           >
-                            <Text fontSize="xs" fontWeight="bold" color={isActivePair ? 'white' : 'black'} noOfLines={2}>
+                            <Text fontSize="xs" fontWeight="bold" color={isDisabled ? 'gray.400' : isActivePair ? 'white' : 'black'} noOfLines={2}>
                               {pair.reference.criterion_name.substring(0, 12)} → {pair.adjusted.criterion_name.substring(0, 12)}
                             </Text>
                             {comp && (
-                              <Text fontSize="xs" color={isActivePair ? 'whiteAlpha.800' : 'green.700'}>
+                              <Text fontSize="xs" color={isDisabled ? 'gray.400' : isActivePair ? 'whiteAlpha.800' : 'green.700'}>
                                 ✓ {comp.data_value.toFixed(2)}
                               </Text>
                             )}
