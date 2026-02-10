@@ -19,8 +19,13 @@ import {
   NumberInputStepper,
   NumberIncrementStepper,
   NumberDecrementStepper,
+  Select,
+  Tooltip,
+  Flex,
+  FormControl,
+  FormLabel,
 } from '@chakra-ui/react'
-import { ArrowBackIcon, ArrowForwardIcon, CheckCircleIcon } from '@chakra-ui/icons'
+import { ArrowBackIcon, ArrowForwardIcon, CheckCircleIcon, QuestionIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useState, useRef } from 'react'
 
@@ -240,10 +245,19 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
 }
 
 // Plot component for Phase 2 (value function visualization)
-function QualitativeValuePlot({ ranking, isIncreasing, adjustedValues }) {
+function QualitativeValuePlot({ ranking, isIncreasing, adjustedValues, confidences = {} }) {
   const svgRef = useRef(null)
   const width = 480
   const height = 480
+
+  const getConfidenceMargin = (conf) => {
+    if (conf === 4) return 0
+    if (conf === 3) return 0.025
+    if (conf === 2) return 0.05
+    if (conf === 1) return 0.075
+    if (conf === 0) return 0.1
+    return 0
+  }
 
   // Build points for the plot
   const uniqueRanks = Array.from(new Set(Object.values(ranking)))
@@ -282,7 +296,9 @@ function QualitativeValuePlot({ ranking, isIncreasing, adjustedValues }) {
     const y = adjustedValues[rank] !== undefined ? adjustedValues[rank] : linearY
     const altNames = rankToAlternatives[rank] || []
     const rankIdx = uniqueRanks.indexOf(rank)
-    points.push({ x: xPos, y, rank, rankIdx, altNames, isHypothetical: false })
+    const confidence = confidences[rank] ?? 4
+    const margin = getConfidenceMargin(confidence)
+    points.push({ x: xPos, y, rank, rankIdx, altNames, isHypothetical: false, confidence, margin })
   })
   
   // Add the other hypothetical point
@@ -294,9 +310,14 @@ function QualitativeValuePlot({ ranking, isIncreasing, adjustedValues }) {
     points.push({ x: uniqueRanks.length + 1, y: 0, isHypothetical: true })
   }
 
+  const marginLeft = 50
+  const marginRight = 20
+  const marginTop = 40
+  const marginBottom = 40
+
   // Equal spacing on x-axis
-  const toSvgX = (xIdx) => (xIdx / (totalPoints - 1)) * (width - 70) + 50
-  const toSvgY = (y) => height - 40 - y * (height - 80)
+  const toSvgX = (xIdx) => (xIdx / (totalPoints - 1)) * (width - marginLeft - marginRight) + marginLeft
+  const toSvgY = (y) => height - marginBottom - y * (height - marginTop - marginBottom)
 
   const linePath = points
     .map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${toSvgX(p.x)} ${toSvgY(p.y)}`)
@@ -324,8 +345,54 @@ function QualitativeValuePlot({ ranking, isIncreasing, adjustedValues }) {
         >
           Value
         </text>
-        {/* Line */}
-        <path d={linePath} stroke="#2B6CB0" strokeWidth="2.5" fill="none" />
+        {/* Clipping path to constrain error bars and line to 0-1 range */}
+        <defs>
+          <clipPath id="plotArea">
+            <rect x={marginLeft} y={marginTop} width={width - marginLeft - marginRight} height={height - marginTop - marginBottom} />
+          </clipPath>
+        </defs>
+        {/* Error bars for confidence bands */}
+        <g clipPath="url(#plotArea)">
+          {points.map((p, idx) => {
+            if (p.isHypothetical || !p.margin) return null
+            const yUpper = Math.max(0, p.y + p.margin)
+            const yLower = Math.min(1, p.y - p.margin)
+            const barWidth = 8
+            return (
+              <g key={`errorbar-${idx}`}>
+                {/* Vertical error bar */}
+                <line
+                  x1={toSvgX(p.x)}
+                  y1={toSvgY(yUpper)}
+                  x2={toSvgX(p.x)}
+                  y2={toSvgY(yLower)}
+                  stroke="rgba(49, 130, 206, 0.4)"
+                  strokeWidth="2"
+                />
+                {/* Top cap */}
+                <line
+                  x1={toSvgX(p.x) - barWidth / 2}
+                  y1={toSvgY(yUpper)}
+                  x2={toSvgX(p.x) + barWidth / 2}
+                  y2={toSvgY(yUpper)}
+                  stroke="rgba(49, 130, 206, 0.4)"
+                  strokeWidth="2"
+                />
+                {/* Bottom cap */}
+                <line
+                  x1={toSvgX(p.x) - barWidth / 2}
+                  y1={toSvgY(yLower)}
+                  x2={toSvgX(p.x) + barWidth / 2}
+                  y2={toSvgY(yLower)}
+                  stroke="rgba(49, 130, 206, 0.4)"
+                  strokeWidth="2"
+                />
+              </g>
+            )
+          })}
+          {/* Line */}
+          <path d={linePath} stroke="#2B6CB0" strokeWidth="2.5" fill="none" />
+        </g>
         {/* Points and labels */}
         {points.map((p, idx) => (
           <g key={idx}>
@@ -361,9 +428,10 @@ function QualitativeValuePlot({ ranking, isIncreasing, adjustedValues }) {
 }
 
 // Phase 2: Slider adjustment
-function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, initialValues, initialIsIncreasing, onValuesChange }) {
+function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, initialValues, initialIsIncreasing, onValuesChange, onConfidencesChange }) {
   const [isIncreasing, setIsIncreasing] = useState(initialIsIncreasing !== null ? initialIsIncreasing : true)
   const [adjustedValues, setAdjustedValues] = useState({})
+  const [confidences, setConfidences] = useState({})
   const [hasInitialized, setHasInitialized] = useState(false)
 
   const uniqueRanks = Array.from(new Set(Object.values(ranking))).map(Number).sort((a, b) => a - b)
@@ -377,13 +445,19 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
     if (hasInitialized) return
     
     // Use saved values if available, otherwise initialize with linear interpolation
-    if (initialValues && Object.keys(initialValues).length > 0) {
-      setAdjustedValues(initialValues)
+    if (initialValues && initialValues.values && Object.keys(initialValues.values).length > 0) {
+      setAdjustedValues(initialValues.values)
+      const loadedConfidences = initialValues.confidences || {}
+      setConfidences(loadedConfidences)
+      if (onConfidencesChange) {
+        onConfidencesChange(loadedConfidences)
+      }
       setHasInitialized(true)
       return
     }
     
     const newInitialValues = {}
+    const newConfidences = {}
     const totalPoints = uniqueRanks.length + 2 // hypothetical worst + ranks + hypothetical best
     
     // uniqueRanks is [0, 1, 2, ...] where 0=best (top tier), N-1=worst (bottom tier)
@@ -393,8 +467,13 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
       const xPos = uniqueRanks.length - idx // rank 0→xPos=N, rank N-1→xPos=1
       const linearY = xPos / (totalPoints - 1)
       newInitialValues[rank] = linearY
+      newConfidences[rank] = 4 // Default to fully confident
     })
     setAdjustedValues(newInitialValues)
+    setConfidences(newConfidences)
+    if (onConfidencesChange) {
+      onConfidencesChange(newConfidences)
+    }
     setHasInitialized(true)
   }, [uniqueRanks, hasInitialized, initialValues])
 
@@ -486,6 +565,7 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
       ranking,
       values: adjustedValues,
       isIncreasing,
+      confidences,
     })
   }
 
@@ -504,7 +584,7 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
 
       <HStack spacing={6} align="flex-start">
         <Box minW="400px" maxH="700px">
-          <QualitativeValuePlot ranking={ranking} isIncreasing={isIncreasing} adjustedValues={adjustedValues} />
+          <QualitativeValuePlot ranking={ranking} isIncreasing={isIncreasing} adjustedValues={adjustedValues} confidences={confidences} />
         </Box>
 
         <VStack spacing={6} align="stretch" flex="1" minW="400px" maxH="700px" overflowY="auto">
@@ -549,6 +629,46 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
                   />
                   <Text fontSize="xs" color="gray.600" minW="35px">1</Text>
                 </HStack>
+                <FormControl mt={3}>
+                  <HStack spacing={1} mb={1}>
+                    <FormLabel fontSize="xs" m={0} fontWeight="medium">Confidence</FormLabel>
+                    <Tooltip
+                      label={
+                        <Box>
+                          <Text fontWeight="bold" mb={1}>Confidence Levels:</Text>
+                          <Text>0 - Not confident (±10%)</Text>
+                          <Text>1 - Low (±7.5%)</Text>
+                          <Text>2 - Medium (±5%)</Text>
+                          <Text>3 - High (±2.5%)</Text>
+                          <Text>4 - Fully confident</Text>
+                        </Box>
+                      }
+                      placement="right"
+                      hasArrow
+                    >
+                      <QuestionIcon color="gray.500" boxSize={3} cursor="help" />
+                    </Tooltip>
+                  </HStack>
+                  <Select
+                    value={confidences[rank] ?? 4}
+                    onChange={(e) => {
+                      const conf = parseInt(e.target.value, 10)
+                      const updated = { ...confidences, [rank]: conf }
+                      setConfidences(updated)
+                      if (onConfidencesChange) {
+                        onConfidencesChange(updated)
+                      }
+                    }}
+                    size="sm"
+                    maxW="180px"
+                  >
+                    <option value="0">0 - Not confident (±10%)</option>
+                    <option value="1">1 - Low (±7.5%)</option>
+                    <option value="2">2 - Medium (±5%)</option>
+                    <option value="3">3 - High (±2.5%)</option>
+                    <option value="4">4 - Fully confident</option>
+                  </Select>
+                </FormControl>
               </Box>
             )
           })}
@@ -569,12 +689,104 @@ function QualitativeIndicatorsPage({ sessionId }) {
   const [currentRanking, setCurrentRanking] = useState(null)
   const [savedValues, setSavedValues] = useState(null)
   const [savedIsIncreasing, setSavedIsIncreasing] = useState(null)
+  const [savedConfidences, setSavedConfidences] = useState(null)
   const [currentAdjustedValues, setCurrentAdjustedValues] = useState({})
   const [currentIsIncreasing, setCurrentIsIncreasing] = useState(true)
+  const [currentConfidences, setCurrentConfidences] = useState({})
+  const autosaveTimerRef = useRef(null)
+  const lastAutosaveKeyRef = useRef('')
+  const autosaveInFlightRef = useRef(false)
+  const latestAutosaveRef = useRef({ indicatorName: null, data: null, key: '' })
+  const qualitativeDataRef = useRef(qualitativeData)
+  const currentIndicatorNameRef = useRef(null)
   const toast = useToast()
 
   const qualitativeCriteria = criteria.filter((c) => c.is_qualitative)
   const activeIndicator = activeIndicatorIdx !== null ? qualitativeCriteria[activeIndicatorIdx] : null
+
+  useEffect(() => {
+    qualitativeDataRef.current = qualitativeData
+  }, [qualitativeData])
+
+  const buildAutosaveData = () => {
+    if (!currentRanking) return null
+    if (phase === 'ranking') {
+      return { ranking: currentRanking }
+    }
+    return {
+      ranking: currentRanking,
+      values: currentAdjustedValues,
+      isIncreasing: currentIsIncreasing,
+      confidences: currentConfidences,
+    }
+  }
+
+  const performAutosave = async (force = false) => {
+    if (isSessionLocked) return
+    const { indicatorName, data, key } = latestAutosaveRef.current
+    if (!indicatorName || !data) return
+    if (!force && key === lastAutosaveKeyRef.current) return
+    if (autosaveInFlightRef.current) return
+
+    autosaveInFlightRef.current = true
+    try {
+      const updatedData = {
+        ...qualitativeDataRef.current,
+        [indicatorName]: data,
+      }
+      await axios.put(`${API_URL}/session/${sessionId}/qualitative`, {
+        value: updatedData,
+      })
+      setQualitativeData(updatedData)
+      lastAutosaveKeyRef.current = key
+    } catch (error) {
+      console.error('Autosave failed:', error)
+    } finally {
+      autosaveInFlightRef.current = false
+    }
+  }
+
+  useEffect(() => {
+    if (!activeIndicator || isSessionLocked) return
+    if (currentIndicatorNameRef.current && currentIndicatorNameRef.current !== activeIndicator.criterion_name) {
+      return
+    }
+    const data = buildAutosaveData()
+    if (!data) return
+    const key = JSON.stringify({ indicatorName: activeIndicator.criterion_name, data })
+    latestAutosaveRef.current = {
+      indicatorName: activeIndicator.criterion_name,
+      data,
+      key,
+    }
+
+    if (autosaveTimerRef.current) {
+      clearTimeout(autosaveTimerRef.current)
+    }
+    autosaveTimerRef.current = setTimeout(() => {
+      performAutosave()
+    }, 600)
+
+    return () => {
+      if (autosaveTimerRef.current) {
+        clearTimeout(autosaveTimerRef.current)
+      }
+    }
+  }, [
+    activeIndicator?.criterion_name,
+    phase,
+    currentRanking,
+    currentAdjustedValues,
+    currentIsIncreasing,
+    currentConfidences,
+    isSessionLocked,
+  ])
+
+  useEffect(() => {
+    return () => {
+      performAutosave(true)
+    }
+  }, [])
 
   useEffect(() => {
     const fetchSession = async () => {
@@ -622,18 +834,24 @@ function QualitativeIndicatorsPage({ sessionId }) {
   const loadIndicatorData = (idx, criterionName, dataStore = null) => {
     const store = dataStore !== null ? dataStore : qualitativeData
     const savedData = store[criterionName]
+
+    currentIndicatorNameRef.current = criterionName
     
     if (savedData && savedData.ranking) {
       // Data exists in DB - load it and go to adjustment phase
       setCurrentRanking(savedData.ranking)
       setSavedValues(savedData.values || null)
       setSavedIsIncreasing(savedData.isIncreasing !== undefined ? savedData.isIncreasing : null)
+      setSavedConfidences(savedData.confidences || null)
+      setCurrentConfidences(savedData.confidences || {})
       setPhase('adjustment')
     } else {
       // No data in DB - start fresh from ranking phase
       setCurrentRanking(null)
       setSavedValues(null)
       setSavedIsIncreasing(null)
+      setSavedConfidences(null)
+      setCurrentConfidences({})
       setPhase('ranking')
     }
   }
@@ -645,6 +863,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
       // Ranking order changed, clear saved values so user re-elicits them
       setSavedValues(null)
       setSavedIsIncreasing(null)
+      setSavedConfidences(null)
     }
     setCurrentRanking(ranking)
     setPhase('adjustment')
@@ -654,6 +873,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
     if (isSessionLocked) {
       setSavedValues(currentAdjustedValues)
       setSavedIsIncreasing(currentIsIncreasing)
+      setSavedConfidences(currentConfidences)
       setPhase('ranking')
       return
     }
@@ -665,6 +885,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
         ranking: currentRanking,
         values: currentAdjustedValues,
         isIncreasing: currentIsIncreasing,
+        confidences: currentConfidences,
       }
       
       const updatedData = {
@@ -679,6 +900,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
       setQualitativeData(updatedData)
       setSavedValues(currentAdjustedValues)
       setSavedIsIncreasing(currentIsIncreasing)
+      setSavedConfidences(currentConfidences)
       setPhase('ranking')
     } catch (error) {
       toast({
@@ -712,9 +934,14 @@ function QualitativeIndicatorsPage({ sessionId }) {
 
     setSaving(true)
     try {
+      // Ensure confidences are included in the saved data
+      const dataWithConfidences = {
+        ...data,
+        confidences: data.confidences || currentConfidences,
+      }
       const updatedData = {
         ...qualitativeData,
-        [activeIndicator.criterion_name]: data,
+        [activeIndicator.criterion_name]: dataWithConfidences,
       }
       await axios.put(`${API_URL}/session/${sessionId}/qualitative`, {
         value: updatedData,
@@ -777,6 +1004,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
           ranking: currentRanking,
           values: currentAdjustedValues,
           isIncreasing: currentIsIncreasing,
+          confidences: currentConfidences,
         }
         
         const updatedData = {
@@ -1015,11 +1243,17 @@ function QualitativeIndicatorsPage({ sessionId }) {
                     onComplete={handlePhase2Complete}
                     onBack={handlePhase2Back}
                     isDisabled={isSessionLocked || saving}
-                    initialValues={savedValues}
+                    initialValues={{
+                      values: savedValues,
+                      confidences: savedConfidences,
+                    }}
                     initialIsIncreasing={savedIsIncreasing}
                     onValuesChange={(data) => {
                       setCurrentAdjustedValues(data.values)
                       setCurrentIsIncreasing(data.isIncreasing)
+                    }}
+                    onConfidencesChange={(confidences) => {
+                      setCurrentConfidences(confidences)
                     }}
                   />
                 )}

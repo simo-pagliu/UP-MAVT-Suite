@@ -459,13 +459,14 @@ def _build_alternatives_csv(criteria, qualitative_indicators):
 def _build_qualitative_csv(criteria, qualitative_indicators):
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['CRITERION_NAME', 'ALTERNATIVE', 'RANK', 'VALUE'])
+    writer.writerow(['CRITERION_NAME', 'ALTERNATIVE', 'RANK', 'VALUE', 'CONFIDENCE'])
     for criterion in criteria:
         if not isinstance(criterion, dict) or not criterion.get('is_qualitative'):
             continue
         name = criterion.get('criterion_name', '')
         data = qualitative_indicators.get(name, {}) if name else {}
         ranking = data.get('ranking') if isinstance(data, dict) else None
+        confidences = data.get('confidences', {}) if isinstance(data, dict) else {}
         if not isinstance(ranking, dict):
             continue
         alternatives = criterion.get('alternatives', [])
@@ -477,7 +478,10 @@ def _build_qualitative_csv(criteria, qualitative_indicators):
                 continue
             rank = ranking.get(alt_name)
             value = _get_qualitative_alt_value(qualitative_indicators, name, alt_name)
-            writer.writerow([name, alt_name, rank if rank is not None else '', value])
+            confidence = 4
+            if rank is not None and isinstance(confidences, dict):
+                confidence = confidences.get(rank, confidences.get(str(rank), 4))
+            writer.writerow([name, alt_name, rank if rank is not None else '', value, confidence])
     return output.getvalue()
 
 def _generate_qualitative_value_function(qualitative_indicators, criterion_name):
@@ -552,7 +556,38 @@ def _build_value_functions_csv(criteria, criteria_map, qualitative_indicators=No
             if criterion.get('is_qualitative'):
                 # For qualitative indicators, generate value function from ranking and values
                 points = _generate_qualitative_value_function(qualitative_indicators, name)
-                confidence = 4  # Default for qualitative
+                # Get per-rank confidences, formatted as comma-separated values in order of ranks
+                qual_data = qualitative_indicators.get(name) if isinstance(qualitative_indicators, dict) else None
+                if isinstance(qual_data, dict) and 'confidences' in qual_data:
+                    confidences_dict = qual_data.get('confidences', {})
+                    # Extract confidence values in rank order
+                    ranks = []
+                    values = qual_data.get('values') if isinstance(qual_data.get('values'), dict) else None
+                    ranking_map = qual_data.get('ranking') if isinstance(qual_data.get('ranking'), dict) else None
+                    if values:
+                        try:
+                            ranks = sorted([int(r) for r in values.keys()])
+                        except (TypeError, ValueError):
+                            ranks = []
+                    if not ranks and ranking_map:
+                        ranks = sorted({int(r) for r in ranking_map.values()})
+                    confidence_values = []
+                    for rank in ranks:
+                        confidence_values.append(str(confidences_dict.get(rank, confidences_dict.get(str(rank), 4))))
+                    confidence = ','.join(confidence_values) if confidence_values else '4'
+                else:
+                    # Fallback: default confidence based on number of ranks
+                    ranks = []
+                    values = qual_data.get('values') if isinstance(qual_data, dict) else None
+                    ranking_map = qual_data.get('ranking') if isinstance(qual_data, dict) else None
+                    if isinstance(values, dict):
+                        try:
+                            ranks = sorted([int(r) for r in values.keys()])
+                        except (TypeError, ValueError):
+                            ranks = []
+                    if not ranks and isinstance(ranking_map, dict):
+                        ranks = sorted({int(r) for r in ranking_map.values()})
+                    confidence = ','.join(['4'] * len(ranks)) if ranks else '4'
             else:
                 cfg = criteria_map.get(name) if isinstance(criteria_map, dict) else None
                 points = cfg.get('points') if isinstance(cfg, dict) else []
