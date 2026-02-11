@@ -45,6 +45,7 @@ import {
   Cell,
   ReferenceDot,
 } from 'recharts'
+import { parseDistribution, computeDistributionBounds } from '../utils/distributionUtils'
 
 const API_URL = 'http://localhost:5000/api'
 
@@ -522,9 +523,34 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       return { min: 0, max: 1 }
     }
     const alternatives = criterion.alternatives || []
-    const values = alternatives.map((alt) => Number(alt.value)).filter((v) => isFinite(v))
-    if (values.length === 0) return { min: 0, max: 1 }
-    return { min: Math.min(...values), max: Math.max(...values) }
+    const bounds = []
+    
+    // Try to extract ranges from distributions first
+    for (const alt of alternatives) {
+      const valueStr = alt.value || ''
+      const dist = parseDistribution(valueStr)
+      
+      if (dist) {
+        // It's a distribution - compute bounds
+        const bounds_computed = computeDistributionBounds(dist)
+        bounds.push(bounds_computed.min, bounds_computed.max)
+      } else {
+        // Try to parse as plain number
+        const num = Number(valueStr)
+        if (isFinite(num)) {
+          bounds.push(num)
+        }
+      }
+    }
+    
+    if (bounds.length === 0) {
+      return { min: 0, max: 1 }
+    }
+    
+    return {
+      min: Math.min(...bounds),
+      max: Math.max(...bounds)
+    }
   }
 
   const interpolateVF = (criterionName, dataValue) => {

@@ -20,9 +20,19 @@ import {
   Text,
   Divider,
   Checkbox,
+  useDisclosure,
 } from '@chakra-ui/react'
 import axios from 'axios'
 import { useState, useEffect } from 'react'
+import { DistributionModal } from '../components/DistributionModal'
+import {
+  parseDistribution,
+  distributionToString,
+  getDistributionTypeLabel,
+  getDistributionSummary,
+  computeDistributionBounds,
+} from '../utils/distributionUtils'
+import { generateInputCSV, downloadCSVFile } from '../utils/csvExport'
 
 const API_URL = 'http://localhost:5000/api'
 
@@ -37,6 +47,11 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
   const [isLocked, setIsLocked] = useState(false)
   const [isSessionLocked, setIsSessionLocked] = useState(false)
   const [hasModifiedInput, setHasModifiedInput] = useState(false)
+  
+  // Distribution modal state
+  const { isOpen: isDistModalOpen, onOpen: onDistModalOpen, onClose: onDistModalClose } = useDisclosure()
+  const [editingCell, setEditingCell] = useState(null) // {criterionIdx, altIdx}
+  const [currentCellValue, setCurrentCellValue] = useState('')
   
   const toast = useToast()
   const fileInputRef = useRef(null)
@@ -57,7 +72,12 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
       group: c.group || '',
       description: c.description || '',
       is_qualitative: c.is_qualitative || false,
-      alternatives: Array.isArray(c.alternatives) ? c.alternatives : [],
+      alternatives: Array.isArray(c.alternatives) 
+        ? c.alternatives.map(alt => ({
+            name: alt.name || '',
+            value: alt.value || ''
+          }))
+        : [],
     }))
   }
 
@@ -304,7 +324,7 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
       const parsedCriteria = criterionNames.map((name, idx) => {
         const alternatives = alternativeRows.map(row => ({
           name: row[0],
-          value: row[idx + 1] || ''
+          value: row[idx + 1] || '' // This can be a distribution string
         }))
         return {
           criterion_name: name,
@@ -358,6 +378,63 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
       return updated
     })
     setHasModifiedInput(true)
+  }
+
+  const handleDistributionModalOpen = (criterionIdx, altIdx) => {
+    setEditingCell({ criterionIdx, altIdx })
+    setCurrentCellValue(criteria[criterionIdx].alternatives[altIdx].value)
+    onDistModalOpen()
+  }
+
+  const handleDistributionSave = async (distribution) => {
+    if (editingCell) {
+      const { criterionIdx, altIdx } = editingCell
+      const valueString = distributionToString(distribution)
+      handleAlternativeChange(criterionIdx, altIdx, valueString)
+      
+      // Auto-save to database if this is an existing session
+      if (isExistingSession && existingSessionId && !isInputLocked) {
+        // Update the criteria array immediately
+        const updatedCriteria = criteria.map((crit, idx) => {
+          if (idx === criterionIdx) {
+            return {
+              ...crit,
+              alternatives: crit.alternatives.map((alt, altIdx2) => 
+                altIdx2 === altIdx ? { ...alt, value: valueString } : alt
+              )
+            }
+          }
+          return crit
+        })
+        
+        try {
+          await axios.put(`${API_URL}/session/${existingSessionId}/criteria`, { criteria: updatedCriteria })
+          toast({
+            title: 'Saved',
+            description: 'Distribution saved to database',
+            status: 'success',
+            duration: 2,
+            isClosable: true,
+          })
+        } catch (error) {
+          toast({
+            title: 'Error',
+            description: error.response?.data?.error || 'Failed to save distribution',
+            status: 'error',
+            duration: 3,
+            isClosable: true,
+          })
+        }
+      } else {
+        toast({
+          title: 'Distribution Updated',
+          description: 'Click "Confirm input to continue" to save all changes to the database',
+          status: 'success',
+          duration: 3,
+          isClosable: true,
+        })
+      }
+    }
   }
 
   const handleAlternativeNameChange = (altIdx, value) => {
@@ -438,48 +515,8 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
       return
     }
 
-    // Build CSV content
-    const rows = []
-    
-    // Header row: Alternative, Criterion1, Criterion2, ...
-    const headerRow = ['Alternative', ...criteria.map(c => c.criterion_name)]
-    rows.push(headerRow.join(','))
-
-    // Group row
-    const groupRow = ['Group', ...criteria.map(c => c.group || '')]
-    rows.push(groupRow.join(','))
-
-    // Description row
-    const descriptionRow = ['Description', ...criteria.map(c => c.description || '')]
-    rows.push(descriptionRow.join(','))
-    
-    // Alternative rows: name, value1, value2, ...
-    const alternativeCount = criteria[0]?.alternatives.length || 0
-    for (let i = 0; i < alternativeCount; i++) {
-      const row = [
-        criteria[0].alternatives[i].name,
-        ...criteria.map(c => c.alternatives[i]?.value || '')
-      ]
-      rows.push(row.join(','))
-    }
-    
-    // Unit row: Unit, unit1, unit2, ...
-    const unitRow = ['Unit', ...criteria.map(c => c.unit)]
-    rows.push(unitRow.join(','))
-    
-    // Create CSV string
-    const csvContent = rows.join('\n')
-    
-    // Create download link
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    const url = URL.createObjectURL(blob)
-    link.setAttribute('href', url)
-    link.setAttribute('download', `${name || 'criteria'}_export.csv`)
-    link.style.visibility = 'hidden'
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+    const csvContent = generateInputCSV(criteria)
+    downloadCSVFile(csvContent, `input_${name || 'criteria'}.csv`)
     
     toast({
       title: 'Success',
@@ -518,13 +555,19 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
     }
 
     // Validate all alternatives have names and values
-    const hasEmptyAlternatives = criteria.some(criterion =>
-      criterion.alternatives.some(alt => !alt.name || alt.value === '')
-    )
+    const hasEmptyAlternatives = criteria.some(criterion => {
+      if (criterion.is_qualitative) {
+        // Qualitative criteria should have empty values
+        return criterion.alternatives.some(alt => !alt.name)
+      } else {
+        // Non-qualitative criteria must have names and values
+        return criterion.alternatives.some(alt => !alt.name || alt.value === '')
+      }
+    })
     if (hasEmptyAlternatives) {
       toast({
         title: 'Error',
-        description: 'All alternatives must have names and values',
+        description: 'All alternatives must have names. Non-qualitative criteria must have values.',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -549,12 +592,14 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
           onSessionCreated(existingSessionId)
         } else {
           // Update existing session criteria
+          console.log('Updating criteria:', criteria)
           await axios.put(`${API_URL}/session/${existingSessionId}/criteria`, { criteria })
+          console.log('Criteria updated successfully')
           toast({
             title: 'Success',
-            description: 'Session updated',
+            description: 'Session updated and saved to database',
             status: 'success',
-            duration: 2,
+            duration: 3,
             isClosable: true,
           })
           setHasModifiedInput(false)
@@ -562,26 +607,29 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
         }
       } else {
         // Create new session
+        console.log('Creating session with criteria:', criteria)
         const response = await axios.post(`${API_URL}/session`, { name, criteria })
         const newSessionId = response.data.session_id
+        console.log('Session created:', newSessionId)
         setExistingSessionId(newSessionId)
         setIsExistingSession(true)
         setHasModifiedInput(false)
         toast({
           title: 'Success',
-          description: 'Session created',
+          description: 'Session created and saved to database',
           status: 'success',
-          duration: 2,
+          duration: 3,
           isClosable: true,
         })
         onSessionCreated(newSessionId)
       }
     } catch (error) {
+      console.error('Save error:', error)
       toast({
         title: 'Error',
-        description: error.response?.data?.error || 'Failed to create session',
+        description: error.response?.data?.error || error.message || 'Failed to save session',
         status: 'error',
-        duration: 3,
+        duration: 5,
         isClosable: true,
       })
     } finally {
@@ -836,18 +884,79 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
                           isDisabled={isInputLocked}
                         />
                       </Td>
-                      {criteria.map((criterion, critIdx) => (
-                        <Td key={critIdx} minW="180px">
-                          <Input
-                            value={criterion.alternatives[altIdx]?.value || ''}
-                            onChange={(e) => handleAlternativeChange(critIdx, altIdx, e.target.value)}
-                            placeholder="Value"
-                            size="sm"
-                            type="number"
-                            isDisabled={isInputLocked}
-                          />
-                        </Td>
-                      ))}
+                      {criteria.map((criterion, critIdx) => {
+                        const altValue = criterion.alternatives[altIdx]?.value || ''
+                        const isQualitative = criterion.is_qualitative
+                        const distribution = parseDistribution(altValue)
+                        const summary = getDistributionSummary(distribution)
+                        const typeLabel = distribution ? getDistributionTypeLabel(distribution.type) : 'Empty'
+                        
+                        return (
+                          <Td key={critIdx} minW="180px">
+                            {isQualitative ? (
+                              // Qualitative: gray out and disabled
+                              <Box
+                                bg="gray.100"
+                                p={2}
+                                borderRadius="md"
+                                cursor="not-allowed"
+                                opacity={0.5}
+                                textAlign="center"
+                              >
+                                <Text fontSize="sm" color="gray.500">
+                                  (QI Page)
+                                </Text>
+                              </Box>
+                            ) : isInputLocked ? (
+                              // Locked: gray out and disabled
+                              <Box
+                                bg="gray.100"
+                                p={2}
+                                borderRadius="md"
+                                cursor="not-allowed"
+                                opacity={0.5}
+                              >
+                                <Text fontSize="xs" fontWeight="semibold" color="gray.600">
+                                  {typeLabel}
+                                </Text>
+                                <Text fontSize="sm" fontWeight="bold" noOfLines={1}>
+                                  {summary || '—'}
+                                </Text>
+                              </Box>
+                            ) : (
+                              // Non-qualitative and unlocked: clickable distribution editor
+                              <HStack
+                                spacing={1}
+                                p={2}
+                                borderWidth={1}
+                                borderRadius="md"
+                                borderColor={altValue ? 'blue.300' : 'gray.200'}
+                                bg={altValue ? 'blue.50' : 'white'}
+                                cursor="pointer"
+                                _hover={{ borderColor: 'blue.400', bg: 'blue.100' }}
+                                onClick={() => handleDistributionModalOpen(critIdx, altIdx)}
+                                transition="all 0.2s"
+                              >
+                                <Box flex={1} minW={0}>
+                                  <Text fontSize="xs" fontWeight="semibold" color="gray.600">
+                                    {typeLabel}
+                                  </Text>
+                                  <Text fontSize="sm" fontWeight="bold" noOfLines={1}>
+                                    {summary || '—'}
+                                  </Text>
+                                </Box>
+                                <Box
+                                  fontSize="lg"
+                                  color="blue.600"
+                                  flexShrink={0}
+                                >
+                                  ⚙
+                                </Box>
+                              </HStack>
+                            )}
+                          </Td>
+                        )
+                      })}
                       <Td width="90px" minW="90px">
                         <IconButton
                           aria-label="Remove alternative"
@@ -873,6 +982,15 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
           </>
         )}
       </VStack>
+
+      {/* Distribution Modal */}
+      <DistributionModal
+        isOpen={isDistModalOpen}
+        onClose={onDistModalClose}
+        initialValue={currentCellValue}
+        onSave={handleDistributionSave}
+        title="Edit Distribution"
+      />
     </Box>
   )
 }

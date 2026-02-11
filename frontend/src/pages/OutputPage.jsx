@@ -1,6 +1,7 @@
 import { Box, Button, Heading, HStack, Text, VStack, useToast } from '@chakra-ui/react'
 import axios from 'axios'
 import { useEffect, useState, forwardRef, useImperativeHandle } from 'react'
+import { generateInputCSV, downloadCSVFile } from '../utils/csvExport'
 
 const API_URL = 'http://localhost:5000/api'
 
@@ -205,14 +206,18 @@ function OutputPage({ sessionId }, ref) {
           <HStack spacing={3} flexWrap="wrap">
             <Button
               size="md"
-              isLoading={loading}
               isDisabled={!hasAlternatives}
-              onClick={() => handleDownload({
-                endpoint: `/session/${sessionId}/export-input-raw`,
-                filename: `input_raw_${sessionName || sessionId}.csv`,
-                successMessage: 'Input table CSV downloaded',
-                errorMessage: 'Failed to download input table CSV',
-              })}
+              onClick={() => {
+                const csvContent = generateInputCSV(criteriaList)
+                downloadCSVFile(csvContent, `input_${sessionName || sessionId}.csv`)
+                toast({
+                  title: 'Success',
+                  description: 'Input CSV downloaded',
+                  status: 'success',
+                  duration: 2000,
+                  isClosable: true,
+                })
+              }}
             >
               Input Table
             </Button>

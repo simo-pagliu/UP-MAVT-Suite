@@ -36,6 +36,7 @@ import {
 import { CheckCircleIcon, WarningIcon, CloseIcon, QuestionIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { parseDistribution, computeDistributionBounds } from '../utils/distributionUtils'
 
 const API_URL = 'http://localhost:5000/api'
 
@@ -59,11 +60,35 @@ const sortByX = (pts) => [...pts].sort((a, b) => a.x - b.x)
 const formatPointsForCsv = (points) => points.map((p) => `${p.x}:${p.y}`).join(';')
 
 const deriveRange = (criterion) => {
-  const numericValues = (criterion.alternatives || [])
-    .map((alt) => Number(alt.value))
-    .filter((v) => Number.isFinite(v))
-  if (!numericValues.length) return { min: 0, max: 1 }
-  return { min: Math.min(...numericValues), max: Math.max(...numericValues) }
+  const alternatives = criterion.alternatives || []
+  const bounds = []
+  
+  // Try to extract ranges from distributions first
+  for (const alt of alternatives) {
+    const valueStr = alt.value || ''
+    const dist = parseDistribution(valueStr)
+    
+    if (dist) {
+      // It's a distribution - compute bounds
+      const bounds_computed = computeDistributionBounds(dist)
+      bounds.push(bounds_computed.min, bounds_computed.max)
+    } else {
+      // Try to parse as plain number
+      const num = Number(valueStr)
+      if (Number.isFinite(num)) {
+        bounds.push(num)
+      }
+    }
+  }
+  
+  if (bounds.length === 0) {
+    return { min: 0, max: 1 }
+  }
+  
+  return {
+    min: Math.min(...bounds),
+    max: Math.max(...bounds)
+  }
 }
 
 const defaultPointsForShape = (shape, range, gaussian) => {
