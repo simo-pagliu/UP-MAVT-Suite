@@ -9,6 +9,78 @@ import zipfile
 
 bp = Blueprint('api', __name__, url_prefix='/api')
 
+def _ensure_object_id(value):
+    if isinstance(value, ObjectId):
+        return value
+    if not value:
+        return None
+    try:
+        return ObjectId(value)
+    except Exception:
+        return None
+
+def _serialize_object_id(value):
+    if isinstance(value, ObjectId):
+        return str(value)
+    if value is None:
+        return None
+    return str(value)
+
+def _validate_criteria(criteria):
+    if not isinstance(criteria, list) or len(criteria) == 0:
+        return False, 'At least one criterion is required'
+
+    required_fields = {'criterion_name', 'unit', 'alternatives'}
+    normalized = []
+
+    for idx, criterion in enumerate(criteria):
+        if not isinstance(criterion, dict):
+            return False, f'Criterion {idx + 1} is not valid'
+        if not required_fields.issubset(criterion.keys()):
+            return False, f'Criterion {idx + 1} is missing required fields'
+
+        normalized_criterion = dict(criterion)
+        if 'group' not in normalized_criterion:
+            normalized_criterion['group'] = ''
+        if not isinstance(normalized_criterion.get('group'), str):
+            return False, f'Criterion {idx + 1} group must be a string'
+
+        if 'description' not in normalized_criterion:
+            normalized_criterion['description'] = ''
+        if not isinstance(normalized_criterion.get('description'), str):
+            return False, f'Criterion {idx + 1} description must be a string'
+
+        alternatives = normalized_criterion.get('alternatives')
+        if not isinstance(alternatives, list):
+            return False, f'Criterion {idx + 1} alternatives must be a list'
+        for alt_idx, alt in enumerate(alternatives):
+            if not isinstance(alt, dict) or 'name' not in alt or 'value' not in alt:
+                return False, f'Criterion {idx + 1}, alternative {alt_idx + 1} is invalid'
+
+        normalized.append(normalized_criterion)
+
+    return True, normalized
+
+def _resolve_session_criteria(session, db):
+    if not isinstance(session, dict):
+        return []
+    input_id = _ensure_object_id(session.get('input_id'))
+    if input_id:
+        input_doc = db.inputs.find_one({'_id': input_id})
+        if isinstance(input_doc, dict) and isinstance(input_doc.get('criteria'), list):
+            return input_doc.get('criteria')
+    return session.get('criteria', [])
+
+def _attach_session_criteria(session, db):
+    if not isinstance(session, dict):
+        return session
+    session['criteria'] = _resolve_session_criteria(session, db)
+    if 'input_id' in session:
+        session['input_id'] = _serialize_object_id(session.get('input_id'))
+    if 'study_session_id' in session:
+        session['study_session_id'] = _serialize_object_id(session.get('study_session_id'))
+    return session
+
 # Admin authentication
 @bp.route('/admin/login', methods=['POST'])
 def admin_login():
@@ -34,31 +106,10 @@ def create_session():
     if not name:
         return jsonify({'error': 'Name is required'}), 400
 
-    if not isinstance(criteria, list) or len(criteria) == 0:
-        return jsonify({'error': 'At least one criterion is required'}), 400
-
-    # Validate new criteria format: each criterion has name, unit, group (optional), description (optional), and alternatives
-    required_fields = {'criterion_name', 'unit', 'alternatives'}
-    for idx, criterion in enumerate(criteria):
-        if not isinstance(criterion, dict):
-            return jsonify({'error': f'Criterion {idx + 1} is not valid'}), 400
-        if not required_fields.issubset(criterion.keys()):
-            return jsonify({'error': f'Criterion {idx + 1} is missing required fields'}), 400
-        # Ensure group field exists and is a string
-        if 'group' not in criterion:
-            criterion['group'] = ''
-        if not isinstance(criterion.get('group'), str):
-            return jsonify({'error': f'Criterion {idx + 1} group must be a string'}), 400
-        # Ensure description field exists and is a string
-        if 'description' not in criterion:
-            criterion['description'] = ''
-        if not isinstance(criterion.get('description'), str):
-            return jsonify({'error': f'Criterion {idx + 1} description must be a string'}), 400
-        if not isinstance(criterion.get('alternatives'), list):
-            return jsonify({'error': f'Criterion {idx + 1} alternatives must be a list'}), 400
-        for alt_idx, alt in enumerate(criterion['alternatives']):
-            if not isinstance(alt, dict) or 'name' not in alt or 'value' not in alt:
-                return jsonify({'error': f'Criterion {idx + 1}, alternative {alt_idx + 1} is invalid'}), 400
+    is_valid, criteria_or_error = _validate_criteria(criteria)
+    if not is_valid:
+        return jsonify({'error': criteria_or_error}), 400
+    criteria = criteria_or_error
 
     db = current_app.db
     session_doc = {
@@ -75,6 +126,256 @@ def create_session():
     result = db.sessions.insert_one(session_doc)
     return jsonify({'session_id': str(result.inserted_id)}), 201
 
+# Study sessions
+@bp.route('/study-session', methods=['POST'])
+def create_study_session():
+    """Create a new study session (code only)."""
+    data = request.json or {}
+    code = data.get('code')
+    if not code:
+        return jsonify({'error': 'Study code is required'}), 400
+
+    db = current_app.db
+    existing = db.study_sessions.find_one({'code': code})
+    if existing:
+        return jsonify({'error': 'Study code already exists'}), 409
+
+    study_doc = {
+        'code': code,
+        'input_id': None,
+        'created_at': datetime.utcnow(),
+    }
+    result = db.study_sessions.insert_one(study_doc)
+    return jsonify({'study_session_id': str(result.inserted_id)}), 201
+
+@bp.route('/study-session/by-code/<code>', methods=['GET'])
+def get_study_session_by_code(code):
+    """Retrieve a study session by code."""
+    db = current_app.db
+    study = db.study_sessions.find_one({'code': code})
+    if not study:
+        return jsonify({'exists': False}), 200
+
+    input_id = _ensure_object_id(study.get('input_id'))
+    criteria = []
+    if input_id:
+        input_doc = db.inputs.find_one({'_id': input_id})
+        if isinstance(input_doc, dict):
+            criteria = input_doc.get('criteria', [])
+
+    study['_id'] = str(study['_id'])
+    study['input_id'] = _serialize_object_id(study.get('input_id'))
+    study['criteria'] = criteria
+    study['exists'] = True
+    return jsonify(study), 200
+
+@bp.route('/study-session/<study_session_id>', methods=['GET'])
+def get_study_session(study_session_id):
+    """Retrieve a study session by id."""
+    db = current_app.db
+    try:
+        study = db.study_sessions.find_one({'_id': ObjectId(study_session_id)})
+        if not study:
+            return jsonify({'error': 'Study session not found'}), 404
+
+        input_id = _ensure_object_id(study.get('input_id'))
+        criteria = []
+        if input_id:
+            input_doc = db.inputs.find_one({'_id': input_id})
+            if isinstance(input_doc, dict):
+                criteria = input_doc.get('criteria', [])
+
+        study['_id'] = str(study['_id'])
+        study['input_id'] = _serialize_object_id(study.get('input_id'))
+        study['criteria'] = criteria
+        return jsonify(study), 200
+    except:
+        return jsonify({'error': 'Invalid study session ID'}), 400
+
+@bp.route('/study-session/<study_session_id>', methods=['DELETE'])
+def delete_study_session(study_session_id):
+    """Delete a study session and optionally its elicitation sessions."""
+    db = current_app.db
+    try:
+        study = db.study_sessions.find_one({'_id': ObjectId(study_session_id)})
+        if not study:
+            return jsonify({'error': 'Study session not found'}), 404
+
+        # Check if there are elicitation sessions
+        session_count = db.sessions.count_documents({'study_session_id': ObjectId(study_session_id)})
+        if session_count > 0:
+            return jsonify({'error': 'Cannot delete study session with elicitation sessions'}), 400
+
+        # Delete associated input if it exists
+        input_id = _ensure_object_id(study.get('input_id'))
+        if input_id:
+            db.inputs.delete_one({'_id': input_id})
+
+        # Delete the study session
+        db.study_sessions.delete_one({'_id': ObjectId(study_session_id)})
+        return jsonify({'success': True}), 200
+    except:
+        return jsonify({'error': 'Invalid study session ID'}), 400
+
+@bp.route('/study-session/<study_session_id>/input', methods=['PUT'])
+def update_study_input(study_session_id):
+    """Create or update the study input criteria."""
+    data = request.json or {}
+    criteria = data.get('criteria', [])
+
+    is_valid, criteria_or_error = _validate_criteria(criteria)
+    if not is_valid:
+        return jsonify({'error': criteria_or_error}), 400
+    criteria = criteria_or_error
+
+    db = current_app.db
+    try:
+        study = db.study_sessions.find_one({'_id': ObjectId(study_session_id)})
+        if not study:
+            return jsonify({'error': 'Study session not found'}), 404
+
+        input_id = _ensure_object_id(study.get('input_id'))
+        now = datetime.utcnow()
+        if input_id:
+            db.inputs.update_one(
+                {'_id': input_id},
+                {'$set': {'criteria': criteria, 'updated_at': now}}
+            )
+        else:
+            input_doc = {
+                'criteria': criteria,
+                'created_at': now,
+                'updated_at': now,
+            }
+            result = db.inputs.insert_one(input_doc)
+            db.study_sessions.update_one(
+                {'_id': ObjectId(study_session_id)},
+                {'$set': {'input_id': result.inserted_id}}
+            )
+
+        return jsonify({'status': 'updated'}), 200
+    except:
+        return jsonify({'error': 'Invalid study session ID'}), 400
+
+@bp.route('/study-session/<study_session_id>/input', methods=['GET'])
+def get_study_input(study_session_id):
+    """Get study input criteria."""
+    db = current_app.db
+    try:
+        study = db.study_sessions.find_one({'_id': ObjectId(study_session_id)})
+        if not study:
+            return jsonify({'error': 'Study session not found'}), 404
+
+        input_id = _ensure_object_id(study.get('input_id'))
+        criteria = []
+        if input_id:
+            input_doc = db.inputs.find_one({'_id': input_id})
+            if isinstance(input_doc, dict):
+                criteria = input_doc.get('criteria', [])
+
+        return jsonify({'criteria': criteria}), 200
+    except:
+        return jsonify({'error': 'Invalid study session ID'}), 400
+
+@bp.route('/study-session/<study_session_id>/elicitation-session', methods=['POST'])
+def create_elicitation_session(study_session_id):
+    """Create an elicitation session under a study session."""
+    data = request.json or {}
+    name = data.get('name')
+    if not name:
+        return jsonify({'error': 'Session code is required'}), 400
+
+    db = current_app.db
+    try:
+        study = db.study_sessions.find_one({'_id': ObjectId(study_session_id)})
+        if not study:
+            return jsonify({'error': 'Study session not found'}), 404
+
+        if db.sessions.find_one({'name': name}):
+            return jsonify({'error': 'Session code already exists'}), 409
+
+        input_id = _ensure_object_id(study.get('input_id'))
+        if not input_id:
+            return jsonify({'error': 'Study input is not defined'}), 400
+
+        session_doc = {
+            'name': name,
+            'input_id': input_id,
+            'study_session_id': ObjectId(study_session_id),
+            'qualitative_indicators': None,
+            'value_functions': None,
+            'bwt': None,
+            'locked': False,
+            'session_locked': False,
+            'created_at': datetime.utcnow()
+        }
+        result = db.sessions.insert_one(session_doc)
+        return jsonify({'session_id': str(result.inserted_id)}), 201
+    except:
+        return jsonify({'error': 'Invalid study session ID'}), 400
+
+@bp.route('/study-session/<study_session_id>/elicitation-sessions', methods=['GET'])
+def list_elicitation_sessions(study_session_id):
+    """List elicitation sessions for a study session."""
+    db = current_app.db
+    try:
+        study = db.study_sessions.find_one({'_id': ObjectId(study_session_id)})
+        if not study:
+            return jsonify({'error': 'Study session not found'}), 404
+
+        input_id = _ensure_object_id(study.get('input_id'))
+        criteria = []
+        if input_id:
+            input_doc = db.inputs.find_one({'_id': input_id})
+            if isinstance(input_doc, dict):
+                criteria = input_doc.get('criteria', [])
+
+        sessions = list(db.sessions.find({'study_session_id': ObjectId(study_session_id)}).sort('created_at', -1))
+        for session in sessions:
+            session['_id'] = str(session['_id'])
+            session['study_session_id'] = _serialize_object_id(session.get('study_session_id'))
+            session['input_id'] = _serialize_object_id(session.get('input_id'))
+
+        return jsonify({
+            'study_session_id': str(study.get('_id')),
+            'study_code': study.get('code'),
+            'criteria': criteria,
+            'sessions': sessions,
+        }), 200
+    except:
+        return jsonify({'error': 'Invalid study session ID'}), 400
+
+# Get all study sessions (for admin)
+@bp.route('/study-sessions', methods=['GET'])
+def get_all_study_sessions():
+    """Retrieve all study sessions with their elicitation sessions"""
+    db = current_app.db
+    study_sessions = list(db.study_sessions.find().sort('created_at', -1))
+    result = []
+    for study in study_sessions:
+        study_id = study.get('_id')
+        input_id = _ensure_object_id(study.get('input_id'))
+        criteria = []
+        if input_id:
+            input_doc = db.inputs.find_one({'_id': input_id})
+            if isinstance(input_doc, dict):
+                criteria = input_doc.get('criteria', [])
+        
+        # Get elicitation sessions for this study
+        sessions = list(db.sessions.find({'study_session_id': study_id}).sort('created_at', -1))
+        for session in sessions:
+            session['_id'] = str(session['_id'])
+            session['study_session_id'] = _serialize_object_id(session.get('study_session_id'))
+            session['input_id'] = _serialize_object_id(session.get('input_id'))
+        
+        study['_id'] = str(study_id)
+        study['input_id'] = _serialize_object_id(study.get('input_id'))
+        study['criteria'] = criteria
+        study['sessions'] = sessions
+        result.append(study)
+    
+    return jsonify(result), 200
+
 # Get all sessions (for admin)
 @bp.route('/sessions', methods=['GET'])
 def get_all_sessions():
@@ -83,6 +384,7 @@ def get_all_sessions():
     sessions = list(db.sessions.find().sort('created_at', -1))
     for session in sessions:
         session['_id'] = str(session['_id'])
+        _attach_session_criteria(session, db)
     return jsonify(sessions), 200
 
 # Get session by name
@@ -93,9 +395,10 @@ def get_session_by_name(name):
     session = db.sessions.find_one({'name': name})
     if not session:
         return jsonify({'exists': False}), 200
-    
+
     session['_id'] = str(session['_id'])
     session['exists'] = True
+    _attach_session_criteria(session, db)
     return jsonify(session), 200
 
 # Get session
@@ -107,8 +410,9 @@ def get_session(session_id):
         session = db.sessions.find_one({'_id': ObjectId(session_id)})
         if not session:
             return jsonify({'error': 'Session not found'}), 404
-        
+
         session['_id'] = str(session['_id'])
+        _attach_session_criteria(session, db)
         return jsonify(session), 200
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
@@ -133,25 +437,10 @@ def update_criteria(session_id):
     data = request.json or {}
     criteria = data.get('criteria', [])
 
-    if not isinstance(criteria, list) or len(criteria) == 0:
-        return jsonify({'error': 'At least one criterion is required'}), 400
-
-    # Validate criteria format
-    required_fields = {'criterion_name', 'unit', 'alternatives'}
-    for idx, criterion in enumerate(criteria):
-        if not isinstance(criterion, dict):
-            return jsonify({'error': f'Criterion {idx + 1} is not valid'}), 400
-        if not required_fields.issubset(criterion.keys()):
-            return jsonify({'error': f'Criterion {idx + 1} is missing required fields'}), 400
-        if 'group' not in criterion:
-            criterion['group'] = ''
-        if not isinstance(criterion.get('group'), str):
-            return jsonify({'error': f'Criterion {idx + 1} group must be a string'}), 400
-        if not isinstance(criterion.get('alternatives'), list):
-            return jsonify({'error': f'Criterion {idx + 1} alternatives must be a list'}), 400
-        for alt_idx, alt in enumerate(criterion['alternatives']):
-            if not isinstance(alt, dict) or 'name' not in alt or 'value' not in alt:
-                return jsonify({'error': f'Criterion {idx + 1}, alternative {alt_idx + 1} is invalid'}), 400
+    is_valid, criteria_or_error = _validate_criteria(criteria)
+    if not is_valid:
+        return jsonify({'error': criteria_or_error}), 400
+    criteria = criteria_or_error
 
     db = current_app.db
     try:
@@ -164,7 +453,7 @@ def update_criteria(session_id):
             return jsonify({'error': 'Input is locked'}), 423
 
         # Check for criteria that became qualitative/non-qualitative and update accordingly
-        old_criteria = session.get('criteria', [])
+        old_criteria = _resolve_session_criteria(session, db)
         value_functions = session.get('value_functions') or {}
         qualitative_indicators = session.get('qualitative_indicators') or {}
         
@@ -199,9 +488,19 @@ def update_criteria(session_id):
                 if criterion_name in qualitative_indicators:
                     del qualitative_indicators[criterion_name]
 
-        result = db.sessions.update_one(
+        input_id = _ensure_object_id(session.get('input_id'))
+        if input_id:
+            db.inputs.update_one(
+                {'_id': input_id},
+                {'$set': {'criteria': criteria, 'updated_at': datetime.utcnow()}}
+            )
+            update_payload = {'value_functions': value_functions, 'qualitative_indicators': qualitative_indicators}
+        else:
+            update_payload = {'criteria': criteria, 'value_functions': value_functions, 'qualitative_indicators': qualitative_indicators}
+
+        db.sessions.update_one(
             {'_id': ObjectId(session_id)},
-            {'$set': {'criteria': criteria, 'value_functions': value_functions, 'qualitative_indicators': qualitative_indicators}}
+            {'$set': update_payload}
         )
         return jsonify({'status': 'updated'}), 200
     except:
@@ -672,7 +971,7 @@ def export_value_functions_csv(session_id):
         if not session:
             return jsonify({'error': 'Session not found'}), 404
 
-        criteria = session.get('criteria', [])
+        criteria = _resolve_session_criteria(session, db)
         qualitative_indicators = session.get('qualitative_indicators') or {}
         value_functions = session.get('value_functions') or {}
         if not _is_value_functions_complete(criteria, value_functions):
@@ -702,7 +1001,7 @@ def export_value_functions_json(session_id):
         if not session:
             return jsonify({'error': 'Session not found'}), 404
 
-        criteria = session.get('criteria', [])
+        criteria = _resolve_session_criteria(session, db)
         value_functions = session.get('value_functions') or {}
         if not _is_value_functions_complete(criteria, value_functions):
             return jsonify({'error': 'Complete value functions before export'}), 400
@@ -825,7 +1124,7 @@ def export_input_csv(session_id):
         if not session:
             return jsonify({'error': 'Session not found'}), 404
 
-        criteria = session.get('criteria', [])
+        criteria = _resolve_session_criteria(session, db)
         qualitative_indicators = session.get('qualitative_indicators') or {}
         value_functions = session.get('value_functions') or {}
         if not _is_qualitative_complete(criteria, qualitative_indicators) or not _is_value_functions_complete(criteria, value_functions):
@@ -851,7 +1150,7 @@ def export_input_json(session_id):
         if not session:
             return jsonify({'error': 'Session not found'}), 404
 
-        criteria = session.get('criteria', [])
+        criteria = _resolve_session_criteria(session, db)
         qualitative_indicators = session.get('qualitative_indicators') or {}
         value_functions = session.get('value_functions') or {}
         if not _is_qualitative_complete(criteria, qualitative_indicators) or not _is_value_functions_complete(criteria, value_functions):
@@ -904,7 +1203,7 @@ def export_input_raw_csv(session_id):
         if not session:
             return jsonify({'error': 'Session not found'}), 404
 
-        criteria = session.get('criteria', [])
+        criteria = _resolve_session_criteria(session, db)
         if not isinstance(criteria, list) or len(criteria) == 0:
             return jsonify({'error': 'No input data to export'}), 404
 
@@ -928,7 +1227,7 @@ def export_qualitative_csv(session_id):
         if not session:
             return jsonify({'error': 'Session not found'}), 404
 
-        criteria = session.get('criteria', [])
+        criteria = _resolve_session_criteria(session, db)
         qualitative_indicators = session.get('qualitative_indicators') or {}
         if not _is_qualitative_complete(criteria, qualitative_indicators):
             return jsonify({'error': 'Complete qualitative indicators before export'}), 400
@@ -1006,7 +1305,7 @@ def export_all_outputs_zip(session_id):
         if not session:
             return jsonify({'error': 'Session not found'}), 404
 
-        criteria = session.get('criteria', [])
+        criteria = _resolve_session_criteria(session, db)
         qualitative_indicators = session.get('qualitative_indicators') or {}
         value_functions = session.get('value_functions') or {}
         bwt_data = session.get('bwt')

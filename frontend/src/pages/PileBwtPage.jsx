@@ -1568,9 +1568,9 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                           mainContentRef.current.scrollTop = 0
                         }
                       } else {
-                        // Last group - go to output
+                        // Last group - go to recap
                         if (onPageChange) {
-                          onPageChange('output')
+                          onPageChange('recap')
                         }
                       }
                     } else {
@@ -1583,7 +1583,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                   size="md"
                 >
                   {currentPairIndex === pairs.length - 1 
-                    ? (selectedGroupIndex === allGroups.length - 1 ? 'Complete & Go to Output' : 'Next Group') 
+                    ? (selectedGroupIndex === allGroups.length - 1 ? 'Complete & Go to Recap' : 'Next Group') 
                     : 'Next'}
                 </Button>
               </HStack>

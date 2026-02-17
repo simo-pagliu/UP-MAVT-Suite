@@ -36,14 +36,11 @@ import { generateInputCSV, downloadCSVFile } from '../utils/csvExport'
 
 const API_URL = 'http://localhost:5000/api'
 
-function InputPage({ onSessionCreated, sessionId }, ref) {
+function InputPage({ studySessionId }, ref) {
   const [name, setName] = useState('')
   const [criteria, setCriteria] = useState([])
   const [loading, setLoading] = useState(false)
-  const [nameChecked, setNameChecked] = useState(false)
-  const [existingSessionId, setExistingSessionId] = useState(null)
-  const [isExistingSession, setIsExistingSession] = useState(false)
-  const [showCodeInput, setShowCodeInput] = useState(false)
+  const [isExistingStudySession, setIsExistingStudySession] = useState(false)
   const [isLocked, setIsLocked] = useState(false)
   const [isSessionLocked, setIsSessionLocked] = useState(false)
   const [hasModifiedInput, setHasModifiedInput] = useState(false)
@@ -55,6 +52,31 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
   
   const toast = useToast()
   const fileInputRef = useRef(null)
+
+  const parseCsvLine = (line) => {
+    const values = []
+    let current = ''
+    let inQuotes = false
+    for (let i = 0; i < line.length; i += 1) {
+      const char = line[i]
+      if (char === '"') {
+        const nextChar = line[i + 1]
+        if (inQuotes && nextChar === '"') {
+          current += '"'
+          i += 1
+        } else {
+          inQuotes = !inQuotes
+        }
+      } else if (char === ',' && !inQuotes) {
+        values.push(current.trim())
+        current = ''
+      } else {
+        current += char
+      }
+    }
+    values.push(current.trim())
+    return values
+  }
   
   useImperativeHandle(ref, () => ({
     async saveBeforeNavigate() {
@@ -82,127 +104,33 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
   }
 
   useEffect(() => {
-    if (sessionId) {
-      const fetchSession = async () => {
-        try {
-          const response = await axios.get(`${API_URL}/session/${sessionId}`)
-          const session = response.data
-          if (session.name) {
-            setName(session.name)
-            setNameChecked(true)
-          }
-          if (session.criteria && Array.isArray(session.criteria)) {
-                  setCriteria(normalizeCriteria(session.criteria))
-          }
-          setIsLocked(session.locked || false)
-          setIsSessionLocked(session.session_locked || false)
-          setExistingSessionId(sessionId)
-          setIsExistingSession(true)
-          setHasModifiedInput(false)
-          // Enable navigation if: locked OR (unlocked with complete criteria)
-          const isComplete = session.criteria && session.criteria.length > 0
-          if (session.locked || session.session_locked || isComplete) {
-            onSessionCreated(sessionId)
-          }
-        } catch (error) {
-          console.error('Failed to fetch session:', error)
-        }
-      }
-      fetchSession()
-    }
-  }, [sessionId, onSessionCreated])
-
-  const generateRandomCode = () => {
-    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-    let code = ''
-    for (let i = 0; i < 8; i++) {
-      code += characters.charAt(Math.floor(Math.random() * characters.length))
-    }
-    return code
-  }
-
-  const handleNewSession = () => {
-    const code = generateRandomCode()
-    setName(code)
-    setNameChecked(true)
-    setIsExistingSession(false)
-    setCriteria([])
-    toast({
-      title: 'New session created',
-      description: `Session code: ${code}`,
-      status: 'success',
-      duration: 3000,
-      isClosable: true,
-    })
-  }
-
-  const handleCheckName = async () => {
-    if (!name.trim()) {
-      toast({
-        title: 'Error',
-        description: 'Please enter a session code',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      })
+    if (!studySessionId) {
+      setName('')
+      setCriteria([])
+      setIsExistingStudySession(false)
       return
     }
 
-    setLoading(true)
-    try {
-      const response = await axios.get(`${API_URL}/session/by-name/${encodeURIComponent(name)}`)
-      const data = response.data
-      
-      if (data.exists) {
-        // Session exists, load it
-        if (data.criteria && Array.isArray(data.criteria)) {
-          setCriteria(normalizeCriteria(data.criteria))
+    const fetchStudy = async () => {
+      try {
+        const response = await axios.get(`${API_URL}/study-session/${studySessionId}`)
+        const study = response.data
+        if (study.code) {
+          setName(study.code)
         }
-        setIsLocked(data.locked || false)
-        setIsSessionLocked(data.session_locked || false)
-        setExistingSessionId(data._id)
-        setIsExistingSession(true)
-        setHasModifiedInput(false)
-        toast({
-          title: 'Session found',
-          description: 'Loaded existing criteria for this session code',
-          status: 'info',
-          duration: 3000,
-          isClosable: true,
-        })
-        // Enable navigation if: locked OR (unlocked with complete criteria)
-        const isComplete = data.criteria && data.criteria.length > 0
-        if (data.locked || data.session_locked || isComplete) {
-          onSessionCreated(data._id)
+        if (study.criteria && Array.isArray(study.criteria)) {
+          setCriteria(normalizeCriteria(study.criteria))
         }
-      } else {
-        // New session
-        setIsExistingSession(false)
         setIsLocked(false)
         setIsSessionLocked(false)
+        setIsExistingStudySession(true)
         setHasModifiedInput(false)
-        setCriteria([])
-        toast({
-          title: 'New session',
-          description: 'Upload a CSV to create criteria',
-          status: 'info',
-          duration: 3000,
-          isClosable: true,
-        })
+      } catch (error) {
+        console.error('Failed to fetch study session:', error)
       }
-      setNameChecked(true)
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.error || 'Failed to check session code',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      })
-    } finally {
-      setLoading(false)
     }
-  }
+    fetchStudy()
+  }, [studySessionId])
 
   const handleFileUpload = (event) => {
     if (isInputLocked) {
@@ -239,7 +167,7 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
       }
 
       // Parse all rows
-      const rows = lines.map(line => line.split(',').map(cell => cell.trim()))
+      const rows = lines.map((line) => parseCsvLine(line))
       
       // First row: criterion names (first cell should be something like "Alternative")
       const headerRow = rows[0]
@@ -392,8 +320,7 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
       const valueString = distributionToString(distribution)
       handleAlternativeChange(criterionIdx, altIdx, valueString)
       
-      // Auto-save to database if this is an existing session
-      if (isExistingSession && existingSessionId && !isInputLocked) {
+      if (isExistingStudySession && studySessionId && !isInputLocked) {
         // Update the criteria array immediately
         const updatedCriteria = criteria.map((crit, idx) => {
           if (idx === criterionIdx) {
@@ -408,10 +335,10 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
         })
         
         try {
-          await axios.put(`${API_URL}/session/${existingSessionId}/criteria`, { criteria: updatedCriteria })
+          await axios.put(`${API_URL}/study-session/${studySessionId}/input`, { criteria: updatedCriteria })
           toast({
             title: 'Saved',
-            description: 'Distribution saved to database',
+            description: 'Distribution saved to study input',
             status: 'success',
             duration: 2,
             isClosable: true,
@@ -577,51 +504,24 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
 
     setLoading(true)
     try {
-      if (isExistingSession && existingSessionId) {
-        // If locked, just proceed without updating
-        if (isInputLocked) {
-          toast({
-            title: 'Proceeding',
-            description: isSessionLocked
-              ? 'Session is locked, proceeding to elicitation'
-              : 'Input is locked, proceeding to elicitation',
-            status: 'info',
-            duration: 2,
-            isClosable: true,
-          })
-          onSessionCreated(existingSessionId)
-        } else {
-          // Update existing session criteria
-          console.log('Updating criteria:', criteria)
-          await axios.put(`${API_URL}/session/${existingSessionId}/criteria`, { criteria })
-          console.log('Criteria updated successfully')
-          toast({
-            title: 'Success',
-            description: 'Session updated and saved to database',
-            status: 'success',
-            duration: 3,
-            isClosable: true,
-          })
-          setHasModifiedInput(false)
-          onSessionCreated(existingSessionId)
-        }
-      } else {
-        // Create new session
-        console.log('Creating session with criteria:', criteria)
-        const response = await axios.post(`${API_URL}/session`, { name, criteria })
-        const newSessionId = response.data.session_id
-        console.log('Session created:', newSessionId)
-        setExistingSessionId(newSessionId)
-        setIsExistingSession(true)
-        setHasModifiedInput(false)
+      if (isExistingStudySession && studySessionId) {
+        await axios.put(`${API_URL}/study-session/${studySessionId}/input`, { criteria })
         toast({
           title: 'Success',
-          description: 'Session created and saved to database',
+          description: 'Study input updated and saved',
           status: 'success',
           duration: 3,
           isClosable: true,
         })
-        onSessionCreated(newSessionId)
+        setHasModifiedInput(false)
+      } else {
+        toast({
+          title: 'Missing study session',
+          description: 'Access or create a study session before saving input.',
+          status: 'error',
+          duration: 3,
+          isClosable: true,
+        })
       }
     } catch (error) {
       console.error('Save error:', error)
@@ -641,177 +541,79 @@ function InputPage({ onSessionCreated, sessionId }, ref) {
     <Box bg="white" p={6} borderRadius="lg" boxShadow="sm">
       <VStack spacing={6} align="stretch">
         <HStack justify="space-between" align="center" mb={4}>
-          <Heading as="h1" size="lg">Input</Heading>
-          {nameChecked && !isInputLocked && (hasModifiedInput || !isExistingSession || criteria.length === 0) && (
+          <Heading as="h1" size="lg">Input Definition</Heading>
+          {studySessionId && !isInputLocked && (hasModifiedInput || !isExistingStudySession || criteria.length === 0) && (
             <Button
               colorScheme="blue"
               isLoading={loading}
               onClick={handleSubmit}
               size="lg"
             >
-              Confirm input to continue
+              Save input
             </Button>
           )}
         </HStack>
-        {nameChecked && isSessionLocked && (
-          <Text color="orange.600" fontSize="sm">
-            Session is locked. You can proceed, but changes are disabled.
-          </Text>
+        {!studySessionId && (
+          <Box borderWidth={1} borderRadius="md" p={4} bg="gray.50">
+            <Text fontSize="sm" color="gray.600">
+              Access a study session first to define the input.
+            </Text>
+          </Box>
         )}
-        {nameChecked && !isSessionLocked && isLocked && (
-          <Text color="orange.600" fontSize="sm">
-            Input is locked. You can proceed, but changes are disabled.
-          </Text>
-        )}
-        <FormControl>
-          
-          {!nameChecked && !showCodeInput && (
-            <VStack spacing={4} align="stretch">
-              <Text fontSize="sm" color="gray.600">
-                Start a new session or continue with an existing session code.
-              </Text>
-              <HStack spacing={4} justify="center">
-                <Button 
-                  colorScheme="blue" 
-                  onClick={handleNewSession}
-                  size="lg"
-                  px={8}
-                >
-                  New Empty Session
-                </Button>
-                <Button 
-                  variant="outline" 
-                  onClick={() => setShowCodeInput(true)}
-                  size="lg"
-                  px={8}
-                >
-                  I Have a Code
-                </Button>
-              </HStack>
-            </VStack>
-          )}
 
-          {!nameChecked && showCodeInput && (
-            <VStack spacing={3} align="stretch">
-              <Text fontSize="sm" color="gray.600">
-                Enter your session code below.
-              </Text>
-              <HStack>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setShowCodeInput(false)
-                    setName('')
-                  }}
-                >
-                  ← Back
-                </Button>
-              </HStack>
-              <HStack>
-                <Input
-                  placeholder="Enter session code"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && handleCheckName()}
-                  autoFocus
-                />
-                <Button
-                  colorScheme="blue"
-                  onClick={handleCheckName}
-                  isLoading={loading}
-                  minW="100px"
-                >
-                  Next
-                </Button>
-              </HStack>
-            </VStack>
-          )}
-
-          {nameChecked && (
-            <HStack mb={4}>
-              <Text fontSize="sm" fontWeight="medium">Session Code: {name}</Text>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setNameChecked(false)
-                  setShowCodeInput(false)
-                  setCriteria([])
-                  setIsExistingSession(false)
-                  setExistingSessionId(null)
-                  setName('')
-                }}
-              >
-                Change
-              </Button>
-            </HStack>
-          )}
-        </FormControl>
-
-        {nameChecked && (
+        {studySessionId && (
           <>
             <Divider />
 
-            {isInputLocked && (
-              <Box bg="yellow.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="yellow.400">
-                <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
-                  🔒 {isSessionLocked
-                    ? 'This session is locked. You can view the criteria but cannot modify them.'
-                    : 'This input is locked. You can view the criteria but cannot modify them.'}
-                </Text>
-              </Box>
-            )}
-
             <VStack align="stretch" spacing={4}>
-          <Heading as="h2" size="md">Criteria & Alternatives</Heading>
-          <Text fontSize="sm" color="gray.600">
-            Upload a CSV where the first column contains alternative names, other columns are criteria. First row has criterion names, last row has units.
-          </Text>
-          {!isInputLocked && (
-            <FormControl>
-              <FormLabel>Upload CSV</FormLabel>
-              <Input 
-                type="file" 
-                accept=".csv" 
-                onChange={handleFileUpload} 
-                ref={fileInputRef}
-              display="none"
-            />
-            <Button 
-              onClick={() => fileInputRef.current?.click()} 
-              colorScheme="blue" 
-              variant="outline"
-              width="full"
-            >
-              Choose File
-            </Button>
-            </FormControl>
-          )}
+              <Heading as="h2" size="md">Criteria & Alternatives</Heading>
+              <Text fontSize="sm" color="gray.600">
+                Upload a CSV where the first column contains alternative names, other columns are criteria. First row has criterion names, last row has units.
+              </Text>
+              {!isInputLocked && (
+                <FormControl>
+                  <FormLabel>Upload CSV</FormLabel>
+                  <Input
+                    type="file"
+                    accept=".csv"
+                    onChange={handleFileUpload}
+                    ref={fileInputRef}
+                    display="none"
+                  />
+                  <Button
+                    onClick={() => fileInputRef.current?.click()}
+                    colorScheme="blue"
+                    variant="outline"
+                    width="full"
+                  >
+                    Choose File
+                  </Button>
+                </FormControl>
+              )}
 
-          <HStack justify="space-between">
-            <HStack spacing={2}>
-              <Button 
-                leftIcon={<AddIcon />} 
-                size="sm" 
-                onClick={handleAddAlternative}
-                isDisabled={isInputLocked}
-              >
-                Add Alternative
-              </Button>
-              <Button 
-                leftIcon={<AddIcon />} 
-                size="sm" 
-                onClick={handleAddCriterion}
-                isDisabled={isInputLocked}
-              >
-                Add Criterion
-              </Button>
-            </HStack>
-            <Button size="sm" onClick={downloadCSV}>
-              Download CSV
-            </Button>
-          </HStack>
+              <HStack justify="space-between">
+                <HStack spacing={2}>
+                  <Button
+                    leftIcon={<AddIcon />}
+                    size="sm"
+                    onClick={handleAddAlternative}
+                    isDisabled={isInputLocked}
+                  >
+                    Add Alternative
+                  </Button>
+                  <Button
+                    leftIcon={<AddIcon />}
+                    size="sm"
+                    onClick={handleAddCriterion}
+                    isDisabled={isInputLocked}
+                  >
+                    Add Criterion
+                  </Button>
+                </HStack>
+                <Button size="sm" onClick={downloadCSV}>
+                  Download CSV
+                </Button>
+              </HStack>
 
           {criteria.length > 0 ? (
             <Box overflowX="auto" borderWidth={1} borderRadius="md">
