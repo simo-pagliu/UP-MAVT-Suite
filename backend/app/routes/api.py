@@ -1400,3 +1400,319 @@ def export_csv(session_id):
         )
     except:
         return jsonify({'error': 'Invalid session ID'}), 400
+
+
+# ============================================================================
+# UP-MAVT WORKFLOW ENDPOINTS
+# ============================================================================
+
+@bp.route('/study-session/<study_session_id>/compute-weights', methods=['POST'])
+def compute_weights_endpoint(study_session_id):
+    """Create a task to compute weights for selected elicitation sessions."""
+    data = request.json or {}
+    selected_session_ids = data.get('selected_session_ids', [])
+
+    if not selected_session_ids:
+        return jsonify({'error': 'No sessions selected'}), 400
+
+    db = current_app.db
+    try:
+        study = db.study_sessions.find_one({'_id': ObjectId(study_session_id)})
+        if not study:
+            return jsonify({'error': 'Study session not found'}), 404
+
+        # Cancel any existing pending/running compute_weights tasks for this study
+        db.tasks.update_many(
+            {
+                'params.study_session_id': study_session_id,
+                'type': 'compute_weights',
+                'status': {'$in': ['pending', 'running']},
+            },
+            {'$set': {'status': 'cancelled'}}
+        )
+
+        task_doc = {
+            'type': 'compute_weights',
+            'status': 'pending',
+            'params': {
+                'study_session_id': study_session_id,
+                'selected_session_ids': selected_session_ids,
+            },
+            'console_output': '',
+            'created_at': datetime.utcnow(),
+        }
+        result = db.tasks.insert_one(task_doc)
+        return jsonify({'task_id': str(result.inserted_id)}), 202
+
+    except Exception:
+        return jsonify({'error': 'Invalid study session ID'}), 400
+
+
+@bp.route('/study-session/<study_session_id>/run-step', methods=['POST'])
+def run_step_endpoint(study_session_id):
+    """Create a task to run a UP-MAVT step (2-6)."""
+    data = request.json or {}
+    step_number = data.get('step_number')
+    selected_session_ids = data.get('selected_session_ids', [])
+    mc_iterations = data.get('mc_iterations', 1000)
+    aggregation_method = data.get('aggregation_method', 'weighted_sum')
+    mc_mode = data.get('mc_mode', 'non_strict')
+    use_random_weights = data.get('use_random_weights', False)
+
+    if step_number is None or step_number not in [2, 3, 4, 5, 6]:
+        return jsonify({'error': 'Invalid step number (must be 2-6)'}), 400
+
+    if not selected_session_ids:
+        return jsonify({'error': 'No sessions selected'}), 400
+
+    # Validate mc_iterations
+    mc_iterations = max(100, min(5000, int(mc_iterations)))
+
+    # Map aggregation method shortcodes
+    agg_map = {
+        'SUM': 'weighted_sum',
+        'GEO': 'geometric_mean',
+        'HAR': 'harmonic_mean',
+        'weighted_sum': 'weighted_sum',
+        'geometric_mean': 'geometric_mean',
+        'harmonic_mean': 'harmonic_mean',
+    }
+    aggregation_method = agg_map.get(aggregation_method, 'weighted_sum')
+
+    step_names = {
+        2: 'Consensus Analysis (SMC)',
+        3: 'Dominance Analysis (NSMC + Random Weights)',
+        4: 'Compensation Analysis (NSMC + All Aggregations)',
+        5: 'Uncertainty Analysis (SMC)',
+        6: 'Final Results (NSMC)',
+    }
+
+    db = current_app.db
+    try:
+        study = db.study_sessions.find_one({'_id': ObjectId(study_session_id)})
+        if not study:
+            return jsonify({'error': 'Study session not found'}), 404
+
+        # Check weights are computed
+        if not study.get('computed_weights'):
+            return jsonify({'error': 'Compute weights first (Step 1)'}), 400
+
+        # Cancel any existing pending/running tasks for this step
+        db.tasks.update_many(
+            {
+                'params.study_session_id': study_session_id,
+                'params.step_number': step_number,
+                'type': 'run_step',
+                'status': {'$in': ['pending', 'running']},
+            },
+            {'$set': {'status': 'cancelled'}}
+        )
+
+        task_doc = {
+            'type': 'run_step',
+            'status': 'pending',
+            'params': {
+                'study_session_id': study_session_id,
+                'selected_session_ids': selected_session_ids,
+                'step_number': step_number,
+                'step_name': step_names.get(step_number, f'Step {step_number}'),
+                'mc_iterations': mc_iterations,
+                'aggregation_method': aggregation_method,
+                'mc_mode': mc_mode,
+                'use_random_weights': use_random_weights,
+                'opinion_weights': None,
+            },
+            'console_output': '',
+            'created_at': datetime.utcnow(),
+        }
+        result = db.tasks.insert_one(task_doc)
+        return jsonify({'task_id': str(result.inserted_id)}), 202
+
+    except Exception:
+        return jsonify({'error': 'Invalid study session ID'}), 400
+
+
+@bp.route('/task/<task_id>/status', methods=['GET'])
+def get_task_status(task_id):
+    """Get the status and console output of a task."""
+    db = current_app.db
+    try:
+        task = db.tasks.find_one({'_id': ObjectId(task_id)})
+        if not task:
+            return jsonify({'error': 'Task not found'}), 404
+
+        return jsonify({
+            'task_id': str(task['_id']),
+            'type': task.get('type'),
+            'status': task.get('status'),
+            'console_output': task.get('console_output', ''),
+            'error': task.get('error'),
+            'created_at': task.get('created_at', '').isoformat() if task.get('created_at') else None,
+            'started_at': task.get('started_at', '').isoformat() if task.get('started_at') else None,
+            'completed_at': task.get('completed_at', '').isoformat() if task.get('completed_at') else None,
+        }), 200
+
+    except Exception:
+        return jsonify({'error': 'Invalid task ID'}), 400
+
+
+@bp.route('/task/<task_id>/cancel', methods=['POST'])
+def cancel_task(task_id):
+    """Cancel a pending or running task."""
+    db = current_app.db
+    try:
+        result = db.tasks.update_one(
+            {'_id': ObjectId(task_id), 'status': {'$in': ['pending', 'running']}},
+            {'$set': {'status': 'cancelled', 'completed_at': datetime.utcnow()}}
+        )
+        if result.modified_count == 0:
+            return jsonify({'error': 'Task not found or already completed'}), 404
+        return jsonify({'status': 'cancelled'}), 200
+    except Exception:
+        return jsonify({'error': 'Invalid task ID'}), 400
+
+
+@bp.route('/study-session/<study_session_id>/reset-weights', methods=['POST'])
+def reset_weights(study_session_id):
+    """Reset computed weights and all step results."""
+    db = current_app.db
+    try:
+        result = db.study_sessions.update_one(
+            {'_id': ObjectId(study_session_id)},
+            {'$unset': {
+                'computed_weights': '',
+                'step_2_results': '',
+                'step_3_results': '',
+                'step_4_results': '',
+                'step_5_results': '',
+                'step_6_results': '',
+            }}
+        )
+        if result.matched_count == 0:
+            return jsonify({'error': 'Study session not found'}), 404
+        return jsonify({'status': 'reset'}), 200
+    except Exception:
+        return jsonify({'error': 'Invalid study session ID'}), 400
+
+
+@bp.route('/study-session/<study_session_id>/reset-step/<int:step_number>', methods=['POST'])
+def reset_step(study_session_id, step_number):
+    """Reset results for a specific step."""
+    if step_number not in [2, 3, 4, 5, 6]:
+        return jsonify({'error': 'Invalid step number'}), 400
+    db = current_app.db
+    try:
+        result = db.study_sessions.update_one(
+            {'_id': ObjectId(study_session_id)},
+            {'$unset': {f'step_{step_number}_results': ''}}
+        )
+        if result.matched_count == 0:
+            return jsonify({'error': 'Study session not found'}), 404
+        return jsonify({'status': 'reset'}), 200
+    except Exception:
+        return jsonify({'error': 'Invalid study session ID'}), 400
+
+
+@bp.route('/study-session/<study_session_id>/workflow-status', methods=['GET'])
+def get_workflow_status(study_session_id):
+    """Get the workflow status for a study session (weights and step results)."""
+    db = current_app.db
+    try:
+        study = db.study_sessions.find_one({'_id': ObjectId(study_session_id)})
+        if not study:
+            return jsonify({'error': 'Study session not found'}), 404
+
+        computed_weights = study.get('computed_weights')
+        weights_status = None
+        if computed_weights:
+            ts = computed_weights.get('timestamp')
+            weights_status = {
+                'computed': True,
+                'timestamp': ts.isoformat() if ts else None,
+                'session_count': len(computed_weights.get('weight_spaces', {})),
+            }
+
+        steps_status = {}
+        for step_num in [2, 3, 4, 5, 6]:
+            step_data = study.get(f'step_{step_num}_results')
+            if step_data:
+                ts = step_data.get('timestamp')
+                step_info = {
+                    'completed': True,
+                    'timestamp': ts.isoformat() if ts else None,
+                    'mc_iterations': step_data.get('mc_iterations'),
+                    'mc_mode': step_data.get('mc_mode'),
+                }
+                if step_num == 4:
+                    step_info['aggregation_methods'] = list(step_data.get('results_by_aggregation', {}).keys())
+                else:
+                    step_info['aggregation_method'] = step_data.get('aggregation_method')
+                steps_status[str(step_num)] = step_info
+            else:
+                steps_status[str(step_num)] = {'completed': False}
+
+        return jsonify({
+            'weights': weights_status,
+            'steps': steps_status,
+        }), 200
+
+    except Exception:
+        return jsonify({'error': 'Invalid study session ID'}), 400
+
+
+@bp.route('/study-session/<study_session_id>/weight-space/<session_id>', methods=['GET'])
+def get_weight_space(study_session_id, session_id):
+    """Get weight space data for a specific elicitation session (for plotting)."""
+    db = current_app.db
+    try:
+        study = db.study_sessions.find_one({'_id': ObjectId(study_session_id)})
+        if not study:
+            return jsonify({'error': 'Study session not found'}), 404
+
+        computed_weights = study.get('computed_weights')
+        if not computed_weights:
+            return jsonify({'error': 'Weights not computed yet'}), 404
+
+        weight_spaces = computed_weights.get('weight_spaces', {})
+        ws = weight_spaces.get(session_id, {})
+
+        if not ws:
+            return jsonify({'error': 'Weight space not found for this session'}), 404
+
+        return jsonify({'weight_space': ws}), 200
+
+    except Exception:
+        return jsonify({'error': 'Invalid ID'}), 400
+
+
+@bp.route('/study-session/<study_session_id>/step-results/<int:step_number>', methods=['GET'])
+def get_step_results(study_session_id, step_number):
+    """Get results for a specific step."""
+    if step_number not in [2, 3, 4, 5, 6]:
+        return jsonify({'error': 'Invalid step number'}), 400
+
+    db = current_app.db
+    try:
+        study = db.study_sessions.find_one({'_id': ObjectId(study_session_id)})
+        if not study:
+            return jsonify({'error': 'Study session not found'}), 404
+
+        step_data = study.get(f'step_{step_number}_results')
+        if not step_data:
+            return jsonify({'error': f'Step {step_number} results not found'}), 404
+
+        # Serialize datetime
+        if 'timestamp' in step_data and step_data['timestamp']:
+            step_data['timestamp'] = step_data['timestamp'].isoformat()
+
+        # For step 4, also serialize nested timestamps
+        if step_number == 4 and 'results_by_aggregation' in step_data:
+            for agg_key, agg_data in step_data['results_by_aggregation'].items():
+                if isinstance(agg_data, dict) and 'timestamp' in agg_data:
+                    if agg_data['timestamp']:
+                        agg_data['timestamp'] = agg_data['timestamp'].isoformat()
+
+        return jsonify(step_data), 200
+
+    except Exception:
+        return jsonify({'error': 'Invalid ID'}), 400

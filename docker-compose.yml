@@ -29,6 +29,19 @@ services:
     networks:
       - elicitation-network
 
+  worker:
+    build: ./worker
+    container_name: elicitation-worker
+    environment:
+      MONGO_URI: mongodb://mongo:27017/elicitation
+    depends_on:
+      - mongo
+    volumes:
+      - ./worker:/app
+    networks:
+      - elicitation-network
+    restart: unless-stopped
+
   frontend:
     build: ./frontend
     container_name: elicitation-frontend

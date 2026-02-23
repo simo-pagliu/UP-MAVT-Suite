@@ -72,6 +72,9 @@ export function DistributionModal({
       case 'gaussian':
         setParams({ type: 'gaussian', mean: 0, std: 1 })
         break
+      case 'uniform':
+        setParams({ type: 'uniform', low: 0, high: 1 })
+        break
       case 'errorAbsolute':
         setParams({ type: 'errorAbsolute', value: 0, error: 0 })
         break
@@ -95,6 +98,14 @@ export function DistributionModal({
           peak_end: 2,
           max: 3,
           base_prob: 0
+        })
+        break
+      case 'custom_1':
+        setParams({
+          type: 'custom_1',
+          a_values: [1],
+          x_low: 0.3,
+          x_high: 0.7
         })
         break
       default:
@@ -158,11 +169,13 @@ export function DistributionModal({
               <Select value={distType} onChange={handleTypeChange}>
                 <option value="certain">Certain (single value)</option>
                 <option value="gaussian">Gaussian (Normal) N(μ, σ)</option>
+                <option value="uniform">Uniform U(low, high)</option>
                 <option value="errorAbsolute">±Error (absolute)</option>
                 <option value="errorPercent">±%Error (percentage)</option>
                 <option value="discrete">Discrete {`{x, y, z}`}</option>
                 <option value="histogram">Histogram {`(range: %)`}</option>
                 <option value="trapezoid">Trapezoid / Triangle</option>
+                <option value="custom_1">Custom 1 (categorical)</option>
               </Select>
             </FormControl>
 
@@ -202,6 +215,32 @@ export function DistributionModal({
                   <Text fontSize="xs" color="gray.600" mt={2}>
                     Bounds computed as μ ± 1.96σ (98% confidence interval)
                   </Text>
+                </FormControl>
+                <Box bg="blue.50" p={3} borderRadius="md">
+                  <Text fontSize="sm">Range: {bounds.min.toFixed(2)} to {bounds.max.toFixed(2)}</Text>
+                </Box>
+              </>
+            )}
+
+            {distType === 'uniform' && (
+              <>
+                <FormControl>
+                  <FormLabel>Low</FormLabel>
+                  <Input
+                    type="number"
+                    value={params.low !== undefined ? params.low : ''}
+                    onChange={(e) => handleParamChange('low', parseFloat(e.target.value))}
+                    placeholder="Lower bound"
+                  />
+                </FormControl>
+                <FormControl>
+                  <FormLabel>High</FormLabel>
+                  <Input
+                    type="number"
+                    value={params.high !== undefined ? params.high : ''}
+                    onChange={(e) => handleParamChange('high', parseFloat(e.target.value))}
+                    placeholder="Upper bound"
+                  />
                 </FormControl>
                 <Box bg="blue.50" p={3} borderRadius="md">
                   <Text fontSize="sm">Range: {bounds.min.toFixed(2)} to {bounds.max.toFixed(2)}</Text>
@@ -412,6 +451,61 @@ export function DistributionModal({
                     </Text>
                   </Box>
                 )}
+              </>
+            )}
+
+            {distType === 'custom_1' && (
+              <>
+                <Text fontSize="sm" fontWeight="semibold" mb={2}>
+                  Custom categorical distribution: samples outcome 0, 1, or 2
+                </Text>
+                <FormControl>
+                  <FormLabel>a values (comma-separated)</FormLabel>
+                  <Input
+                    value={params.a_values ? params.a_values.join(', ') : ''}
+                    onChange={(e) => {
+                      const values = e.target.value
+                        .split(',')
+                        .map(v => parseFloat(v.trim()))
+                        .filter(v => !isNaN(v))
+                      handleParamChange('a_values', values)
+                    }}
+                    placeholder="e.g., 1 or 0.38"
+                  />
+                  <Text fontSize="xs" color="gray.600" mt={2}>
+                    One value is randomly chosen each sample
+                  </Text>
+                </FormControl>
+                <FormControl>
+                  <FormLabel>x_low</FormLabel>
+                  <Input
+                    type="number"
+                    value={params.x_low !== undefined ? params.x_low : ''}
+                    onChange={(e) => handleParamChange('x_low', parseFloat(e.target.value))}
+                    placeholder="Lower bound for x (0-1)"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                  />
+                </FormControl>
+                <FormControl>
+                  <FormLabel>x_high</FormLabel>
+                  <Input
+                    type="number"
+                    value={params.x_high !== undefined ? params.x_high : ''}
+                    onChange={(e) => handleParamChange('x_high', parseFloat(e.target.value))}
+                    placeholder="Upper bound for x (0-1)"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                  />
+                </FormControl>
+                <Box bg="blue.50" p={3} borderRadius="md">
+                  <Text fontSize="sm">Outputs: 0, 1, or 2 (categorical)</Text>
+                  <Text fontSize="xs" color="gray.600">
+                    p(0) = a*(1-x), p(1) = a*x + (1-a)*(1-x), p(2) = (1-a)*x
+                  </Text>
+                </Box>
               </>
             )}
 
