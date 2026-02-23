@@ -1,0 +1,8 @@
+Alternative,Capital Investment Budgeted,Construction Complexity,Design Complexity,Design Maturity,Discharge Burnup,Electricity Market Benefit,GHGe Benefit,Licensing Status,Load following Capabilities,Net Power Output,Nuclear Waste,Operative + Fuel Costs,Percived Safety,Supplier Availbility,Thermal Efficiency
+Group,Economic,Economic,Economic,Feasibility,Technical,Social,Social,Feasibility,Technical,Technical,Social,Economic,Social,Feasibility,Technical
+Description,Investment cost,Build complexity,Design level,Maturity,Fuel burnup,Market benefit,GHG reduction,Licensing ease,Load capability,Power output,Waste amount,Fuel costs,Safety perception,Supplier access,Efficiency
+Nuclear,"N(8000, 1000)",0.7,0.8,0.9,52,35,"N(1.5, 0.2)",0.85,3.5,"N(800, 50)","N(15, 2)","N(22, 1)",0.8,0.7,34
+Solar,"N(5000, 500)",0.4,0.5,0.3,0,45,"N(2.5, 0.3)",0.6,1.2,"N(400, 100)","N(5, 1)","N(18, 2)","U(0.6, 0.9)",0.5,32
+Gas,"N(4000, 800)",0.5,0.6,0.6,50,25,"N(1.2, 0.1)",0.7,2.8,"N(700, 80)","N(8, 1)","N(24, 2)",0.7,0.65,33
+Coal,"N(6500, 1200)",0.6,0.7,0.7,48,15,"N(0.8, 0.1)",0.5,3.0,"N(900, 120)","N(12, 2)","N(26, 1)",0.5,0.6,31
+Unit,EUR,score,score,score,MWd/MTU,Score,Tons CO2,score,Score,MWe,Tons waste,EUR/MWh,Score,Score,Percent
