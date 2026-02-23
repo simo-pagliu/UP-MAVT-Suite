@@ -257,6 +257,25 @@ def update_study_input(study_session_id):
     except:
         return jsonify({'error': 'Invalid study session ID'}), 400
 
+@bp.route('/study-session/<study_session_id>/reset-sessions', methods=['POST'])
+def reset_elicitation_sessions(study_session_id):
+    """Reset all elicitation sessions for a study session."""
+    db = current_app.db
+    try:
+        study = db.study_sessions.find_one({'_id': ObjectId(study_session_id)})
+        if not study:
+            return jsonify({'error': 'Study session not found'}), 404
+
+        # Delete all elicitation sessions associated with this study
+        result = db.sessions.delete_many({'study_session_id': ObjectId(study_session_id)})
+        
+        return jsonify({
+            'status': 'reset',
+            'deleted_count': result.deleted_count
+        }), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
 @bp.route('/study-session/<study_session_id>/input', methods=['GET'])
 def get_study_input(study_session_id):
     """Get study input criteria."""

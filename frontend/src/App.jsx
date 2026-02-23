@@ -7,15 +7,14 @@ import ValueFunctionsPage from './pages/ValueFunctionsPage'
 import PileBwtPage from './pages/PileBwtPage'
 import AdminPage from './pages/AdminPage'
 import SessionAccessPage from './pages/SessionAccessPage'
-import ManageCaseStudyPage from './pages/ManageCaseStudyPage'
+import CaseStudyPage from './pages/CaseStudyPage'
 import RunUpMavtPage from './pages/RunUpMavtPage'
-import StudyAccessPage from './pages/StudyAccessPage'
 import RecapPage from './pages/RecapPage'
 
 function App() {
   const [activeRole, setActiveRole] = useState('expert')
   const [expertPage, setExpertPage] = useState('session-access')
-  const [practitionerPage, setPractitionerPage] = useState('study-access')
+  const [practitionerPage, setPractitionerPage] = useState('case-study')
   const [isAdminView, setIsAdminView] = useState(false)
   const [lastView, setLastView] = useState({ role: 'expert', page: 'session-access' })
   const [sessionId, setSessionId] = useState(null)
@@ -111,21 +110,19 @@ function App() {
             <RecapPage sessionId={sessionId} onNavigate={handlePageChange} />
           )}
 
+          {!isAdminView && activeRole === 'practitioner' && currentPage === 'case-study' && (
+            <CaseStudyPage
+              studySessionId={studySessionId}
+              studyCode={studyCode}
+              onStudyAccessed={handleStudySessionAccessed}
+              onClearStudy={handleStudySessionCleared}
+            />
+          )}
           {!isAdminView && activeRole === 'practitioner' && currentPage === 'input-definition' && (
             <InputPage studySessionId={studySessionId} />
           )}
-          {!isAdminView && activeRole === 'practitioner' && currentPage === 'study-access' && (
-            <StudyAccessPage
-              onStudyAccessed={handleStudySessionAccessed}
-              onClearStudy={handleStudySessionCleared}
-              studyCode={studyCode}
-            />
-          )}
-          {!isAdminView && activeRole === 'practitioner' && currentPage === 'manage-case-study' && (
-            <ManageCaseStudyPage studySessionId={studySessionId} studyCode={studyCode} />
-          )}
-          {!isAdminView && activeRole === 'practitioner' && currentPage === 'run-up-mavt' && (
-            <RunUpMavtPage />
+          {!isAdminView && activeRole === 'practitioner' && currentPage === 'run-up-mavt' && studySessionId && (
+            <RunUpMavtPage studySessionId={studySessionId} onNavigate={handlePageChange} />
           )}
         </VStack>
       </Container>

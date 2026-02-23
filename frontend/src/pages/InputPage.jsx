@@ -39,10 +39,12 @@ const API_URL = 'http://localhost:5000/api'
 function InputPage({ studySessionId }, ref) {
   const [name, setName] = useState('')
   const [criteria, setCriteria] = useState([])
+  const [originalCriteria, setOriginalCriteria] = useState([])
   const [loading, setLoading] = useState(false)
   const [isExistingStudySession, setIsExistingStudySession] = useState(false)
-  const [isLocked, setIsLocked] = useState(false)
-  const [isSessionLocked, setIsSessionLocked] = useState(false)
+  const [isLocked, setIsLocked] = useState(true)
+  const [isEditing, setIsEditing] = useState(false)
+  const [hasExistingSessions, setHasExistingSessions] = useState(false)
   const [hasModifiedInput, setHasModifiedInput] = useState(false)
   
   // Distribution modal state
@@ -83,8 +85,6 @@ function InputPage({ studySessionId }, ref) {
       // InputPage does not have persistent state
     },
   }))
-  
-  const isInputLocked = isLocked || isSessionLocked
 
   const normalizeCriteria = (items) => {
     if (!Array.isArray(items)) return []
@@ -107,22 +107,33 @@ function InputPage({ studySessionId }, ref) {
     if (!studySessionId) {
       setName('')
       setCriteria([])
+      setOriginalCriteria([])
       setIsExistingStudySession(false)
+      setIsLocked(true)
+      setHasExistingSessions(false)
       return
     }
 
     const fetchStudy = async () => {
       try {
-        const response = await axios.get(`${API_URL}/study-session/${studySessionId}`)
-        const study = response.data
+        const studyResponse = await axios.get(`${API_URL}/study-session/${studySessionId}`)
+        const study = studyResponse.data
         if (study.code) {
           setName(study.code)
         }
         if (study.criteria && Array.isArray(study.criteria)) {
-          setCriteria(normalizeCriteria(study.criteria))
+          const normalized = normalizeCriteria(study.criteria)
+          setCriteria(normalized)
+          setOriginalCriteria(JSON.parse(JSON.stringify(normalized)))
         }
-        setIsLocked(false)
-        setIsSessionLocked(false)
+        
+        // Check if there are existing elicitation sessions
+        const sessionsResponse = await axios.get(`${API_URL}/study-session/${studySessionId}/elicitation-sessions`)
+        const sessions = sessionsResponse.data.sessions || []
+        setHasExistingSessions(sessions.length > 0)
+        
+        setIsLocked(true)
+        setIsEditing(false)
         setIsExistingStudySession(true)
         setHasModifiedInput(false)
       } catch (error) {
@@ -132,20 +143,27 @@ function InputPage({ studySessionId }, ref) {
     fetchStudy()
   }, [studySessionId])
 
-  const handleFileUpload = (event) => {
-    if (isInputLocked) {
-      toast({
-        title: 'Error',
-        description: isSessionLocked
-          ? 'This session is locked. You cannot modify the criteria.'
-          : 'This input is locked. You cannot modify the criteria.',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      })
-      return
+  const handleUnlock = () => {
+    if (hasExistingSessions) {
+      const confirmed = window.confirm(
+        'Are you sure you want to modify the input?\n\n' +
+        'Warning: All existing elicitation sessions will be reset when you save changes.'
+      )
+      if (!confirmed) return
     }
+    setIsEditing(true)
+    setIsLocked(false)
+  }
 
+  const handleCancel = () => {
+    // Restore original criteria
+    setCriteria(JSON.parse(JSON.stringify(originalCriteria)))
+    setIsEditing(false)
+    setIsLocked(true)
+    setHasModifiedInput(false)
+  }
+
+  const handleFileUpload = (event) => {
     const file = event.target.files?.[0]
     if (!file) return
 
@@ -320,7 +338,7 @@ function InputPage({ studySessionId }, ref) {
       const valueString = distributionToString(distribution)
       handleAlternativeChange(criterionIdx, altIdx, valueString)
       
-      if (isExistingStudySession && studySessionId && !isInputLocked) {
+      if (isExistingStudySession && studySessionId && !isLocked) {
         // Update the criteria array immediately
         const updatedCriteria = criteria.map((crit, idx) => {
           if (idx === criterionIdx) {
@@ -454,7 +472,7 @@ function InputPage({ studySessionId }, ref) {
     })
   }
 
-  const handleSubmit = async () => {
+  const handleSave = async () => {
     if (criteria.length === 0) {
       toast({
         title: 'Error',
@@ -505,15 +523,33 @@ function InputPage({ studySessionId }, ref) {
     setLoading(true)
     try {
       if (isExistingStudySession && studySessionId) {
+        // If there are existing sessions and input was modified, reset them
+        if (hasExistingSessions && hasModifiedInput) {
+          await axios.post(`${API_URL}/study-session/${studySessionId}/reset-sessions`)
+        }
+        
         await axios.put(`${API_URL}/study-session/${studySessionId}/input`, { criteria })
+        
+        // Update original criteria and state
+        setOriginalCriteria(JSON.parse(JSON.stringify(criteria)))
+        setIsLocked(true)
+        setIsEditing(false)
+        setHasModifiedInput(false)
+        
+        // Refresh session count
+        const sessionsResponse = await axios.get(`${API_URL}/study-session/${studySessionId}/elicitation-sessions`)
+        const sessions = sessionsResponse.data.sessions || []
+        setHasExistingSessions(sessions.length > 0)
+        
         toast({
           title: 'Success',
-          description: 'Study input updated and saved',
+          description: hasExistingSessions && hasModifiedInput
+            ? 'Input saved and elicitation sessions reset'
+            : 'Input saved successfully',
           status: 'success',
           duration: 3,
           isClosable: true,
         })
-        setHasModifiedInput(false)
       } else {
         toast({
           title: 'Missing study session',
@@ -527,7 +563,7 @@ function InputPage({ studySessionId }, ref) {
       console.error('Save error:', error)
       toast({
         title: 'Error',
-        description: error.response?.data?.error || error.message || 'Failed to save session',
+        description: error.response?.data?.error || error.message || 'Failed to save input',
         status: 'error',
         duration: 5,
         isClosable: true,
@@ -540,19 +576,7 @@ function InputPage({ studySessionId }, ref) {
   return (
     <Box bg="white" p={6} borderRadius="lg" boxShadow="sm">
       <VStack spacing={6} align="stretch">
-        <HStack justify="space-between" align="center" mb={4}>
-          <Heading as="h1" size="lg">Input Definition</Heading>
-          {studySessionId && !isInputLocked && (hasModifiedInput || !isExistingStudySession || criteria.length === 0) && (
-            <Button
-              colorScheme="blue"
-              isLoading={loading}
-              onClick={handleSubmit}
-              size="lg"
-            >
-              Save input
-            </Button>
-          )}
-        </HStack>
+        <Heading as="h1" size="lg">Input Definition</Heading>
         {!studySessionId && (
           <Box borderWidth={1} borderRadius="md" p={4} bg="gray.50">
             <Text fontSize="sm" color="gray.600">
@@ -566,52 +590,92 @@ function InputPage({ studySessionId }, ref) {
             <Divider />
 
             <VStack align="stretch" spacing={4}>
-              <Heading as="h2" size="md">Criteria & Alternatives</Heading>
               <Text fontSize="sm" color="gray.600">
-                Upload a CSV where the first column contains alternative names, other columns are criteria. First row has criterion names, last row has units.
+                You can either define the input in a CSV and upload it, or use the editor below.
               </Text>
-              {!isInputLocked && (
-                <FormControl>
-                  <FormLabel>Upload CSV</FormLabel>
-                  <Input
-                    type="file"
-                    accept=".csv"
-                    onChange={handleFileUpload}
-                    ref={fileInputRef}
-                    display="none"
-                  />
+              
+              {/* Action Buttons */}
+              <HStack spacing={3} wrap="wrap">
+                <Input
+                  type="file"
+                  accept=".csv"
+                  onChange={handleFileUpload}
+                  ref={fileInputRef}
+                  display="none"
+                />
+                
+                {!isEditing ? (
                   <Button
-                    onClick={() => fileInputRef.current?.click()}
-                    colorScheme="blue"
                     variant="outline"
-                    width="full"
+                    onClick={handleUnlock}
+                    minW="120px"
                   >
-                    Choose File
+                    Unlock to Edit
                   </Button>
-                </FormControl>
-              )}
-
-              <HStack justify="space-between">
-                <HStack spacing={2}>
-                  <Button
-                    leftIcon={<AddIcon />}
-                    size="sm"
-                    onClick={handleAddAlternative}
-                    isDisabled={isInputLocked}
-                  >
-                    Add Alternative
-                  </Button>
-                  <Button
-                    leftIcon={<AddIcon />}
-                    size="sm"
-                    onClick={handleAddCriterion}
-                    isDisabled={isInputLocked}
-                  >
-                    Add Criterion
-                  </Button>
-                </HStack>
-                <Button size="sm" onClick={downloadCSV}>
+                ) : (
+                  <>
+                    <Button
+                      colorScheme="blue"
+                      onClick={handleSave}
+                      isLoading={loading}
+                      minW="120px"
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={handleCancel}
+                      minW="120px"
+                    >
+                      Cancel
+                    </Button>
+                  </>
+                )}
+                
+                <Button
+                  variant="outline"
+                  onClick={downloadCSV}
+                  minW="140px"
+                >
                   Download CSV
+                </Button>
+                
+                <Button
+                  variant="outline"
+                  as="a"
+                  href="/example_input.csv"
+                  download="example_input.csv"
+                  minW="180px"
+                >
+                  Download Example CSV
+                </Button>
+                
+                <Button
+                  variant="outline"
+                  onClick={() => fileInputRef.current?.click()}
+                  isDisabled={isLocked}
+                  minW="140px"
+                >
+                  Upload CSV
+                </Button>
+              </HStack>
+
+              <HStack spacing={2}>
+                <Button
+                  leftIcon={<AddIcon />}
+                  size="sm"
+                  onClick={handleAddAlternative}
+                  isDisabled={isLocked}
+                >
+                  Add Alternative
+                </Button>
+                <Button
+                  leftIcon={<AddIcon />}
+                  size="sm"
+                  onClick={handleAddCriterion}
+                  isDisabled={isLocked}
+                >
+                  Add Criterion
                 </Button>
               </HStack>
 
@@ -631,7 +695,7 @@ function InputPage({ studySessionId }, ref) {
                             size="sm"
                             fontWeight="bold"
                             bg="white"
-                            isDisabled={isInputLocked}
+                            isDisabled={isLocked}
                           />
                           <Input
                             value={criterion.group || ''}
@@ -640,7 +704,7 @@ function InputPage({ studySessionId }, ref) {
                             size="sm"
                             fontSize="xs"
                             bg="white"
-                            isDisabled={isInputLocked}
+                            isDisabled={isLocked}
                           />
                           <Input
                             value={criterion.description || ''}
@@ -649,7 +713,7 @@ function InputPage({ studySessionId }, ref) {
                             size="sm"
                             fontSize="xs"
                             bg="white"
-                            isDisabled={isInputLocked}
+                            isDisabled={isLocked}
                           />
                           <Input
                             value={criterion.unit}
@@ -658,12 +722,12 @@ function InputPage({ studySessionId }, ref) {
                             size="sm"
                             fontSize="xs"
                             bg="white"
-                            isDisabled={isInputLocked}
+                            isDisabled={isLocked}
                           />
                           <Checkbox
                             isChecked={criterion.is_qualitative}
                             onChange={(e) => handleCellChange(idx, 'is_qualitative', e.target.checked)}
-                            isDisabled={isInputLocked}
+                            isDisabled={isLocked}
                             size="sm"
                           >
                             <Text fontSize="xs">Qualitative</Text>
@@ -683,7 +747,7 @@ function InputPage({ studySessionId }, ref) {
                           onChange={(e) => handleAlternativeNameChange(altIdx, e.target.value)}
                           placeholder="Alternative name"
                           size="sm"
-                          isDisabled={isInputLocked}
+                          isDisabled={isLocked}
                         />
                       </Td>
                       {criteria.map((criterion, critIdx) => {
@@ -709,7 +773,7 @@ function InputPage({ studySessionId }, ref) {
                                   (QI Page)
                                 </Text>
                               </Box>
-                            ) : isInputLocked ? (
+                            ) : isLocked ? (
                               // Locked: gray out and disabled
                               <Box
                                 bg="gray.100"
@@ -767,7 +831,7 @@ function InputPage({ studySessionId }, ref) {
                           variant="ghost"
                           colorScheme="red"
                           onClick={() => handleRemoveAlternative(altIdx)}
-                          isDisabled={isInputLocked}
+                          isDisabled={isLocked}
                         />
                       </Td>
                     </Tr>

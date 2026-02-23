@@ -20,9 +20,8 @@ function Navigation({
   ]
 
   const practitionerPages = [
-    { id: 'study-access', label: 'Study Access' },
+    { id: 'case-study', label: 'Case Study' },
     { id: 'input-definition', label: 'Input Definition', requiresStudy: true },
-    { id: 'manage-case-study', label: 'Manage Case Study', requiresStudy: true },
     { id: 'run-up-mavt', label: 'Run UP-MAVT', requiresStudy: true },
   ]
 
