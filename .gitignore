@@ -25,3 +25,5 @@ UP-MAVT/weight_spaces_comparison.png
 /UPMAVTcode/results
 /UPMAVTcode
 *.md
+update_ref_case_study.py
+update_ref_case_study_correct.py
