@@ -27,3 +27,4 @@ UP-MAVT/weight_spaces_comparison.png
 *.md
 update_ref_case_study.py
 update_ref_case_study_correct.py
+/worker/scripts/__pycache__
