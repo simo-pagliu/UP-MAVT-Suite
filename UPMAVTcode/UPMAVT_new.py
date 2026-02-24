@@ -10,11 +10,16 @@ import pandas as pd
 import csv
 import os
 from scipy.interpolate import interp1d
+from weight_space_definition import (
+    constraint_func as ws_constraint_func,
+    load_comparisons,
+    build_constraint_structure,
+)
 
 # ============================================================================
 # PARAMETERS
 # ============================================================================
-ELICITATION_CODES = ["7WVLVCGU"]  # List of elicitation codes (e.g., ["7WVLVCGU", "9"])
+ELICITATION_CODES = ["4"]  # List of elicitation codes (e.g., ["7WVLVCGU", "9"])
 ALTERNATIVES_FILE = "input_test.csv"
 OUTPUT_DIR = "results"
 
@@ -70,20 +75,58 @@ def load_weight_space(filepath):
     return weight_space
 
 # ============================================================================
-# WRONG
+# WEIGHT SAMPLING (rejection sampling)
 # ============================================================================
-def weight_sampler(weight_space, criteria):
-    """Sample a random set of weights from weight space."""
-    sampled_weights = {}
-    for crit in criteria:
-        if crit in weight_space:
-            possible_weights = weight_space[crit]
-            sampled_weights[crit] = np.random.choice(possible_weights)
-    
-    # Normalize to sum to 1
-    total = sum(sampled_weights.values())
-    sampled_weights = {k: v / total for k, v in sampled_weights.items()}
-    return sampled_weights
+def weight_sampler(weight_space, criteria, constraint_data, use_random_weights=False):
+    """Sample a random set of weights via rejection sampling.
+
+    Randomly picks one weight per criterion from its weight space, then
+    checks that (a) they sum to 1 and (b) the BWT constraints are
+    satisfied.  Repeats until a valid set is found.
+
+    Parameters
+    ----------
+    weight_space : dict
+        Mapping criterion_name -> list of allowable weight values.
+    criteria : list[str]
+        List of criterion names.
+    constraint_data : dict
+        Constraint structure built by ``build_constraint_structure``.
+    use_random_weights : bool
+        If True, generate weights from a Dirichlet distribution instead
+        of sampling from the weight space.
+
+    Returns
+    -------
+    dict
+        Mapping criterion_name -> sampled weight.
+    """
+    if use_random_weights:
+        # Dirichlet distribution: uniform random weights
+        n = len(criteria)
+        raw = np.random.dirichlet(np.ones(n))
+        return {crit: raw[i] for i, crit in enumerate(criteria)}
+
+    while True:
+        # Randomly sample one weight per criterion
+        sampled_weights = {}
+        for crit in criteria:
+            if crit in weight_space:
+                sampled_weights[crit] = np.random.choice(weight_space[crit])
+
+        # Check if they sum to 1
+        total = sum(sampled_weights.values())
+        if not np.isclose(total, 1.0, atol=1e-3):
+            continue
+
+        # Check constraints
+        ordered_criteria = constraint_data['criteria']
+        x_temp = np.concatenate(([sampled_weights.get(c, 0.0) for c in ordered_criteria], [0]))
+        cons = ws_constraint_func(x_temp, constraint_data)
+        if any(c < 0 for c in cons):
+            continue
+
+        return sampled_weights
 
 # ============================================================================
 # LOAD ALTERNATIVES
@@ -285,6 +328,7 @@ def evaluate_alternative(alt_data, criteria, vf_lists, confidence_lists, weight_
 # MONTE CARLO SIMULATION
 # ============================================================================
 def run_monte_carlo(alternatives, criteria, weight_spaces, vf_lists, confidence_lists,
+                    constraint_data_list,
                     aggregation_method, opinion_weights, num_iterations, mc_mode):
     """Run MC simulation.
     
@@ -292,6 +336,7 @@ def run_monte_carlo(alternatives, criteria, weight_spaces, vf_lists, confidence_
         weight_spaces: List of weight space dicts (one per elicitation)
         vf_lists: List of value function dicts (one per elicitation)
         confidence_lists: List of confidence dicts (one per elicitation)
+        constraint_data_list: List of constraint data dicts (one per elicitation)
         opinion_weights: Weights for selecting elicitations in non-strict mode
         mc_mode: "strict" or "non_strict"
     """
@@ -320,7 +365,10 @@ def run_monte_carlo(alternatives, criteria, weight_spaces, vf_lists, confidence_
         for iteration in range(num_iterations):
             for elicit_idx in range(num_elicitations):
                 # Sample weights from this elicitation's weight space
-                sampled_weights = weight_sampler(weight_spaces[elicit_idx], criteria)
+                sampled_weights = weight_sampler(
+                    weight_spaces[elicit_idx], criteria,
+                    constraint_data_list[elicit_idx],
+                )
                 
                 # Evaluate each alternative (both weight and VF from same elicitation)
                 for alt_name, alt_data in alternatives.items():
@@ -334,7 +382,10 @@ def run_monte_carlo(alternatives, criteria, weight_spaces, vf_lists, confidence_
         for iteration in range(num_iterations):
             # Randomly select elicitation for weights
             weight_elicit_idx = np.random.choice(num_elicitations, p=opinion_weights)
-            sampled_weights = weight_sampler(weight_spaces[weight_elicit_idx], criteria)
+            sampled_weights = weight_sampler(
+                weight_spaces[weight_elicit_idx], criteria,
+                constraint_data_list[weight_elicit_idx],
+            )
             
             # Randomly select elicitation for value functions
             vf_elicit_idx = np.random.choice(num_elicitations, p=opinion_weights)
@@ -447,9 +498,12 @@ def main():
     confidence_lists = []
     weight_spaces = []
     
+    constraint_data_list = []
+    
     for code in ELICITATION_CODES:
         vf_file = f"value_functions_{code}.csv"
-        ws_file = f"weight_space_{code}.csv"
+        ws_file = f"weight_space_output_{code}.csv"
+        bwt_file = f"pile_bwt_{code}.csv"
         
         print(f"  - Elicitation {code}:")
         vf_dict, conf_dict = load_value_functions_with_confidence(vf_file)
@@ -460,6 +514,12 @@ def main():
         weight_space = load_weight_space(ws_file)
         print(f"    ✓ Loaded weight space for {len(weight_space)} criteria")
         weight_spaces.append(weight_space)
+        
+        # Build constraint data for rejection sampling
+        comparisons = load_comparisons(bwt_file)
+        constraint_data = build_constraint_structure(comparisons, vf_dict)
+        constraint_data_list.append(constraint_data)
+        print(f"    ✓ Built constraint structure")
     
     print("\nLoading alternatives...")
     alternatives, criteria = load_alternatives(ALTERNATIVES_FILE)
@@ -472,6 +532,7 @@ def main():
     print(f"Opinion weights: {ELICITATION_OPINION_WEIGHTS}")
     
     results = run_monte_carlo(alternatives, criteria, weight_spaces, vf_lists, confidence_lists,
+                             constraint_data_list,
                              AGGREGATION_METHOD, ELICITATION_OPINION_WEIGHTS, 
                              MC_ITERATIONS, MC_MODE)
     print(f"✓ Simulation complete")

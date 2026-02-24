@@ -871,9 +871,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
 
   const handlePhase2Back = async () => {
     if (isSessionLocked) {
-      setSavedValues(currentAdjustedValues)
-      setSavedIsIncreasing(currentIsIncreasing)
-      setSavedConfidences(currentConfidences)
+      // When locked, discard changes and go back to ranking phase
       setPhase('ranking')
       return
     }
@@ -988,13 +986,9 @@ function QualitativeIndicatorsPage({ sessionId }) {
     // If currently in adjustment phase with data, save before navigating
     if (phase === 'adjustment' && currentRanking && activeIndicator) {
       if (isSessionLocked) {
-        toast({
-          title: 'Session locked',
-          description: 'This session is locked. You cannot save changes.',
-          status: 'warning',
-          duration: 3,
-          isClosable: true,
-        })
+        // Session is locked - allow navigation but don't save changes
+        setActiveIndicatorIdx(idx)
+        loadIndicatorData(idx, qualitativeCriteria[idx].criterion_name)
         return
       }
 

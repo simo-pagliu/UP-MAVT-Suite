@@ -13,9 +13,9 @@ import csv
 # ============================================================================
 # PARAMETERS
 # ============================================================================
-COMPARISON_FILE = "pile_bwt_7WVLVCGU.csv"
-VALUE_FUNCTIONS_FILE = "value_functions_7WVLVCGU.csv"
-OUTPUT_FILE = "weight_space_output.csv"
+COMPARISON_FILE = "pile_bwt_4.csv"
+VALUE_FUNCTIONS_FILE = "value_functions_4.csv"
+OUTPUT_FILE = "weight_space_output_4.csv"
 SOLUTION_TARGET = 100
 RNG_SEED = 426
 Z_THRESHOLD_OFFSET = 0.001
@@ -70,15 +70,13 @@ def build_constraint_structure(comparisons, value_functions):
 # ============================================================================
 # CONSTRAINT FUNCTION
 # ============================================================================
-def constraint_func(x, constraint_data, z_star=None):
+def compute_max_constraint_violation(weights, constraint_data):
     """
-    Evaluate constraints.
-    x = [w_crit1, w_crit2, ..., w_critN, z]
-    Returns list of constraint values (must all be >= 0).
+    Compute the maximum absolute constraint violation from weights alone.
+    weights = [w_crit1, w_crit2, ..., w_critN] (no z auxiliary variable)
+    Returns the maximum absolute violation across all constraints.
     """
-    num_criteria = len(constraint_data['criteria'])
-    z = x[-1]
-    cons = []
+    violations = []
     
     for comp in constraint_data['comparisons']:
         ref_crit = comp['REFERENCE_CRITERION']
@@ -89,19 +87,62 @@ def constraint_func(x, constraint_data, z_star=None):
         ref_idx = constraint_data['criterion_to_index'][ref_crit]
         other_idx = constraint_data['criterion_to_index'][other_crit]
         
-        w_ref = x[ref_idx]
-        w_other = x[other_idx]
+        w_ref = weights[ref_idx]
+        w_other = weights[other_idx]
         
         if comp_type == 'best':
             vf = constraint_data['value_functions'][ref_crit]
             vf_val = max(vf(comp_value), EPS)
-            # cons.append(z - abs(w_ref / (w_other + EPS) - 1.0 / vf_val))
-            cons.append(np.log(z) - np.log(abs(w_ref / (w_other + EPS) - 1.0 / vf_val))) # Logarithmic variant
+            violation = abs(w_ref / (w_other + EPS) - 1.0 / (vf_val + EPS))
+            violations.append(violation)
         else:  # worst
             vf_other = constraint_data['value_functions'][other_crit]
             vf_other_val = max(vf_other(comp_value), EPS)
-            # cons.append(z - abs(1.0 / vf_other_val - (w_other + EPS) / (w_ref + EPS)))
-            cons.append(np.log(z) - np.log(abs(1.0 / vf_other_val - (w_other + EPS) / (w_ref + EPS)))) # Logarithmic variant
+            violation = abs(1.0 / (vf_other_val + EPS) - (w_other + EPS) / (w_ref + EPS))
+            violations.append(violation)
+    
+    return max(violations) if violations else 0.0
+
+
+def constraint_func(x, constraint_data, z_star=None):
+    """
+    Evaluate constraints for optimization.
+    x = [w_crit1, w_crit2, ..., w_critN, z]
+    z is an auxiliary variable representing the maximum constraint violation.
+    Returns list of constraint values (must all be >= 0).
+    """
+    num_criteria = len(constraint_data['criteria'])
+    z = x[-1]
+    weights = x[:num_criteria]
+    
+    # Compute actual constraint violations from weights
+    violations = []
+    
+    for comp in constraint_data['comparisons']:
+        ref_crit = comp['REFERENCE_CRITERION']
+        other_crit = comp['ADJUSTED_CRITERION']
+        comp_value = comp['DATA_VALUE']
+        comp_type = comp['TYPE'].lower()
+        
+        ref_idx = constraint_data['criterion_to_index'][ref_crit]
+        other_idx = constraint_data['criterion_to_index'][other_crit]
+        
+        w_ref = weights[ref_idx]
+        w_other = weights[other_idx]
+        
+        if comp_type == 'best':
+            vf = constraint_data['value_functions'][ref_crit]
+            vf_val = max(vf(comp_value), EPS)
+            violation = abs(w_ref / (w_other + EPS) - 1.0 / (vf_val + EPS))
+            violations.append(violation)
+        else:  # worst
+            vf_other = constraint_data['value_functions'][other_crit]
+            vf_other_val = max(vf_other(comp_value), EPS)
+            violation = abs(1.0 / (vf_other_val + EPS) - (w_other + EPS) / (w_ref + EPS))
+            violations.append(violation)
+    
+    # Constraint: z must be >= all violations
+    cons = [z - v for v in violations]
     
     if z_star is not None:
         cons.append(z_star - z)
@@ -111,45 +152,32 @@ def constraint_func(x, constraint_data, z_star=None):
 # ============================================================================
 # OPTIMIZATION
 # ============================================================================
-def find_max_z(constraint_data, num_criteria):
-    """Find maximum z value using COBYQA."""
+def check_sum_to_one(weights, threshold=0.001):
+    """Check if weights sum to 1 within threshold."""
+    return abs(np.sum(weights) - 1.0) <= threshold
+
+
+def check_constraints_satisfied(weights, constraint_data, num_criteria):
+    """
+    Check if all constraints are satisfied for given weights.
+    Sets z=0 and checks if all constraint values are positive (>= 0).
+    """
+    x = np.concatenate([weights, [0.0]])
+    cons = constraint_func(x, constraint_data, z_star=None)
+    return all(c >= -EPS for c in cons) if cons else True
+
+
+def find_solutions_de(constraint_data, num_criteria):
+    """Find solutions using Differential Evolution."""
     bounds = [(0.001, 1) for _ in range(num_criteria)] + [(0.0, 1000.0)]
     
-    def objective(x):
-        return x[-1]  # Minimize z
-    
-    x0 = np.ones(num_criteria + 1) / num_criteria
-    
-    result = opt.minimize(
-        objective,
-        x0,
-        method='COBYQA',
-        constraints=[
-            {'type': 'ineq', 'fun': constraint_func, 'args': (constraint_data, None)},
-            {'type': 'eq', 'fun': lambda x: np.sum(x[:num_criteria]) - 1}
-        ],
-        bounds=bounds,
-        options={'maxiter': 2000}
-    )
-    
-    return result.x, result.fun
-
-def max_constraint_violation(x, constraint_data):
-    """Calculate maximum constraint violation for a solution."""
-    cons = constraint_func(x, constraint_data)
-    return max(0, -min(cons)) if cons else 0
-
-def find_all_solutions(constraint_data, num_criteria, num_restarts=150):
-    """Find all feasible solutions using DE + multi-start SLSQP."""
-    bounds = [(0.001, 1) for _ in range(num_criteria)] + [(0.0, 1000.0)]
-    
-    # Step 1: Find global optimum using differential evolution
     def objective_for_de(x):
         penalty = 0.0
         PEN = 1e6
-        penalty += PEN * max_constraint_violation(x, constraint_data)
+        # Penalties for constraint violations
         penalty += PEN * abs(np.sum(x[:num_criteria]) - 1.0)
-        return x[-1] + penalty
+        penalty += PEN * x[-1]  # Minimize z
+        return penalty
     
     result_de = opt.differential_evolution(
         objective_for_de,
@@ -160,20 +188,27 @@ def find_all_solutions(constraint_data, num_criteria, num_restarts=150):
         polish=True,
         seed=RNG_SEED
     )
-    max_violation_opt = max_constraint_violation(result_de.x, constraint_data)
-    solutions = [result_de.x]
+    return [result_de.x]
+
+
+def find_solutions_multistart_slsqp(constraint_data, num_criteria, num_restarts=150):
+    """Find solutions using multi-start SLSQP."""
+    bounds = [(0.001, 1) for _ in range(num_criteria)] + [(0.0, 1000.0)]
     
-    # Step 2: Multi-start local optimization
-    def objective(x, var=-1):
-        return x[var]
+    def objective(x):
+        return x[-1]
     
+    solutions = []
     rng = np.random.RandomState(RNG_SEED)
-    for _ in range(num_restarts):
-        x0_random = rng.uniform(0.001, 1, size=num_criteria + 1)
-        x0_random[-1] = 0.1
+    
+    for restart_idx in range(num_restarts):
+        x0_random = rng.uniform(0.001, 1, size=num_criteria)
+        x0_random = x0_random / np.sum(x0_random)  # Normalize to sum to 1
+        x0 = np.concatenate([x0_random, [0.1]])
+        
         res = opt.minimize(
             objective,
-            x0_random,
+            x0,
             method='SLSQP',
             constraints=[
                 {'type': 'ineq', 'fun': constraint_func, 'args': (constraint_data, None)},
@@ -182,7 +217,8 @@ def find_all_solutions(constraint_data, num_criteria, num_restarts=150):
             bounds=bounds,
             options={'maxiter': 1000}
         )
-        if max_constraint_violation(res.x, constraint_data) <= max_violation_opt + EPS:
+        
+        if res.success:
             solutions.append(res.x)
     
     return solutions
@@ -228,38 +264,67 @@ def main():
     print(f"Number of criteria: {num_criteria}")
     print(f"Criteria: {criteria}")
     
-    print("\nFinding maximum z...")
-    x_opt, _ = find_max_z(constraint_data, num_criteria)
-    z_max = x_opt[-1]
-    print(f"Maximum z found: {z_max:.3f}")
+    print("\nFinding solutions with Differential Evolution...")
+    de_solutions = find_solutions_de(constraint_data, num_criteria)
+    print(f"Found {len(de_solutions)} solutions from DE")
     
-    print(f"\nFinding all solutions in weight space...")
-    solutions = find_all_solutions(constraint_data, num_criteria)
-    print(f"Found {len(solutions)} solutions")
+    print("\nFinding solutions with multi-start SLSQP...")
+    slsqp_solutions = find_solutions_multistart_slsqp(constraint_data, num_criteria, num_restarts=150)
+    print(f"Found {len(slsqp_solutions)} solutions from SLSQP")
     
-    # Extract z values and filter by threshold
-    z_values = np.array([sol[-1] for sol in solutions])
-    z_min = z_values.min()
-    z_threshold = z_min + Z_THRESHOLD_OFFSET
-    filtered_idx = np.where(z_values <= z_threshold)[0]
-    filtered_solutions = [solutions[i] for i in filtered_idx]
-    print(f"After filtering (z <= {z_threshold:.3f}): {len(filtered_solutions)} solutions")
+    all_solutions = de_solutions + slsqp_solutions
+    print(f"\nTotal solutions collected: {len(all_solutions)}")
     
-    # Deduplicate by rounding weights
-    if filtered_solutions:
-        rounded = np.round(np.array([sol[:-1] for sol in filtered_solutions]), 3)
-        _, uniq_idx = np.unique(rounded, axis=0, return_index=True)
-        # Keep the ROUNDED weights, not the original ones
-        unique_solutions = []
-        for i in sorted(uniq_idx):
-            z_val = filtered_solutions[i][-1]
-            unique_solutions.append(np.concatenate((rounded[i], [z_val])))
+    # Filter 1: Check sum to 1
+    sum_filtered = []
+    for sol in all_solutions:
+        weights = sol[:num_criteria]
+        if check_sum_to_one(weights, threshold=0.001):
+            sum_filtered.append(sol)
+    print(f"After filtering sum to 1: {len(sum_filtered)} solutions")
+    
+    # Filter 2: Check constraints satisfied
+    constraint_filtered = []
+    for sol in sum_filtered:
+        weights = sol[:num_criteria]
+        if check_constraints_satisfied(weights, constraint_data, num_criteria):
+            constraint_filtered.append(sol)
+    print(f"After filtering constraints satisfied: {len(constraint_filtered)} solutions")
+    
+    # Round to 3 decimals
+    rounded_solutions = []
+    for sol in constraint_filtered:
+        weights = np.round(sol[:num_criteria], 3)
+        # Normalize to sum to 1
+        if np.sum(weights) > 0:
+            weights = weights / np.sum(weights)
+        rounded_solutions.append(weights)
+    print(f"After rounding to 3 decimals: {len(rounded_solutions)} solutions")
+    
+    # Deduplicate
+    if rounded_solutions:
+        weights_array = np.array(rounded_solutions)
+        _, uniq_idx = np.unique(weights_array, axis=0, return_index=True)
+        unique_solutions = [weights_array[i] for i in sorted(uniq_idx)]
     else:
         unique_solutions = []
+    
     print(f"After deduplication: {len(unique_solutions)} unique solutions")
     
+    print("\nSample solutions:")
+    for i, weights in enumerate(unique_solutions[:10]):
+        violation = compute_max_constraint_violation(weights, constraint_data)
+        print(f"  Solution {i+1}: violation = {violation:.6f}, weights = {weights}, sum = {np.sum(weights):.4f}")
+    
     print(f"\nSaving weight space to {OUTPUT_FILE}...")
-    save_weight_space(unique_solutions, criteria, OUTPUT_FILE)
+    # Reconstruct solutions with z values for save_weight_space
+    final_solutions = []
+    for weights in unique_solutions:
+        z_val = compute_max_constraint_violation(weights, constraint_data)
+        sol = np.concatenate([weights, [z_val]])
+        final_solutions.append(sol)
+    
+    save_weight_space(final_solutions, criteria, OUTPUT_FILE)
     print("Done!")
 
 if __name__ == "__main__":

@@ -9,6 +9,11 @@ Simone Pagliuca, 2025-2026
 import numpy as np
 from scipy.interpolate import interp1d
 import sys
+from .weight_space_definition import (
+    constraint_func as ws_constraint_func,
+    load_comparisons_from_db,
+    build_constraint_structure,
+)
 
 
 # ============================================================================
@@ -16,6 +21,9 @@ import sys
 # ============================================================================
 def load_value_functions_with_confidence_from_db(criteria, value_functions_data, qualitative_indicators=None):
     """Load value functions and confidence levels from DB session data.
+
+    For quantitative criteria: interpolation function + single confidence level.
+    For qualitative criteria: per-rank confidences dict (rank -> confidence), no VF needed.
 
     Parameters
     ----------
@@ -29,8 +37,9 @@ def load_value_functions_with_confidence_from_db(criteria, value_functions_data,
     Returns
     -------
     tuple(dict, dict)
-        (vf_dict, confidence_dict) where vf_dict maps criterion_name -> interp1d
-        and confidence_dict maps criterion_name -> int confidence level.
+        (vf_dict, confidence_dict) where:
+        - For quantitative: vf_dict[name] -> interp1d, confidence_dict[name] -> int
+        - For qualitative: vf_dict[name] -> None, confidence_dict[name] -> dict {rank -> int}
     """
     vf_dict = {}
     confidence_dict = {}
@@ -43,96 +52,41 @@ def load_value_functions_with_confidence_from_db(criteria, value_functions_data,
         if not name:
             continue
 
-        points = []
-        confidence = 4  # default fully confident
-
         if criterion.get('is_qualitative'):
-            points = _generate_qualitative_value_function(qualitative_indicators, name)
-            # Get qualitative confidence
-            qual_data = qualitative_indicators.get(name) if isinstance(qualitative_indicators, dict) else None
-            if isinstance(qual_data, dict) and 'confidences' in qual_data:
-                confidences_dict = qual_data.get('confidences', {})
-                # Average confidence across ranks
-                if confidences_dict:
-                    conf_values = [int(v) for v in confidences_dict.values()]
-                    confidence = int(round(sum(conf_values) / len(conf_values)))
-                else:
-                    confidence = 4
-            else:
-                confidence = 4
+            # For qualitative: keep per-rank confidences dict
+            qual_data = qualitative_indicators[name]
+            confidences_dict = qual_data['confidences']
+            # Convert keys to int for consistency
+            confidence_dict[name] = {int(k) if k.isdigit() else k: int(v) 
+                                     for k, v in confidences_dict.items()}
+            vf_dict[name] = None  # No VF needed for qualitative
         else:
-            cfg = criteria_map.get(name, {})
-            if isinstance(cfg, dict):
-                points = cfg.get('points', [])
-                confidence = cfg.get('confidence', 4)
+            # For quantitative: traditional VF + single confidence
+            cfg = criteria_map[name]
+            points = cfg['points']
+            confidence = cfg['confidence']
 
-        if not points or len(points) < 2:
-            continue
+            x_vals = [float(p['x']) for p in points if 'x' in p and 'y' in p]
+            y_vals = [float(p['y']) for p in points if 'x' in p and 'y' in p]
 
-        x_vals = [float(p['x']) for p in points if 'x' in p and 'y' in p]
-        y_vals = [float(p['y']) for p in points if 'x' in p and 'y' in p]
-
-        if len(x_vals) < 2:
-            continue
-
-        interp_func = interp1d(x_vals, y_vals, kind='linear',
-                               fill_value=(0, 1), bounds_error=False)
-        vf_dict[name] = interp_func
-        confidence_dict[name] = int(confidence)
+            interp_func = interp1d(x_vals, y_vals, kind='linear',
+                                   fill_value=(0, 1), bounds_error=False)
+            vf_dict[name] = interp_func
+            confidence_dict[name] = int(confidence)
 
     return vf_dict, confidence_dict
 
 
-def _generate_qualitative_value_function(qualitative_indicators, criterion_name):
-    """Generate value function points for a qualitative indicator."""
-    if not isinstance(qualitative_indicators, dict):
-        return []
-    data = qualitative_indicators.get(criterion_name)
-    if not isinstance(data, dict):
-        return []
-
-    ranking = data.get('ranking')
-    values = data.get('values')
-    is_increasing = data.get('isIncreasing', True)
-
-    if not isinstance(ranking, dict) or not isinstance(values, dict):
-        return []
-
-    unique_ranks = sorted(set(ranking.values()))
-    if len(unique_ranks) == 0:
-        return []
-
-    points = []
-    total_points = len(unique_ranks) + 2
-
-    if is_increasing:
-        points.append({'x': 0, 'y': 0})
-    else:
-        points.append({'x': 0, 'y': 1})
-
-    for idx, rank in enumerate(reversed(unique_ranks)):
-        x_pos = idx + 1
-        x_normalized = x_pos / (total_points - 1)
-        y_value = values.get(rank)
-        if y_value is None:
-            y_value = values.get(str(rank))
-        if y_value is None:
-            y_value = x_normalized
-        points.append({'x': x_normalized, 'y': y_value})
-
-    if is_increasing:
-        points.append({'x': 1, 'y': 1})
-    else:
-        points.append({'x': 1, 'y': 0})
-
-    return points
-
 
 # ============================================================================
-# WEIGHT SAMPLER
+# WEIGHT SAMPLER (rejection sampling with constraint enforcement)
 # ============================================================================
-def weight_sampler(weight_space, criteria, use_random_weights=False):
-    """Sample a random set of weights.
+def weight_sampler(weight_space, criteria, constraint_data, use_random_weights=False):
+    """Sample a random set of weights via rejection sampling.
+
+    Randomly picks one weight per criterion from its weight space, then
+    checks that (a) they sum to 1 and (b) the BWT constraints are
+    satisfied.  Repeats until a valid set is found.
 
     Parameters
     ----------
@@ -140,6 +94,8 @@ def weight_sampler(weight_space, criteria, use_random_weights=False):
         Mapping criterion_name -> list of allowable weight values.
     criteria : list[str]
         List of criterion names.
+    constraint_data : dict
+        Constraint structure built by ``build_constraint_structure``.
     use_random_weights : bool
         If True, generate weights from a Dirichlet distribution instead
         of sampling from the weight space.
@@ -147,7 +103,7 @@ def weight_sampler(weight_space, criteria, use_random_weights=False):
     Returns
     -------
     dict
-        Mapping criterion_name -> sampled weight (normalized to sum to 1).
+        Mapping criterion_name -> sampled weight.
     """
     if use_random_weights:
         # Dirichlet distribution: uniform random weights
@@ -155,17 +111,26 @@ def weight_sampler(weight_space, criteria, use_random_weights=False):
         raw = np.random.dirichlet(np.ones(n))
         return {crit: raw[i] for i, crit in enumerate(criteria)}
 
-    sampled_weights = {}
-    for crit in criteria:
-        if crit in weight_space:
-            possible_weights = weight_space[crit]
-            sampled_weights[crit] = np.random.choice(possible_weights)
+    while True:
+        # Randomly sample one weight per criterion
+        sampled_weights = {}
+        for crit in criteria:
+            if crit in weight_space:
+                sampled_weights[crit] = np.random.choice(weight_space[crit])
 
-    # Normalize to sum to 1
-    total = sum(sampled_weights.values())
-    if total > 0:
-        sampled_weights = {k: v / total for k, v in sampled_weights.items()}
-    return sampled_weights
+        # Check if they sum to 1
+        total = sum(sampled_weights.values())
+        if not np.isclose(total, 1.0, atol=1e-3):
+            continue
+
+        # Check constraints
+        ordered_criteria = constraint_data['criteria']
+        x_temp = np.concatenate(([sampled_weights.get(c, 0.0) for c in ordered_criteria], [0]))
+        cons = ws_constraint_func(x_temp, constraint_data)
+        if any(c < 0 for c in cons):
+            continue
+
+        return sampled_weights
 
 
 # ============================================================================
@@ -434,10 +399,14 @@ def harmonic_mean(intermediate_results):
 # ============================================================================
 # EVALUATION FUNCTION
 # ============================================================================
-def evaluate_alternative(alt_data, criteria, vf_lists, confidence_lists,
+def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_lists,
                          weight_elicit_idx, vf_elicit_idx, sampled_weights,
-                         aggregation_func):
-    """Evaluate single alternative using MAVT."""
+                         aggregation_func, qualitative_indicators=None):
+    """Evaluate single alternative using MAVT.
+    
+    For quantitative criteria: sample raw value -> apply VF -> add confidence error
+    For qualitative criteria: use normalized x position -> add confidence error per rank
+    """
     confidence_errors = {
         0: 0.10,
         1: 0.075,
@@ -453,20 +422,43 @@ def evaluate_alternative(alt_data, criteria, vf_lists, confidence_lists,
             raw_value = sample_from_distribution(alt_data[crit])
 
             vf = vf_lists[vf_elicit_idx].get(crit)
-            if vf is None:
+            confidence_info = confidence_lists[vf_elicit_idx].get(crit)
+            
+            if vf is None and isinstance(confidence_info, dict):
+                # Qualitative criterion: use normalized position with per-rank confidence
+                normalized_value = float(raw_value)  # raw_value is already x_normalized
+                
+                # Get the rank for this alternative from qualitative_indicators
+                qi_info = qualitative_indicators[crit]
+                ranking = qi_info['ranking']
+                rank = ranking[alt_name]
+                # Get confidence for this rank from confidence_info dict
+                confidence = confidence_info[rank]
+                
+                # Apply confidence error margin
+                error_pct = confidence_errors[confidence]
+                if error_pct > 0:
+                    error_margin = normalized_value * error_pct
+                    normalized_value = np.random.uniform(
+                        normalized_value - error_margin,
+                        normalized_value + error_margin
+                    )
+                    normalized_value = np.clip(normalized_value, 0.0, 1.0)
+            elif vf is not None and isinstance(confidence_info, int):
+                # Quantitative criterion: traditional VF + single confidence
+                normalized_value = float(vf(raw_value))
+                confidence = confidence_info
+                
+                error_pct = confidence_errors[confidence]
+                if error_pct > 0:
+                    error_margin = normalized_value * error_pct
+                    normalized_value = np.random.uniform(
+                        normalized_value - error_margin,
+                        normalized_value + error_margin
+                    )
+                    normalized_value = np.clip(normalized_value, 0.0, 1.0)
+            else:
                 continue
-            confidence = confidence_lists[vf_elicit_idx].get(crit, 4)
-
-            normalized_value = float(vf(raw_value))
-
-            error_pct = confidence_errors.get(confidence, 0.0)
-            if error_pct > 0:
-                error_margin = normalized_value * error_pct
-                normalized_value = np.random.uniform(
-                    normalized_value - error_margin,
-                    normalized_value + error_margin
-                )
-                normalized_value = np.clip(normalized_value, 0.0, 1.0)
 
             w = sampled_weights.get(crit, 1.0 / len(criteria))
             intermediate_results.append((w, normalized_value))
@@ -479,9 +471,9 @@ def evaluate_alternative(alt_data, criteria, vf_lists, confidence_lists,
 # MONTE CARLO SIMULATION
 # ============================================================================
 def run_monte_carlo(alternatives, criteria, weight_spaces, vf_lists,
-                    confidence_lists, aggregation_method, opinion_weights,
-                    num_iterations, mc_mode, use_random_weights=False,
-                    print_fn=None):
+                    confidence_lists, constraint_data_list, aggregation_method,
+                    opinion_weights, num_iterations, mc_mode, use_random_weights=False,
+                    qualitative_indicators=None, print_fn=None):
     """Run MC simulation.
 
     Parameters
@@ -492,6 +484,8 @@ def run_monte_carlo(alternatives, criteria, weight_spaces, vf_lists,
         One value function dict per elicitation.
     confidence_lists : list[dict]
         One confidence dict per elicitation.
+    constraint_data_list : list[dict]
+        One constraint data dict per elicitation.
     opinion_weights : np.ndarray
         Weights for selecting elicitations in non-strict mode.
     mc_mode : str
@@ -530,12 +524,14 @@ def run_monte_carlo(alternatives, criteria, weight_spaces, vf_lists,
             for elicit_idx in range(num_elicitations):
                 sampled_weights = weight_sampler(
                     weight_spaces[elicit_idx], criteria,
+                    constraint_data_list[elicit_idx],
                     use_random_weights=use_random_weights
                 )
                 for alt_name, alt_data in alternatives.items():
                     score = evaluate_alternative(
-                        alt_data, criteria, vf_lists, confidence_lists,
-                        elicit_idx, elicit_idx, sampled_weights, agg_func
+                        alt_name, alt_data, criteria, vf_lists, confidence_lists,
+                        elicit_idx, elicit_idx, sampled_weights, agg_func,
+                        qualitative_indicators=qualitative_indicators
                     )
                     results[elicit_idx][alt_name].append(score)
     else:
@@ -549,14 +545,16 @@ def run_monte_carlo(alternatives, criteria, weight_spaces, vf_lists,
             weight_elicit_idx = np.random.choice(num_elicitations, p=opinion_weights)
             sampled_weights = weight_sampler(
                 weight_spaces[weight_elicit_idx], criteria,
+                constraint_data_list[weight_elicit_idx],
                 use_random_weights=use_random_weights
             )
             vf_elicit_idx = np.random.choice(num_elicitations, p=opinion_weights)
 
             for alt_name, alt_data in alternatives.items():
                 score = evaluate_alternative(
-                    alt_data, criteria, vf_lists, confidence_lists,
-                    weight_elicit_idx, vf_elicit_idx, sampled_weights, agg_func
+                    alt_name, alt_data, criteria, vf_lists, confidence_lists,
+                    weight_elicit_idx, vf_elicit_idx, sampled_weights, agg_func,
+                    qualitative_indicators=qualitative_indicators
                 )
                 results[alt_name].append(score)
 
@@ -658,6 +656,7 @@ def run_upmavt(session_docs, criteria, computed_weights, params, print_fn=None):
     vf_lists = []
     confidence_lists = []
     weight_spaces_list = []
+    constraint_data_list = []
 
     weight_spaces_data = computed_weights.get('weight_spaces', {})
 
@@ -683,6 +682,24 @@ def run_upmavt(session_docs, criteria, computed_weights, params, print_fn=None):
         else:
             print_fn(f"    ✓ Loaded weight space for {len(ws)} criteria")
         weight_spaces_list.append(ws)
+        
+        # Build constraint data from BWT comparisons
+        bwt_data = session_doc.get('bwt')
+        comparisons = load_comparisons_from_db(bwt_data) if bwt_data else []
+        if comparisons:
+            constraint_data = build_constraint_structure(comparisons, vf_dict)
+            print_fn(f"    ✓ Built constraint structure with {len(comparisons)} comparisons")
+            constraint_data_list.append(constraint_data)
+        else:
+            print_fn(f"    ⚠ No BWT comparisons found, using empty constraints")
+            # Create minimal constraint structure (no comparisons, just criteria)
+            constraint_data = {
+                'criteria': constraint_data_list[-1]['criteria'] if constraint_data_list else list(vf_dict.keys()),
+                'criterion_to_index': {c: i for i, c in enumerate(list(vf_dict.keys()))},
+                'comparisons': [],
+                'value_functions': vf_dict
+            }
+            constraint_data_list.append(constraint_data)
 
     # Load alternatives (same for all elicitations since they share input)
     print_fn("\nLoading alternatives...")
@@ -702,11 +719,18 @@ def run_upmavt(session_docs, criteria, computed_weights, params, print_fn=None):
     print_fn(f"  Opinion weights: {opinion_weights.tolist()}")
     sys.stdout.flush()
 
+    # Gather all qualitative indicators for access during MC
+    all_qi = {}
+    for session_doc in session_docs:
+        qi = session_doc.get('qualitative_indicators')
+        if qi:
+            all_qi.update(qi)
+    
     results = run_monte_carlo(
         alternatives, criteria_names, weight_spaces_list, vf_lists,
-        confidence_lists, aggregation_method, opinion_weights,
-        mc_iterations, mc_mode, use_random_weights=use_random_weights,
-        print_fn=print_fn,
+        confidence_lists, constraint_data_list, aggregation_method,
+        opinion_weights, mc_iterations, mc_mode, use_random_weights=use_random_weights,
+        qualitative_indicators=all_qi if all_qi else None, print_fn=print_fn,
     )
     print_fn("✓ Simulation complete")
 

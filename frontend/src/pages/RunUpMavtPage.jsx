@@ -667,7 +667,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                         <AlertIcon />
                         <AlertDescription>
                           Due to the complexity of the search, this process may take some time. For example, with 15 criteria organized into 4 groups,
-                          the computation typically requires between 10 and 15 minutes. Your patience is appreciated.
+                          the computation typically requires between 15 and 30 minutes <strong>per elicitation</strong>. Your patience is appreciated.
                         </AlertDescription>
                       </Alert>
                     </VStack>
