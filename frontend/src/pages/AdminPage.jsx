@@ -35,25 +35,37 @@ import {
   DrawerCloseButton,
   Badge,
   Tooltip,
-  Icon
+  Icon,
+  Accordion,
+  AccordionItem,
+  AccordionButton,
+  AccordionPanel,
+  AccordionIcon,
 } from '@chakra-ui/react'
-import { LockIcon, UnlockIcon, SettingsIcon } from '@chakra-ui/icons'
+import { LockIcon, UnlockIcon, SettingsIcon, DeleteIcon } from '@chakra-ui/icons'
 import { useRef } from 'react'
 
 function AdminPage(props, ref) {
-  const [sessions, setSessions] = useState([])
+  const [studySessions, setStudySessions] = useState([])
   const [loading, setLoading] = useState(true)
   const [deleteId, setDeleteId] = useState(null)
+  const [deleteStudyId, setDeleteStudyId] = useState(null)
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [password, setPassword] = useState('')
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const { isOpen, onOpen, onClose } = useDisclosure()
+  const {
+    isOpen: isStudyDeleteOpen,
+    onOpen: onStudyDeleteOpen,
+    onClose: onStudyDeleteClose,
+  } = useDisclosure()
   const {
     isOpen: isDrawerOpen,
     onOpen: onDrawerOpen,
     onClose: onDrawerClose,
   } = useDisclosure()
   const cancelRef = useRef()
+  const studyDeleteCancelRef = useRef()
   const toast = useToast()
   const [selectedSession, setSelectedSession] = useState(null)
 
@@ -123,13 +135,18 @@ function AdminPage(props, ref) {
   const fetchSessions = async () => {
     try {
       setLoading(true)
-      const response = await fetch('http://localhost:5000/api/sessions')
-      if (!response.ok) throw new Error('Failed to fetch sessions')
+      const response = await fetch('http://localhost:5000/api/study-sessions')
+      if (!response.ok) throw new Error('Failed to fetch study sessions')
       const data = await response.json()
-      setSessions(data)
+      setStudySessions(data)
       if (selectedSession) {
-        const updated = data.find((s) => s._id === selectedSession._id)
-        setSelectedSession(updated || null)
+        // Find the selected session in the new data
+        let found = null
+        for (const study of data) {
+          found = study.sessions?.find((s) => s._id === selectedSession._id)
+          if (found) break
+        }
+        setSelectedSession(found || null)
       }
     } catch (error) {
       toast({
@@ -189,6 +206,48 @@ function AdminPage(props, ref) {
     } finally {
       onClose()
       setDeleteId(null)
+    }
+  }
+
+  const handleDeleteStudyClick = (studyId, e) => {
+    e.stopPropagation() // Prevent accordion from toggling
+    setDeleteStudyId(studyId)
+    onStudyDeleteOpen()
+  }
+
+  const handleDeleteStudyConfirm = async () => {
+    try {
+      const response = await fetch(`http://localhost:5000/api/study-session/${deleteStudyId}`, {
+        method: 'DELETE',
+      })
+      
+      const data = await response.json()
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to delete study session')
+      }
+      
+      toast({
+        title: 'Success',
+        description: 'Study session deleted successfully',
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      })
+      
+      // Refresh the sessions list
+      fetchSessions()
+    } catch (error) {
+      toast({
+        title: 'Error',
+        description: error.message || 'Failed to delete study session',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+    } finally {
+      onStudyDeleteClose()
+      setDeleteStudyId(null)
     }
   }
 
@@ -318,72 +377,103 @@ function AdminPage(props, ref) {
         </Button>
       </HStack>
       
-      {sessions.length === 0 ? (
-        <Text>No sessions found.</Text>
+      {studySessions.length === 0 ? (
+        <Text>No study sessions found.</Text>
       ) : (
-        <Box overflowX="auto">
-          <Table variant="simple">
-            <Thead>
-              <Tr>
-                <Th>Name</Th>
-                <Th>Created At</Th>
-                <Th>Criteria Count</Th>
-                <Th>Locks</Th>
-                <Th>Qualitative</Th>
-                <Th>Value Functions</Th>
-                <Th>BWT</Th>
-                <Th>PILE-BWT</Th>
-                <Th></Th>
-              </Tr>
-            </Thead>
-            <Tbody>
-              {sessions.map((session) => (
-                <Tr key={session._id} _hover={{ bg: 'gray.50' }}>
-                  <Td>{session.name}</Td>
-                  <Td>{formatDate(session.created_at)}</Td>
-                  <Td>{session.criteria?.length || 0}</Td>
-                  <Td>
-                    <HStack spacing={2}>
-                      <Tooltip
-                        label={
-                          session.session_locked
-                            ? 'Session locked: all edits disabled; downloads allowed.'
-                            : session.locked
-                              ? 'Input locked: criteria edits disabled; other steps allowed.'
-                              : 'Unlocked.'
-                        }
-                        hasArrow
-                      >
-                        <Badge
-                          colorScheme={session.session_locked ? 'red' : session.locked ? 'orange' : 'green'}
-                          display="inline-flex"
-                          alignItems="center"
-                          gap={1}
-                        >
-                          <Icon as={session.session_locked || session.locked ? LockIcon : UnlockIcon} boxSize={3} />
-                          {session.session_locked ? 'Session' : session.locked ? 'Input' : 'Unlocked'}
-                        </Badge>
-                      </Tooltip>
-                    </HStack>
-                  </Td>
-                  <Td>{session.qualitative_indicators !== null ? '✓' : '—'}</Td>
-                  <Td>{session.value_functions !== null ? '✓' : '—'}</Td>
-                  <Td>{session.bwt !== null ? '✓' : '—'}</Td>
-                  <Td>{session.bwt !== null ? '✓' : '—'}</Td>
-                  <Td>
+        <Accordion allowMultiple>
+          {studySessions.map((study) => (
+            <AccordionItem key={study._id} border="1px" borderColor="gray.200" borderRadius="md" mb={3}>
+              <h2>
+                <AccordionButton _expanded={{ bg: 'blue.50' }}>
+                  <Box flex="1" textAlign="left" fontWeight="semibold">
+                    Study: {study.code} ({study.sessions?.length || 0} elicitation session{study.sessions?.length !== 1 ? 's' : ''})
+                  </Box>
+                  {(!study.sessions || study.sessions.length === 0) && (
                     <IconButton
-                      aria-label="Open session menu"
-                      icon={<SettingsIcon />}
+                      aria-label="Delete study session"
+                      icon={<DeleteIcon />}
                       size="sm"
+                      colorScheme="red"
                       variant="ghost"
-                      onClick={() => handleRowClick(session)}
+                      mr={2}
+                      onClick={(e) => handleDeleteStudyClick(study._id, e)}
                     />
-                  </Td>
-                </Tr>
-              ))}
-            </Tbody>
-          </Table>
-        </Box>
+                  )}
+                  <AccordionIcon />
+                </AccordionButton>
+              </h2>
+              <AccordionPanel pb={4} px={0}>
+                {!study.sessions || study.sessions.length === 0 ? (
+                  <Text px={4} color="gray.500">No elicitation sessions yet.</Text>
+                ) : (
+                  <Box overflowX="auto">
+                    <Table variant="simple" size="sm">
+                      <Thead>
+                        <Tr>
+                          <Th>Name</Th>
+                          <Th>Created At</Th>
+                          <Th>Criteria Count</Th>
+                          <Th>Locks</Th>
+                          <Th>Qualitative</Th>
+                          <Th>Value Functions</Th>
+                          <Th>BWT</Th>
+                          <Th>PILE-BWT</Th>
+                          <Th></Th>
+                        </Tr>
+                      </Thead>
+                      <Tbody>
+                        {study.sessions.map((session) => (
+                          <Tr key={session._id} _hover={{ bg: 'gray.50' }}>
+                            <Td>{session.name}</Td>
+                            <Td>{formatDate(session.created_at)}</Td>
+                            <Td>{session.criteria?.length || study.criteria?.length || 0}</Td>
+                            <Td>
+                              <HStack spacing={2}>
+                                <Tooltip
+                                  label={
+                                    session.session_locked
+                                      ? 'Session locked: all edits disabled; downloads allowed.'
+                                      : session.locked
+                                        ? 'Input locked: criteria edits disabled; other steps allowed.'
+                                        : 'Unlocked.'
+                                  }
+                                  hasArrow
+                                >
+                                  <Badge
+                                    colorScheme={session.session_locked ? 'red' : session.locked ? 'orange' : 'green'}
+                                    display="inline-flex"
+                                    alignItems="center"
+                                    gap={1}
+                                  >
+                                    <Icon as={session.session_locked || session.locked ? LockIcon : UnlockIcon} boxSize={3} />
+                                    {session.session_locked ? 'Session' : session.locked ? 'Input' : 'Unlocked'}
+                                  </Badge>
+                                </Tooltip>
+                              </HStack>
+                            </Td>
+                            <Td>{session.qualitative_indicators !== null ? '✓' : '—'}</Td>
+                            <Td>{session.value_functions !== null ? '✓' : '—'}</Td>
+                            <Td>{session.bwt !== null ? '✓' : '—'}</Td>
+                            <Td>{session.bwt !== null ? '✓' : '—'}</Td>
+                            <Td>
+                              <IconButton
+                                aria-label="Open session menu"
+                                icon={<SettingsIcon />}
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => handleRowClick(session)}
+                              />
+                            </Td>
+                          </Tr>
+                        ))}
+                      </Tbody>
+                    </Table>
+                  </Box>
+                )}
+              </AccordionPanel>
+            </AccordionItem>
+          ))}
+        </Accordion>
       )}
 
       <AlertDialog
@@ -406,6 +496,33 @@ function AdminPage(props, ref) {
                 Cancel
               </Button>
               <Button colorScheme="red" onClick={handleDeleteConfirm} ml={3}>
+                Delete
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
+
+      <AlertDialog
+        isOpen={isStudyDeleteOpen}
+        leastDestructiveRef={studyDeleteCancelRef}
+        onClose={onStudyDeleteClose}
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              Delete Study Session
+            </AlertDialogHeader>
+
+            <AlertDialogBody>
+              Are you sure you want to delete this study session? This will also delete any associated input data. This action cannot be undone.
+            </AlertDialogBody>
+
+            <AlertDialogFooter>
+              <Button ref={studyDeleteCancelRef} onClick={onStudyDeleteClose}>
+                Cancel
+              </Button>
+              <Button colorScheme="red" onClick={handleDeleteStudyConfirm} ml={3}>
                 Delete
               </Button>
             </AlertDialogFooter>

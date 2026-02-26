@@ -10,7 +10,11 @@
  * - errorAbsolute: { type: 'errorAbsolute', value: number, error: number }
  * - errorPercent: { type: 'errorPercent', value: number, percent: number }
  * - discrete: { type: 'discrete', values: number[] }
+ * - uniform: { type: 'uniform', low: number, high: number }
  * - histogram: { type: 'histogram', ranges: Array<{min, max, probability}> }
+ * - custom_1: { type: 'custom_1', a_values: number[], x_low: number, x_high: number }
+ *            Samples: x~U(x_low,x_high), a=choice(a_values),
+ *            p0=a*(1-x), p1=a*x+(1-a)*(1-x), p2=(1-a)*x, result=choice([0,1,2], p=[p0,p1,p2])
  * 
  * Note: Gaussian bounds are computed as mean ± (1.96 × std) for 98% confidence interval
  */
@@ -62,6 +66,16 @@ export function parseDistribution(str) {
     }
   }
   
+  // Uniform: "U(low, high)"
+  const uniformMatch = str.match(/^U\(([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\)$/)
+  if (uniformMatch) {
+    return {
+      type: 'uniform',
+      low: parseFloat(uniformMatch[1]),
+      high: parseFloat(uniformMatch[2])
+    }
+  }
+
   // Trapezoid: "TRAP(min, peak_start, peak_end, max, base_prob)"
   const trapezoidMatch = str.match(/^TRAP\(([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\)$/)
   if (trapezoidMatch) {
@@ -90,6 +104,20 @@ export function parseDistribution(str) {
     }
   }
   
+  // Custom_1: "CUSTOM_1({a1, a2, ...}, x_low, x_high)"
+  const custom1Match = str.match(/^CUSTOM_1\(\{([^}]+)\}\s*,\s*([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\)$/)
+  if (custom1Match) {
+    const a_values = custom1Match[1].split(',').map(v => parseFloat(v.trim())).filter(v => !isNaN(v))
+    if (a_values.length > 0) {
+      return {
+        type: 'custom_1',
+        a_values: a_values,
+        x_low: parseFloat(custom1Match[2]),
+        x_high: parseFloat(custom1Match[3])
+      }
+    }
+  }
+
   // Histogram: "(3-4: 15%, 4-6: 32%)"
   const histogramMatch = str.match(/^\((.*)\)$/)
   if (histogramMatch) {
@@ -128,6 +156,9 @@ export function distributionToString(dist) {
     case 'gaussian':
       return `N(${dist.mean}, ${dist.std})`
     
+    case 'uniform':
+      return `U(${dist.low}, ${dist.high})`
+    
     case 'errorAbsolute':
       return `${dist.value} ± ${dist.error}`
     
@@ -146,6 +177,9 @@ export function distributionToString(dist) {
     case 'trapezoid':
       return `TRAP(${dist.min}, ${dist.peak_start}, ${dist.peak_end}, ${dist.max}, ${dist.base_prob})`
     
+    case 'custom_1':
+      return `CUSTOM_1({${dist.a_values.join(', ')}}, ${dist.x_low}, ${dist.x_high})`
+    
     default:
       return ''
   }
@@ -158,11 +192,13 @@ export function getDistributionTypeLabel(type) {
   const labels = {
     certain: 'Certain',
     gaussian: 'Gaussian',
+    uniform: 'Uniform',
     errorAbsolute: '±Error',
     errorPercent: '±%Error',
     discrete: 'Discrete',
     histogram: 'Histogram',
-    trapezoid: 'Trapezoid'
+    trapezoid: 'Trapezoid',
+    custom_1: 'Custom 1'
   }
   return labels[type] || 'Unknown'
 }
@@ -188,6 +224,12 @@ export function computeDistributionBounds(dist) {
       return {
         min: dist.mean - margin,
         max: dist.mean + margin
+      }
+    
+    case 'uniform':
+      return {
+        min: dist.low,
+        max: dist.high
       }
     
     case 'errorAbsolute':
@@ -219,6 +261,12 @@ export function computeDistributionBounds(dist) {
       return {
         min: dist.min,
         max: dist.max
+      }
+    
+    case 'custom_1':
+      return {
+        min: 0,
+        max: 2
       }
     
     default:
@@ -260,6 +308,18 @@ export function generatePlotData(dist, numPoints = 100) {
         points.push({ x, y })
       }
       return points
+    
+    case 'uniform':
+      // Uniform distribution U(low, high)
+      {
+        const uHeight = 1 / (dist.high - dist.low)
+        return [
+          { x: dist.low, y: 0 },
+          { x: dist.low, y: uHeight },
+          { x: dist.high, y: uHeight },
+          { x: dist.high, y: 0 }
+        ]
+      }
     
     case 'errorAbsolute':
       // Uniform distribution
@@ -324,6 +384,21 @@ export function generatePlotData(dist, numPoints = 100) {
         { x: dist.max, y: dist.base_prob }
       ]
     
+    case 'custom_1':
+      // Show approximate PMF for outcomes 0, 1, 2 using mean of a_values and midpoint of x range
+      {
+        const a_mean = dist.a_values.reduce((s, v) => s + v, 0) / dist.a_values.length
+        const x_mid = (dist.x_low + dist.x_high) / 2
+        const p0 = a_mean * (1 - x_mid)
+        const p1 = a_mean * x_mid + (1 - a_mean) * (1 - x_mid)
+        const p2 = (1 - a_mean) * x_mid
+        return [
+          { x: 0, y: p0 },
+          { x: 1, y: p1 },
+          { x: 2, y: p2 }
+        ]
+      }
+    
     default:
       return []
   }
@@ -342,6 +417,10 @@ export function isValidDistribution(dist) {
     case 'gaussian':
       return typeof dist.mean === 'number' && typeof dist.std === 'number'
         && !isNaN(dist.mean) && !isNaN(dist.std) && dist.std > 0
+    
+    case 'uniform':
+      return typeof dist.low === 'number' && typeof dist.high === 'number'
+        && !isNaN(dist.low) && !isNaN(dist.high) && dist.low < dist.high
     
     case 'errorAbsolute':
       return typeof dist.value === 'number' && typeof dist.error === 'number'
@@ -372,6 +451,13 @@ export function isValidDistribution(dist) {
         && dist.min <= dist.peak_start && dist.peak_start <= dist.peak_end
         && dist.peak_end <= dist.max && dist.base_prob >= 0 && dist.base_prob <= 1
     
+    case 'custom_1':
+      return Array.isArray(dist.a_values) && dist.a_values.length > 0
+        && dist.a_values.every(v => typeof v === 'number' && !isNaN(v))
+        && typeof dist.x_low === 'number' && typeof dist.x_high === 'number'
+        && !isNaN(dist.x_low) && !isNaN(dist.x_high)
+        && dist.x_low >= 0 && dist.x_high <= 1 && dist.x_low < dist.x_high
+    
     default:
       return false
   }
@@ -390,6 +476,9 @@ export function getDistributionSummary(dist) {
     case 'gaussian':
       return `N(μ=${dist.mean.toFixed(2)}, σ=${dist.std.toFixed(2)})`
     
+    case 'uniform':
+      return `U(${dist.low.toFixed(2)}, ${dist.high.toFixed(2)})`
+    
     case 'errorAbsolute':
       return `${dist.value.toFixed(2)} ± ${dist.error.toFixed(2)}`
     
@@ -407,6 +496,9 @@ export function getDistributionSummary(dist) {
       return is_triangle
         ? `Tri(${dist.min.toFixed(1)}-${dist.max.toFixed(1)})`
         : `Trap(${dist.min.toFixed(1)}-${dist.max.toFixed(1)})`
+    
+    case 'custom_1':
+      return `Custom1(a={${dist.a_values.join(',')}}, x=[${dist.x_low},${dist.x_high}])`
     
     default:
       return ''
