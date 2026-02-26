@@ -16,7 +16,7 @@ RNG_SEED = 426
 Z_THRESHOLD_OFFSET = 0.001
 EPS = 0.001
 N_RESTARTS = 200
-CONSTRAINT_TOL = 1e-10
+CONSTRAINT_TOL = 1e-5
 
 
 # ============================================================================
