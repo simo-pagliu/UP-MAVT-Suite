@@ -1,7 +1,7 @@
 
 /backend/app/__pycache__
 /backend/app/routes/__pycache__
-/UP-MAVT/__pycache__
+*/__pycache__
 UP-MAVT/aggregation_methods.py
 UP-MAVT/alternatives_CH.csv
 UP-MAVT/alternatives_FR.csv
