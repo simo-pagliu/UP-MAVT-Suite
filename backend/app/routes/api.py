@@ -26,6 +26,101 @@ def _serialize_object_id(value):
         return None
     return str(value)
 
+def _normalize_rank_key(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return value
+
+def _normalize_confidence_value(value, default=4):
+    try:
+        confidence = int(value)
+    except (TypeError, ValueError):
+        confidence = default
+    return max(0, min(4, confidence))
+
+def _build_rank_confidences_from_alternatives(ranking, confidences_alternatives):
+    if not isinstance(ranking, dict) or not isinstance(confidences_alternatives, dict):
+        return {}
+
+    confidence_by_rank = {}
+    for alt_name, rank in ranking.items():
+        rank_key = _normalize_rank_key(rank)
+        conf_raw = confidences_alternatives.get(alt_name)
+        if conf_raw is None:
+            continue
+        confidence_by_rank.setdefault(rank_key, []).append(
+            _normalize_confidence_value(conf_raw, default=4)
+        )
+
+    return {
+        rank_key: int(round(sum(values) / len(values)))
+        for rank_key, values in confidence_by_rank.items()
+        if values
+    }
+
+def _normalize_qualitative_confidences(ranking, confidences, confidences_alternatives=None):
+    if not isinstance(ranking, dict):
+        return {}
+
+    legacy_rank_confidences = _build_rank_confidences_from_alternatives(
+        ranking,
+        confidences_alternatives,
+    )
+    normalized = {}
+    unique_ranks = {_normalize_rank_key(rank) for rank in ranking.values()}
+
+    for rank in unique_ranks:
+        conf_raw = None
+        if isinstance(confidences, dict):
+            conf_raw = confidences.get(rank)
+            if conf_raw is None:
+                conf_raw = confidences.get(str(rank))
+        if conf_raw is None:
+            conf_raw = legacy_rank_confidences.get(rank)
+        normalized[str(rank)] = _normalize_confidence_value(conf_raw, default=4)
+
+    return normalized
+
+def _normalize_qualitative_indicators(criteria, qualitative_indicators):
+    if not isinstance(qualitative_indicators, dict):
+        return {}
+
+    qualitative_names = set()
+    if isinstance(criteria, list):
+        qualitative_names = {
+            c.get('criterion_name')
+            for c in criteria
+            if isinstance(c, dict) and c.get('is_qualitative') and c.get('criterion_name')
+        }
+
+    normalized = {}
+    for criterion_name, raw_data in qualitative_indicators.items():
+        if qualitative_names and criterion_name not in qualitative_names:
+            normalized[criterion_name] = raw_data
+            continue
+
+        if not isinstance(raw_data, dict):
+            normalized[criterion_name] = raw_data
+            continue
+
+        ranking = raw_data.get('ranking') if isinstance(raw_data.get('ranking'), dict) else {}
+        values = raw_data.get('values') if isinstance(raw_data.get('values'), dict) else {}
+        confidences = _normalize_qualitative_confidences(
+            ranking,
+            raw_data.get('confidences'),
+            raw_data.get('confidences_alternatives'),
+        )
+
+        normalized[criterion_name] = {
+            **raw_data,
+            'ranking': ranking,
+            'values': values,
+            'confidences': confidences,
+        }
+
+    return normalized
+
 def _validate_criteria(criteria):
     if not isinstance(criteria, list) or len(criteria) == 0:
         return False, 'At least one criterion is required'
@@ -61,6 +156,31 @@ def _validate_criteria(criteria):
 
     return True, normalized
 
+def _validate_input_for_features(criteria, features):
+    """Validate input based on which features are activated."""
+    if not isinstance(criteria, list) or len(criteria) == 0:
+        return False, 'At least one criterion is required'
+    
+    features = features or {'qi': False, 'vf': False, 'bwt': False}
+    qi_active = features.get('qi', False)
+    vf_active = features.get('vf', False)
+    bwt_active = features.get('bwt', False)
+    
+    # If QI is active, all criteria must have alternatives
+    if qi_active:
+        for idx, criterion in enumerate(criteria):
+            alternatives = criterion.get('alternatives', [])
+            if not isinstance(alternatives, list) or len(alternatives) == 0:
+                return False, f'QI requires alternatives for all criteria. Criterion "{criterion.get("criterion_name")}" at position {idx + 1} is missing alternatives'
+    
+    # If VF or BWT is active, we need at least criteria (alternatives are optional)
+    if vf_active or bwt_active:
+        for idx, criterion in enumerate(criteria):
+            if not criterion.get('criterion_name'):
+                return False, f'Criterion {idx + 1} must have a name'
+    
+    return True, 'Valid'
+
 def _resolve_session_criteria(session, db):
     if not isinstance(session, dict):
         return []
@@ -94,6 +214,35 @@ def admin_login():
         return jsonify({'success': True}), 200
     else:
         return jsonify({'success': False, 'error': 'Invalid password'}), 401
+
+# Session detection
+@bp.route('/session/detect/<code>', methods=['GET'])
+def detect_session_type(code):
+    """Detect if a code belongs to a stakeholder (elicitation) or practitioner session"""
+    db = current_app.db
+    
+    # Check if code exists in stakeholder/elicitation sessions
+    stakeholder_session = db.sessions.find_one({'name': code})
+    if stakeholder_session:
+        return jsonify({
+            'exists': True,
+            'type': 'stakeholder',
+            '_id': str(stakeholder_session.get('_id')),
+            'code': code
+        }), 200
+    
+    # Check if code exists in practitioner study sessions
+    practitioner_session = db.study_sessions.find_one({'code': code})
+    if practitioner_session:
+        return jsonify({
+            'exists': True,
+            'type': 'practitioner',
+            '_id': str(practitioner_session.get('_id')),
+            'code': code
+        }), 200
+    
+    # Code not found
+    return jsonify({'exists': False}), 200
 
 # Initialize session
 @bp.route('/session', methods=['POST'])
@@ -143,6 +292,11 @@ def create_study_session():
     study_doc = {
         'code': code,
         'input_id': None,
+        'features': {
+            'qi': False,
+            'vf': False,
+            'bwt': False
+        },
         'created_at': datetime.utcnow(),
     }
     result = db.study_sessions.insert_one(study_doc)
@@ -189,6 +343,41 @@ def get_study_session(study_session_id):
         study['input_id'] = _serialize_object_id(study.get('input_id'))
         study['criteria'] = criteria
         return jsonify(study), 200
+    except:
+        return jsonify({'error': 'Invalid study session ID'}), 400
+
+@bp.route('/study-session/<study_session_id>', methods=['PATCH'])
+def update_study_session(study_session_id):
+    """Update study session features."""
+    data = request.json or {}
+    db = current_app.db
+    try:
+        study = db.study_sessions.find_one({'_id': ObjectId(study_session_id)})
+        if not study:
+            return jsonify({'error': 'Study session not found'}), 404
+
+        # Update features if provided
+        update_doc = {}
+        if 'features' in data:
+            features = data.get('features', {})
+            if isinstance(features, dict):
+                update_doc['features'] = {
+                    'qi': bool(features.get('qi', False)),
+                    'vf': bool(features.get('vf', False)),
+                    'bwt': bool(features.get('bwt', False))
+                }
+        
+        if update_doc:
+            db.study_sessions.update_one(
+                {'_id': ObjectId(study_session_id)},
+                {'$set': update_doc}
+            )
+        
+        # Return updated session
+        updated_study = db.study_sessions.find_one({'_id': ObjectId(study_session_id)})
+        updated_study['_id'] = str(updated_study['_id'])
+        updated_study['input_id'] = _serialize_object_id(updated_study.get('input_id'))
+        return jsonify(updated_study), 200
     except:
         return jsonify({'error': 'Invalid study session ID'}), 400
 
@@ -317,6 +506,19 @@ def create_elicitation_session(study_session_id):
         if not input_id:
             return jsonify({'error': 'Study input is not defined'}), 400
 
+        # Get input criteria
+        input_doc = db.inputs.find_one({'_id': input_id})
+        if not input_doc:
+            return jsonify({'error': 'Study input not found'}), 400
+        
+        criteria = input_doc.get('criteria', [])
+        features = study.get('features', {'qi': False, 'vf': False, 'bwt': False})
+        
+        # Validate input based on activated features
+        is_valid, validation_msg = _validate_input_for_features(criteria, features)
+        if not is_valid:
+            return jsonify({'error': validation_msg}), 400
+
         session_doc = {
             'name': name,
             'input_id': input_id,
@@ -330,8 +532,8 @@ def create_elicitation_session(study_session_id):
         }
         result = db.sessions.insert_one(session_doc)
         return jsonify({'session_id': str(result.inserted_id)}), 201
-    except:
-        return jsonify({'error': 'Invalid study session ID'}), 400
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
 @bp.route('/study-session/<study_session_id>/elicitation-sessions', methods=['GET'])
 def list_elicitation_sessions(study_session_id):
@@ -587,9 +789,12 @@ def update_qualitative(session_id):
         if session.get('session_locked', False):
             return jsonify({'error': 'Session is locked'}), 423
 
+        criteria = _resolve_session_criteria(session, db)
+        normalized_value = _normalize_qualitative_indicators(criteria, value)
+
         db.sessions.update_one(
             {'_id': ObjectId(session_id)},
-            {'$set': {'qualitative_indicators': value}}
+            {'$set': {'qualitative_indicators': normalized_value}}
         )
         return jsonify({'status': 'updated'}), 200
     except:
@@ -1493,6 +1698,27 @@ def run_step_endpoint(study_session_id):
         if not study:
             return jsonify({'error': 'Study session not found'}), 404
 
+        # Normalize qualitative indicator payloads to guarantee rank-level confidences.
+        selected_object_ids = [_ensure_object_id(session_id) for session_id in selected_session_ids]
+        selected_object_ids = [session_id for session_id in selected_object_ids if session_id is not None]
+        if not selected_object_ids:
+            return jsonify({'error': 'No valid session IDs selected'}), 400
+
+        session_docs = list(db.sessions.find({'_id': {'$in': selected_object_ids}}))
+        for session_doc in session_docs:
+            session_study_id = _ensure_object_id(session_doc.get('study_session_id'))
+            if session_study_id != ObjectId(study_session_id):
+                continue
+            criteria = _resolve_session_criteria(session_doc, db)
+            current_qi = session_doc.get('qualitative_indicators')
+            current_qi = current_qi if isinstance(current_qi, dict) else {}
+            normalized_qi = _normalize_qualitative_indicators(criteria, current_qi)
+            if normalized_qi != current_qi:
+                db.sessions.update_one(
+                    {'_id': session_doc.get('_id')},
+                    {'$set': {'qualitative_indicators': normalized_qi}}
+                )
+
         # Check weights are computed
         if not study.get('computed_weights'):
             return jsonify({'error': 'Compute weights first (Step 1)'}), 400
@@ -1570,6 +1796,38 @@ def cancel_task(task_id):
         return jsonify({'status': 'cancelled'}), 200
     except Exception:
         return jsonify({'error': 'Invalid task ID'}), 400
+
+
+@bp.route('/study-session/<study_session_id>/active-task', methods=['GET'])
+def get_active_task(study_session_id):
+    """Get the currently running or pending task for a study session."""
+    db = current_app.db
+    try:
+        # Find any pending or running task for this study session
+        task = db.tasks.find_one(
+            {
+                'params.study_session_id': study_session_id,
+                'status': {'$in': ['pending', 'running']}
+            },
+            sort=[('created_at', -1)]  # Get the most recent one
+        )
+        
+        if not task:
+            return jsonify({'active_task': None}), 200
+        
+        return jsonify({
+            'active_task': {
+                'task_id': str(task['_id']),
+                'type': task.get('type'),
+                'status': task.get('status'),
+                'console_output': task.get('console_output', ''),
+                'params': task.get('params', {}),
+                'created_at': task.get('created_at', '').isoformat() if task.get('created_at') else None,
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 
 @bp.route('/study-session/<study_session_id>/reset-weights', methods=['POST'])

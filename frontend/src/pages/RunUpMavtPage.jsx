@@ -261,6 +261,45 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     }, 2000)
   }, [fetchWorkflowStatus, toast])
 
+  // Check for active/running tasks on mount (called after startPolling is defined)
+  const checkForActiveTask = useCallback(async () => {
+    try {
+      const response = await axios.get(`${API_URL}/study-session/${studySessionId}/active-task`)
+      const activeTask = response.data.active_task
+      
+      if (activeTask && (activeTask.status === 'pending' || activeTask.status === 'running')) {
+        // Restore task state
+        setActiveTaskId(activeTask.task_id)
+        setConsoleOutput(activeTask.console_output || 'Task in progress...\n')
+        setShowConsole(true)
+        
+        // Determine which step is running
+        const taskType = activeTask.type
+        const params = activeTask.params || {}
+        
+        if (taskType === 'compute_weights') {
+          setRunningStep('weights')
+          startPolling(activeTask.task_id, 'Compute Weights')
+        } else if (taskType === 'run_step') {
+          const stepNumber = params.step_number
+          const stepName = params.step_name || `Step ${stepNumber}`
+          setRunningStep(stepName)
+          startPolling(activeTask.task_id, stepName)
+        }
+      }
+    } catch (error) {
+      console.error('Error checking for active task:', error)
+      // Don't show error toast - this is a background check
+    }
+  }, [studySessionId, startPolling])
+
+  // Call checkForActiveTask on mount
+  useEffect(() => {
+    if (studySessionId) {
+      checkForActiveTask()
+    }
+  }, [studySessionId, checkForActiveTask])
+
   // Cleanup polling on unmount
   useEffect(() => {
     return () => {

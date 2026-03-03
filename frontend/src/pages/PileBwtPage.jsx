@@ -102,6 +102,32 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     return JSON.stringify(normalized)
   }
 
+  const canonicalizeJson = (value) => {
+    if (Array.isArray(value)) {
+      return value.map(canonicalizeJson)
+    }
+    if (value && typeof value === 'object') {
+      return Object.keys(value)
+        .sort()
+        .reduce((acc, key) => {
+          acc[key] = canonicalizeJson(value[key])
+          return acc
+        }, {})
+    }
+    return value
+  }
+
+  const areSignaturesEquivalent = (savedSignature, currentSignature) => {
+    if (!savedSignature || !currentSignature) return false
+    try {
+      const savedParsed = canonicalizeJson(JSON.parse(savedSignature))
+      const currentParsed = canonicalizeJson(JSON.parse(currentSignature))
+      return JSON.stringify(savedParsed) === JSON.stringify(currentParsed)
+    } catch {
+      return savedSignature === currentSignature
+    }
+  }
+
   const criteriaSignature = useMemo(() => getCriteriaSignature(criteria), [criteria])
 
   const getBestWorstByGroupName = (groupName, comps = comparisons) => {
@@ -268,12 +294,13 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
 
   useEffect(() => {
     if (loading) return
+    const signatureMatch = areSignaturesEquivalent(bwtSignature, criteriaSignature)
     
     console.log('BWT Mismatch Check:', {
       comparisonsLength: comparisons.length,
       bwtSignature,
       criteriaSignature,
-      match: bwtSignature === criteriaSignature
+      match: signatureMatch
     })
     
     // If there are comparisons but no saved signature (old data), it's a mismatch
@@ -285,7 +312,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     
     // If there's a saved signature and current signature, compare them
     if (bwtSignature && criteriaSignature) {
-      if (bwtSignature !== criteriaSignature) {
+      if (!signatureMatch) {
         console.log('Setting mismatch: signatures dont match')
         setCriteriaMismatch(true)
       } else {
@@ -301,18 +328,23 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     criteria_signature: criteriaSignature,
   })
 
+  // Track which group the current pairs belong to
+  const [pairsGroupName, setPairsGroupName] = useState(null)
+
   useEffect(() => {
     if (!loading && allGroups.length > 0 && selectedGroupIndex !== null) {
       const selectedGroup = allGroups[selectedGroupIndex]
       if (!selectedGroup) return
+      
+      const groupName = selectedGroup.name
+      
+      // Skip if group is not ready
       if (selectedGroup.isIntra && !selectedGroup.isReady) {
         setStep('select-criteria')
         return
       }
 
-      const groupName = selectedGroup.name
       const groupComps = comparisons.filter((c) => c.group === groupName && c.type !== 'intra-best' && c.type !== 'intra-worst')
-
       const groupCriteria = selectedGroup.criteria
       const hasLocalBestWorst =
         step === 'evaluate-pairs' &&
@@ -326,9 +358,11 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         return
       }
 
-      // Only regenerate pairs if we don't have them yet or if step changed to evaluate-pairs
-      if (pairs.length === 0 || step !== 'evaluate-pairs') {
+      // Generate pairs if we don't have them yet OR if we switched to a different group
+      if (pairs.length === 0 || pairsGroupName !== groupName) {
         // Generate pairs for this group and load
+
+
         const resolvedBestWorst = groupComps.length > 0
           ? getGroupBestWorst(selectedGroupIndex)
           : { best: bestCriterion, worst: worstCriterion }
@@ -352,6 +386,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             })),
           ]
           setPairs(newPairs)
+          setPairsGroupName(groupName)
           setBestCriterion(best)
           setWorstCriterion(worst)
           setStep('evaluate-pairs')
@@ -371,10 +406,11 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             setBestToWorstValue(null)
           }
 
-          const nextIndex = 0
-
-          setCurrentPairIndex(nextIndex)
-          const targetPair = newPairs[nextIndex]
+          // Set current pair and slider value
+          setCurrentPairIndex(0)
+          setConsistencyConstraints({})
+          setIsConsistencyError(false)
+          const targetPair = newPairs[0]
           const existing = comparisons.find(
             (c) =>
               c.reference_criterion === targetPair.reference.criterion_name &&
@@ -385,7 +421,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         }
       }
     }
-  }, [loading, allGroups, selectedGroupIndex, step, bestCriterion, worstCriterion])
+  }, [loading, selectedGroupIndex, allGroups, pairsGroupName])
 
   useEffect(() => {
     if (Number.isFinite(sliderValue)) {
@@ -418,9 +454,12 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       })
       setComparisons([])
       setPairs([])
+      setPairsGroupName(null)
       setBestCriterion(null)
       setWorstCriterion(null)
       setCurrentPairIndex(0)
+      setSelectedGroupIndex(0)
+      setSelectionStep(null)
       setStep('select-criteria')
       setCriteriaMismatch(false)
       setCriteriaMismatchAcknowledged(false)
@@ -491,6 +530,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     setBestCriterion(null)
     setWorstCriterion(null)
     setPairs([])
+    setPairsGroupName(null)
     setStep('select-criteria')
     // Reset consistency tracking for this group
     setBestToWorstValue(null)
@@ -773,6 +813,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     ]
 
     setPairs(newPairs)
+    setPairsGroupName(allGroups[selectedGroupIndex].name)
     setCurrentPairIndex(0)
     setSelectionStep(null)
     setStep('evaluate-pairs')
@@ -1320,6 +1361,16 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
 
     if (step === 'evaluate-pairs') {
       const pair = pairs[currentPairIndex]
+      
+      // Safety check: if pairs array exists but current pair is undefined, return loading
+      if (!pair) {
+        return (
+          <Box display="flex" justifyContent="center" alignItems="center" minH="400px">
+            <Spinner size="lg" />
+          </Box>
+        )
+      }
+      
       const adjustedRange = getDataRange(pair.adjusted)
       const referenceRange = getDataRange(pair.reference)
       const groupCriteria = allGroups[selectedGroupIndex].criteria
@@ -1559,6 +1610,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                         setBestCriterion(null)
                         setWorstCriterion(null)
                         setPairs([])
+                        setPairsGroupName(null)
                         setStep('select-criteria')
                         // Reset consistency tracking for new group
                         setBestToWorstValue(null)

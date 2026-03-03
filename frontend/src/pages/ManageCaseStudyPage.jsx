@@ -36,11 +36,52 @@ const generateRandomCode = () => {
   return code
 }
 
+const getCriteriaSignature = (criteriaList) => {
+  const normalized = (criteriaList || []).map((crit) => ({
+    name: crit?.criterion_name || '',
+    unit: crit?.unit || '',
+    group: crit?.group || '',
+    alternatives: (crit?.alternatives || []).map((alt) => ({
+      name: alt?.name || alt?.alternative_name || '',
+      value: alt?.value,
+    })),
+  }))
+  return JSON.stringify(normalized)
+}
+
+const canonicalizeJson = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeJson)
+  }
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = canonicalizeJson(value[key])
+        return acc
+      }, {})
+  }
+  return value
+}
+
+const areSignaturesEquivalent = (savedSignature, currentSignature) => {
+  if (!savedSignature || !currentSignature) return false
+  try {
+    const savedParsed = canonicalizeJson(JSON.parse(savedSignature))
+    const currentParsed = canonicalizeJson(JSON.parse(currentSignature))
+    return JSON.stringify(savedParsed) === JSON.stringify(currentParsed)
+  } catch {
+    return savedSignature === currentSignature
+  }
+}
+
 const buildProgress = (criteria, session) => {
   const list = Array.isArray(criteria) ? criteria : []
   const qualitativeIndicators = session?.qualitative_indicators || {}
   const valueFunctions = session?.value_functions
   const bwtData = session?.bwt
+  const currentCriteriaSignature = getCriteriaSignature(list)
+  const savedBwtSignature = bwtData?.criteria_signature || null
 
   const hasAlternatives = list.length > 0 && list.every((crit) => {
     const alts = Array.isArray(crit?.alternatives) ? crit.alternatives : []
@@ -92,7 +133,10 @@ const buildProgress = (criteria, session) => {
   const completedIntraB = !hasMultipleGroups || intraBComps.length >= intraBExpected
   const completedIntraW = !hasMultipleGroups || intraWComps.length >= intraWExpected
 
-  const hasBwt = baseGroups.length > 0 && completedBaseGroups && completedIntraB && completedIntraW
+  const hasComparisons = comparisons.length > 0
+  const bwtSignatureValid = hasComparisons && areSignaturesEquivalent(savedBwtSignature, currentCriteriaSignature)
+
+  const hasBwt = baseGroups.length > 0 && completedBaseGroups && completedIntraB && completedIntraW && bwtSignatureValid
 
   const steps = [
     { key: 'qi', label: 'QI', done: hasQualitativeIndicators },
@@ -173,7 +217,7 @@ function ManageCaseStudyPage({ studySessionId, studyCode }) {
       setNewCode('')
       toast({
         title: 'Session created',
-        description: 'Elicitation session is ready for experts',
+        description: 'Elicitation session is ready for stakeholders',
         status: 'success',
         duration: 2000,
         isClosable: true,

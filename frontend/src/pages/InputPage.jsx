@@ -94,6 +94,9 @@ function InputPage({ studySessionId }, ref) {
       group: c.group || '',
       description: c.description || '',
       is_qualitative: c.is_qualitative || false,
+      use_custom_min_max: c.use_custom_min_max || false,
+      min_value: c.min_value || '',
+      max_value: c.max_value || '',
       alternatives: Array.isArray(c.alternatives) 
         ? c.alternatives.map(alt => ({
             name: alt.name || '',
@@ -237,6 +240,40 @@ function InputPage({ studySessionId }, ref) {
         }
       }
 
+      // Optional Min row
+      let minValues = Array(criterionNames.length).fill('')
+      if (rows[alternativesStartIndex] && rows[alternativesStartIndex][0] && rows[alternativesStartIndex][0].toLowerCase() === 'min') {
+        minValues = rows[alternativesStartIndex].slice(1)
+        alternativesStartIndex += 1
+        if (minValues.length !== criterionNames.length) {
+          toast({
+            title: 'Error',
+            description: 'Number of min values must match number of criteria',
+            status: 'error',
+            duration: 3000,
+            isClosable: true,
+          })
+          return
+        }
+      }
+
+      // Optional Max row
+      let maxValues = Array(criterionNames.length).fill('')
+      if (rows[alternativesStartIndex] && rows[alternativesStartIndex][0] && rows[alternativesStartIndex][0].toLowerCase() === 'max') {
+        maxValues = rows[alternativesStartIndex].slice(1)
+        alternativesStartIndex += 1
+        if (maxValues.length !== criterionNames.length) {
+          toast({
+            title: 'Error',
+            description: 'Number of max values must match number of criteria',
+            status: 'error',
+            duration: 3000,
+            isClosable: true,
+          })
+          return
+        }
+      }
+
       // Last row: units (first cell should be "Unit")
       const unitRow = rows[rows.length - 1]
       const units = unitRow.slice(1) // Skip first column
@@ -272,12 +309,16 @@ function InputPage({ studySessionId }, ref) {
           name: row[0],
           value: row[idx + 1] || '' // This can be a distribution string
         }))
+        const hasCustomMinMax = (minValues[idx] && minValues[idx] !== '') || (maxValues[idx] && maxValues[idx] !== '')
         return {
           criterion_name: name,
           group: groups[idx] || '',
           description: descriptions[idx] || '',
           unit: units[idx],
           is_qualitative: false,
+          use_custom_min_max: hasCustomMinMax,
+          min_value: minValues[idx] || '',
+          max_value: maxValues[idx] || '',
           alternatives
         }
       })
@@ -732,6 +773,38 @@ function InputPage({ studySessionId }, ref) {
                           >
                             <Text fontSize="xs">Qualitative</Text>
                           </Checkbox>
+                          <Checkbox
+                            isChecked={criterion.use_custom_min_max}
+                            onChange={(e) => handleCellChange(idx, 'use_custom_min_max', e.target.checked)}
+                            isDisabled={isLocked}
+                            size="sm"
+                          >
+                            <Text fontSize="xs">Custom Min/Max</Text>
+                          </Checkbox>
+                          {criterion.use_custom_min_max && (
+                            <>
+                              <Input
+                                value={criterion.min_value || ''}
+                                onChange={(e) => handleCellChange(idx, 'min_value', e.target.value)}
+                                placeholder="Min value"
+                                size="sm"
+                                fontSize="xs"
+                                bg="white"
+                                isDisabled={isLocked}
+                                type="number"
+                              />
+                              <Input
+                                value={criterion.max_value || ''}
+                                onChange={(e) => handleCellChange(idx, 'max_value', e.target.value)}
+                                placeholder="Max value"
+                                size="sm"
+                                fontSize="xs"
+                                bg="white"
+                                isDisabled={isLocked}
+                                type="number"
+                              />
+                            </>
+                          )}
                         </VStack>
                       </Th>
                     ))}

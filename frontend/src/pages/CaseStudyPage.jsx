@@ -2,6 +2,7 @@ import {
   Badge,
   Box,
   Button,
+  Checkbox,
   FormControl,
   FormLabel,
   HStack,
@@ -38,11 +39,52 @@ const generateRandomCode = () => {
   return code
 }
 
+const getCriteriaSignature = (criteriaList) => {
+  const normalized = (criteriaList || []).map((crit) => ({
+    name: crit?.criterion_name || '',
+    unit: crit?.unit || '',
+    group: crit?.group || '',
+    alternatives: (crit?.alternatives || []).map((alt) => ({
+      name: alt?.name || alt?.alternative_name || '',
+      value: alt?.value,
+    })),
+  }))
+  return JSON.stringify(normalized)
+}
+
+const canonicalizeJson = (value) => {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeJson)
+  }
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = canonicalizeJson(value[key])
+        return acc
+      }, {})
+  }
+  return value
+}
+
+const areSignaturesEquivalent = (savedSignature, currentSignature) => {
+  if (!savedSignature || !currentSignature) return false
+  try {
+    const savedParsed = canonicalizeJson(JSON.parse(savedSignature))
+    const currentParsed = canonicalizeJson(JSON.parse(currentSignature))
+    return JSON.stringify(savedParsed) === JSON.stringify(currentParsed)
+  } catch {
+    return savedSignature === currentSignature
+  }
+}
+
 const buildProgress = (criteria, session) => {
   const list = Array.isArray(criteria) ? criteria : []
   const qualitativeIndicators = session?.qualitative_indicators || {}
   const valueFunctions = session?.value_functions
   const bwtData = session?.bwt
+  const currentCriteriaSignature = getCriteriaSignature(list)
+  const savedBwtSignature = bwtData?.criteria_signature || null
 
   const hasAlternatives = list.length > 0 && list.every((crit) => {
     const alts = Array.isArray(crit?.alternatives) ? crit.alternatives : []
@@ -94,7 +136,10 @@ const buildProgress = (criteria, session) => {
   const completedIntraB = !hasMultipleGroups || intraBComps.length >= intraBExpected
   const completedIntraW = !hasMultipleGroups || intraWComps.length >= intraWExpected
 
-  const hasBwt = baseGroups.length > 0 && completedBaseGroups && completedIntraB && completedIntraW
+  const hasComparisons = comparisons.length > 0
+  const bwtSignatureValid = hasComparisons && areSignaturesEquivalent(savedBwtSignature, currentCriteriaSignature)
+
+  const hasBwt = baseGroups.length > 0 && completedBaseGroups && completedIntraB && completedIntraW && bwtSignatureValid
 
   const steps = [
     { key: 'qi', label: 'QI', done: hasQualitativeIndicators },
@@ -122,6 +167,8 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
   const [criteria, setCriteria] = useState([])
   const [loading, setLoading] = useState(false)
   const [newCode, setNewCode] = useState('')
+  const [features, setFeatures] = useState({ qi: false, vf: false, bwt: false })
+  const [savingFeatures, setSavingFeatures] = useState(false)
   const toast = useToast()
 
   const canCreateSession = Boolean(studySessionId)
@@ -134,6 +181,13 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
       const data = response.data
       setSessions(Array.isArray(data.sessions) ? data.sessions : [])
       setCriteria(Array.isArray(data.criteria) ? data.criteria : [])
+      
+      // Also fetch features
+      const studyResponse = await axios.get(`${API_URL}/study-session/${studySessionId}`)
+      const studyData = studyResponse.data
+      if (studyData && studyData.features) {
+        setFeatures(studyData.features)
+      }
     } catch (error) {
       toast({
         title: 'Error',
@@ -150,6 +204,38 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
   useEffect(() => {
     loadSessions()
   }, [studySessionId])
+
+  const handleFeatureToggle = async (featureName) => {
+    const newFeatures = { ...features, [featureName]: !features[featureName] }
+    setFeatures(newFeatures)
+    
+    // Save to backend
+    setSavingFeatures(true)
+    try {
+      await axios.patch(`${API_URL}/study-session/${studySessionId}`, {
+        features: newFeatures
+      })
+      toast({
+        title: 'Features updated',
+        description: `${featureName === 'qi' ? 'QI' : featureName === 'vf' ? 'Value Functions' : 'PILE-BWT'} ${newFeatures[featureName] ? 'enabled' : 'disabled'}`,
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
+      })
+    } catch (error) {
+      // Revert on error
+      setFeatures(features)
+      toast({
+        title: 'Error',
+        description: error.response?.data?.error || 'Failed to update features',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+    } finally {
+      setSavingFeatures(false)
+    }
+  }
 
   const sessionRows = useMemo(() => {
     return sessions.map((session) => ({
@@ -261,7 +347,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
       setNewCode('')
       toast({
         title: 'Session created',
-        description: 'Elicitation session is ready for experts',
+        description: 'Elicitation session is ready for stakeholders',
         status: 'success',
         duration: 2000,
         isClosable: true,
@@ -407,6 +493,47 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
             Refresh
           </Button>
         </HStack>
+
+        <Box borderWidth={1} borderRadius="md" p={4} bg="blue.50">
+          <VStack spacing={4} align="stretch">
+            <Text fontWeight="semibold">Features</Text>
+            <Text fontSize="sm" color="gray.600">
+              Select which analysis components are required for the elicitation sessions
+            </Text>
+            <HStack spacing={6}>
+              <Checkbox
+                isChecked={features.qi}
+                onChange={() => handleFeatureToggle('qi')}
+                isDisabled={savingFeatures}
+              >
+                <VStack align="start" spacing={0}>
+                  <Text fontWeight="medium">Qualitative Indicators</Text>
+                  <Text fontSize="xs" color="gray.600">Requires complete input with alternatives</Text>
+                </VStack>
+              </Checkbox>
+              <Checkbox
+                isChecked={features.vf}
+                onChange={() => handleFeatureToggle('vf')}
+                isDisabled={savingFeatures}
+              >
+                <VStack align="start" spacing={0}>
+                  <Text fontWeight="medium">Value Functions</Text>
+                  <Text fontSize="xs" color="gray.600">Criteria with optional min/max</Text>
+                </VStack>
+              </Checkbox>
+              <Checkbox
+                isChecked={features.bwt}
+                onChange={() => handleFeatureToggle('bwt')}
+                isDisabled={savingFeatures}
+              >
+                <VStack align="start" spacing={0}>
+                  <Text fontWeight="medium">PILE-BWT</Text>
+                  <Text fontSize="xs" color="gray.600">Criteria with optional min/max</Text>
+                </VStack>
+              </Checkbox>
+            </HStack>
+          </VStack>
+        </Box>
 
         <Box borderWidth={1} borderRadius="md" p={4} bg="gray.50">
           <VStack spacing={3} align="stretch">

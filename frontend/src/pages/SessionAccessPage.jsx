@@ -88,7 +88,7 @@ function SessionAccessPage({ onSessionAccessed, onClearSession, sessionCode }) {
         )}
 
         <Text fontSize="sm" color="gray.600">
-          Experts can only access existing elicitation sessions.
+          Stakeholders can only access existing elicitation sessions.
         </Text>
       </VStack>
     </Box>
