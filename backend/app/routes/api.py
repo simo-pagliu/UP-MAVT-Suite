@@ -556,6 +556,18 @@ def list_elicitation_sessions(study_session_id):
             session['_id'] = str(session['_id'])
             session['study_session_id'] = _serialize_object_id(session.get('study_session_id'))
             session['input_id'] = _serialize_object_id(session.get('input_id'))
+            # Include computed_weights from parent study for checking if weights are available
+            computed_weights = study.get('computed_weights', {})
+            if isinstance(computed_weights, dict) and computed_weights:
+                # Serialize weight_solutions keys to strings
+                serialized_cw = dict(computed_weights)
+                if 'weight_solutions' in serialized_cw:
+                    weight_sols = serialized_cw['weight_solutions']
+                    if isinstance(weight_sols, dict):
+                        serialized_cw['weight_solutions'] = {str(k): v for k, v in weight_sols.items()}
+                session['computed_weights'] = serialized_cw
+            else:
+                session['computed_weights'] = {}
 
         return jsonify({
             'study_session_id': str(study.get('_id')),
@@ -588,6 +600,18 @@ def get_all_study_sessions():
             session['_id'] = str(session['_id'])
             session['study_session_id'] = _serialize_object_id(session.get('study_session_id'))
             session['input_id'] = _serialize_object_id(session.get('input_id'))
+            # Include computed_weights from parent study for checking if weights are available
+            computed_weights = study.get('computed_weights', {})
+            if isinstance(computed_weights, dict) and computed_weights:
+                # Serialize weight_solutions keys to strings
+                serialized_cw = dict(computed_weights)
+                if 'weight_solutions' in serialized_cw:
+                    weight_sols = serialized_cw['weight_solutions']
+                    if isinstance(weight_sols, dict):
+                        serialized_cw['weight_solutions'] = {str(k): v for k, v in weight_sols.items()}
+                session['computed_weights'] = serialized_cw
+            else:
+                session['computed_weights'] = {}
         
         study['_id'] = str(study_id)
         study['input_id'] = _serialize_object_id(study.get('input_id'))
@@ -1871,6 +1895,164 @@ def reset_step(study_session_id, step_number):
         return jsonify({'error': 'Invalid study session ID'}), 400
 
 
+@bp.route('/study-session/<study_session_id>/weight-solutions/export', methods=['GET'])
+def export_weight_solutions_csv(study_session_id):
+    """Export precomputed weight solutions as CSV for all selected sessions."""
+    db = current_app.db
+    try:
+        study = db.study_sessions.find_one({'_id': ObjectId(study_session_id)})
+        if not study:
+            return jsonify({'error': 'Study session not found'}), 404
+
+        computed_weights = study.get('computed_weights')
+        if not computed_weights:
+            return jsonify({'error': 'Weights not computed yet'}), 404
+
+        weight_solutions = computed_weights.get('weight_solutions', {})
+        if not isinstance(weight_solutions, dict) or not weight_solutions:
+            return jsonify({'error': 'No weight solutions found'}), 404
+
+        non_empty_solutions = []
+        for session_id, solutions in weight_solutions.items():
+            if isinstance(solutions, list) and len(solutions) > 0:
+                non_empty_solutions.append((session_id, solutions))
+
+        if not non_empty_solutions:
+            return jsonify({'error': 'No valid weight solutions found'}), 404
+
+        first_solution = None
+        for _, solutions in non_empty_solutions:
+            if isinstance(solutions[0], dict) and solutions[0]:
+                first_solution = solutions[0]
+                break
+
+        if not first_solution:
+            return jsonify({'error': 'No valid weight solutions found'}), 404
+
+        criteria_names = sorted(first_solution.keys())
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['SESSION_ID', 'SOLUTION_INDEX', *criteria_names])
+
+        for session_id, solutions in sorted(non_empty_solutions, key=lambda x: str(x[0])):
+            for index, solution in enumerate(solutions):
+                if not isinstance(solution, dict):
+                    continue
+                row = [session_id, index]
+                for criterion in criteria_names:
+                    value = solution.get(criterion, '')
+                    if value != '' and value is not None:
+                        try:
+                            value = round(float(value), 3)
+                        except (TypeError, ValueError):
+                            pass
+                    row.append(value)
+                writer.writerow(row)
+
+        return send_file(
+            io.BytesIO(output.getvalue().encode()),
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'weight_solutions_{study.get("code", study_session_id)}.csv'
+        )
+    except Exception:
+        return jsonify({'error': 'Invalid study session ID'}), 400
+
+
+@bp.route('/study-session/<study_session_id>/weight-solutions/<session_id>/export', methods=['GET'])
+def export_weight_solutions_csv_single_session(study_session_id, session_id):
+    """Export precomputed weight solutions as CSV for a single elicitation session."""
+    db = current_app.db
+    try:
+        study = db.study_sessions.find_one({'_id': ObjectId(study_session_id)})
+        if not study:
+            return jsonify({'error': 'Study session not found'}), 404
+
+        computed_weights = study.get('computed_weights')
+        if not computed_weights:
+            return jsonify({'error': 'Weights not computed yet'}), 404
+
+        # Get weight_solutions (should be a dict keyed by session_id)
+        weight_solutions = computed_weights.get('weight_solutions', {})
+        
+        # If weight_solutions is not a proper dict or is empty, try weight_spaces fallback
+        solutions_for_session = []
+        if isinstance(weight_solutions, dict) and session_id in weight_solutions:
+            solutions_for_session = weight_solutions.get(session_id, [])
+        
+        # Handle weight_spaces format as fallback (convert to list of dicts)
+        if not solutions_for_session:
+            weight_spaces = computed_weights.get('weight_spaces', {})
+            if isinstance(weight_spaces, dict) and session_id in weight_spaces:
+                space_data = weight_spaces[session_id]
+                if isinstance(space_data, dict) and space_data:
+                    # Convert from per-criterion format to per-solution format
+                    criteria_names = sorted(space_data.keys())
+                    if criteria_names:
+                        first_criterion = criteria_names[0]
+                        num_solutions = len(space_data[first_criterion]) if isinstance(space_data[first_criterion], list) else 0
+                        
+                        if num_solutions > 0:
+                            for idx in range(num_solutions):
+                                solution = {}
+                                for criterion in criteria_names:
+                                    values = space_data.get(criterion, [])
+                                    if idx < len(values):
+                                        solution[criterion] = values[idx]
+                                if solution:  # Only add if we got values
+                                    solutions_for_session.append(solution)
+        
+        if not solutions_for_session:
+            return jsonify({'error': 'No weight solutions found for this session'}), 404
+        
+        if not isinstance(solutions_for_session, list):
+            return jsonify({'error': 'Invalid weight solutions format'}), 400
+
+        # Ensure all solutions are dicts with all criteria present
+        all_criteria = set()
+        for solution in solutions_for_session:
+            if isinstance(solution, dict):
+                all_criteria.update(solution.keys())
+        
+        all_criteria = sorted(all_criteria)
+        if not all_criteria:
+            return jsonify({'error': 'No criteria found in weight solutions'}), 404
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['SOLUTION_INDEX', *all_criteria])
+
+        for index, solution in enumerate(solutions_for_session):
+            if not isinstance(solution, dict):
+                continue
+            row = [index]
+            for criterion in all_criteria:
+                value = solution.get(criterion, '')
+                if value != '' and value is not None:
+                    try:
+                        value = round(float(value), 3)
+                    except (TypeError, ValueError):
+                        pass
+                row.append(value)
+            writer.writerow(row)
+
+        session_doc = db.sessions.find_one({'_id': ObjectId(session_id)}, {'name': 1})
+        session_name = session_doc.get('name') if isinstance(session_doc, dict) else session_id
+
+        return send_file(
+            io.BytesIO(output.getvalue().encode()),
+            mimetype='text/csv',
+            as_attachment=True,
+            download_name=f'weight_solutions_{session_name}.csv'
+        )
+    except Exception as e:
+        import traceback
+        print(f"Error in export_weight_solutions_csv_single_session: {str(e)}")
+        print(traceback.format_exc())
+        return jsonify({'error': f'Error: {str(e)}'}), 400
+
+
 @bp.route('/study-session/<study_session_id>/workflow-status', methods=['GET'])
 def get_workflow_status(study_session_id):
     """Get the workflow status for a study session (weights and step results)."""
@@ -1884,10 +2066,13 @@ def get_workflow_status(study_session_id):
         weights_status = None
         if computed_weights:
             ts = computed_weights.get('timestamp')
+            weight_solutions = computed_weights.get('weight_solutions', {})
+            if not isinstance(weight_solutions, dict) or not weight_solutions:
+                weight_solutions = computed_weights.get('weight_spaces', {})
             weights_status = {
                 'computed': True,
                 'timestamp': ts.isoformat() if ts else None,
-                'session_count': len(computed_weights.get('weight_spaces', {})),
+                'session_count': len(weight_solutions) if isinstance(weight_solutions, dict) else 0,
             }
 
         steps_status = {}
@@ -1931,8 +2116,11 @@ def get_weight_space(study_session_id, session_id):
         if not computed_weights:
             return jsonify({'error': 'Weights not computed yet'}), 404
 
-        weight_spaces = computed_weights.get('weight_spaces', {})
-        ws = weight_spaces.get(session_id, {})
+        weight_solutions = computed_weights.get('weight_solutions', {})
+        if not isinstance(weight_solutions, dict) or not weight_solutions:
+            weight_solutions = computed_weights.get('weight_spaces', {})
+
+        ws = weight_solutions.get(session_id, [])
 
         if not ws:
             return jsonify({'error': 'Weight space not found for this session'}), 404

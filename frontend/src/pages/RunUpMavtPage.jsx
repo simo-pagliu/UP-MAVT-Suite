@@ -457,7 +457,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       const response = await axios.get(
         `${API_URL}/study-session/${studySessionId}/weight-space/${sessionId}`
       )
-      setWeightSpaceData(response.data.weight_space)
+      setWeightSpaceData(response.data.weight_solutions || response.data.weight_space)
     } catch (error) {
       console.error('Error fetching weight space:', error)
       setWeightSpaceData(null)
@@ -1127,7 +1127,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 // WEIGHT SPACE PLOT COMPONENT
 // ============================================================================
 function WeightSpacePlot({ data }) {
-  if (!data || Object.keys(data).length === 0) {
+  if (!data) {
     return (
       <Box bg="gray.100" h={300} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
         <Text color="gray.500">No weight space data available</Text>
@@ -1135,14 +1135,86 @@ function WeightSpacePlot({ data }) {
     )
   }
 
-  const criteria = Object.keys(data)
-  const maxWeight = Math.max(...criteria.flatMap((c) => data[c]))
+  if (!Array.isArray(data) && typeof data === 'object' && Object.keys(data).length > 0) {
+    const criteria = Object.keys(data)
+    const maxWeight = Math.max(...criteria.flatMap((criterion) => data[criterion]))
+
+    return (
+      <Box bg="white" border="1px" borderColor="gray.200" borderRadius="md" p={4}>
+        <VStack spacing={2} align="stretch">
+          {criteria.map((criterion) => {
+            const weights = data[criterion]
+            return (
+              <HStack key={criterion} spacing={3} align="center">
+                <Text
+                  fontSize="xs"
+                  fontWeight="medium"
+                  width="180px"
+                  textAlign="right"
+                  flexShrink={0}
+                  isTruncated
+                  title={criterion}
+                >
+                  {criterion}
+                </Text>
+                <Box flex={1} h="20px" position="relative" bg="gray.50" borderRadius="sm">
+                  {weights.map((w, i) => (
+                    <Box
+                      key={i}
+                      position="absolute"
+                      left={`${(w / (maxWeight * 1.1)) * 100}%`}
+                      top="2px"
+                      width="6px"
+                      height="16px"
+                      bg="blue.500"
+                      borderRadius="sm"
+                      opacity={0.7}
+                      title={`${w.toFixed(3)}`}
+                    />
+                  ))}
+                </Box>
+                <Text fontSize="xs" color="gray.500" width="50px" flexShrink={0}>
+                  {weights.length} pts
+                </Text>
+              </HStack>
+            )
+          })}
+          <HStack spacing={3} mt={2}>
+            <Box width="180px" />
+            <HStack flex={1} justify="space-between">
+              <Text fontSize="xs" color="gray.400">0</Text>
+              <Text fontSize="xs" color="gray.400">{(maxWeight * 1.1).toFixed(2)}</Text>
+            </HStack>
+            <Box width="50px" />
+          </HStack>
+        </VStack>
+      </Box>
+    )
+  }
+
+  if (!Array.isArray(data) || data.length === 0) {
+    return (
+      <Box bg="gray.100" h={300} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
+        <Text color="gray.500">No weight space data available</Text>
+      </Box>
+    )
+  }
+
+  const criteria = Object.keys(data[0] || {})
+  const criterionToValues = criteria.reduce((acc, criterion) => {
+    acc[criterion] = data
+      .map((solution) => (typeof solution?.[criterion] === 'number' ? solution[criterion] : Number(solution?.[criterion] || 0)))
+      .filter((value) => Number.isFinite(value))
+    return acc
+  }, {})
+
+  const maxWeight = Math.max(0.001, ...criteria.flatMap((criterion) => criterionToValues[criterion]))
 
   return (
     <Box bg="white" border="1px" borderColor="gray.200" borderRadius="md" p={4}>
       <VStack spacing={2} align="stretch">
         {criteria.map((criterion) => {
-          const weights = data[criterion]
+          const weights = criterionToValues[criterion]
           return (
             <HStack key={criterion} spacing={3} align="center">
               <Text

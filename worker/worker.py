@@ -100,7 +100,7 @@ def handle_compute_weights(task):
             raise ValueError("No criteria found in input")
 
         # Process each selected session
-        weight_spaces = {}
+        weight_solutions = {}
         total = len(selected_session_ids)
 
         for idx, session_id in enumerate(selected_session_ids):
@@ -113,14 +113,14 @@ def handle_compute_weights(task):
             logger.log(f"\n--- Processing session {idx + 1}/{total}: {session_name} ---")
 
             ws = compute_weights(session, criteria, print_fn=logger.log)
-            weight_spaces[session_id] = ws
+            weight_solutions[session_id] = ws
 
-            logger.log(f"✓ Session {session_name} completed ({len(ws)} criteria)")
+            logger.log(f"✓ Session {session_name} completed ({len(ws)} feasible solutions)")
 
         # Save results to DB
         result_doc = {
             'timestamp': datetime.now(timezone.utc),
-            'weight_spaces': weight_spaces,
+            'weight_solutions': weight_solutions,
         }
 
         db.study_sessions.update_one(

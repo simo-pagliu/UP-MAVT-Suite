@@ -141,6 +141,14 @@ const buildProgress = (criteria, session) => {
 
   const hasBwt = baseGroups.length > 0 && completedBaseGroups && completedIntraB && completedIntraW && bwtSignatureValid
 
+  const computedWeights = session?.computed_weights || {}
+  const weightSpaces = computedWeights.weight_spaces || {}
+  const weightSolutions = computedWeights.weight_solutions || {}
+  const hasWeights = Boolean(
+    (weightSolutions[session._id] && Array.isArray(weightSolutions[session._id]) && weightSolutions[session._id].length > 0) ||
+    (weightSpaces[session._id] && typeof weightSpaces[session._id] === 'object' && Object.keys(weightSpaces[session._id]).length > 0)
+  )
+
   const steps = [
     { key: 'qi', label: 'QI', done: hasQualitativeIndicators },
     { key: 'vf', label: 'VF', done: hasValueFunctions },
@@ -156,6 +164,7 @@ const buildProgress = (criteria, session) => {
     hasQualitativeIndicators,
     hasValueFunctions,
     hasBwt,
+    hasWeights,
     steps,
     percent,
   }
@@ -617,6 +626,12 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
                           isDisabled={!session.progress.hasBwt}
                         >
                           PILE-BWT
+                        </MenuItem>
+                        <MenuItem
+                          onClick={() => handleDownload(`/study-session/${studySessionId}/weight-solutions/${session._id}/export`, `weight_solutions_${session.name}.csv`)}
+                          isDisabled={!session.progress.hasWeights}
+                        >
+                          Weight Solutions
                         </MenuItem>
                       </MenuList>
                     </Menu>

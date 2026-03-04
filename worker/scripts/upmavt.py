@@ -10,7 +10,6 @@ import numpy as np
 from scipy.interpolate import interp1d
 import sys
 from .weight_space_definition import (
-    constraint_func as ws_constraint_func,
     load_comparisons_from_db,
     build_constraint_structure,
 )
@@ -79,26 +78,26 @@ def load_value_functions_with_confidence_from_db(criteria, value_functions_data,
 
 
 # ============================================================================
-# WEIGHT SAMPLER (rejection sampling with constraint enforcement)
+# WEIGHT SAMPLER (direct sampling from precomputed feasible solutions)
 # ============================================================================
-def weight_sampler(weight_space, criteria, constraint_data, use_random_weights=False):
-    """Sample a random set of weights via rejection sampling.
+def weight_sampler(weight_solutions, criteria, constraint_data=None, use_random_weights=False):
+    """Sample a random set of weights.
 
-    Randomly picks one weight per criterion from its weight space, then
-    checks that (a) they sum to 1 and (b) the BWT constraints are
-    satisfied.  Repeats until a valid set is found.
+    Uses direct sampling from precomputed feasible solutions.
+    If ``use_random_weights`` is True, falls back to unconstrained
+    Dirichlet sampling.
 
     Parameters
     ----------
-    weight_space : dict
-        Mapping criterion_name -> list of allowable weight values.
+    weight_solutions : list[dict]
+        List of feasible solutions, each mapping criterion_name -> weight.
     criteria : list[str]
         List of criterion names.
-    constraint_data : dict
-        Constraint structure built by ``build_constraint_structure``.
+    constraint_data : dict or None
+        Unused here (kept for backward compatibility of call sites).
     use_random_weights : bool
         If True, generate weights from a Dirichlet distribution instead
-        of sampling from the weight space.
+        of sampling from precomputed solutions.
 
     Returns
     -------
@@ -111,26 +110,17 @@ def weight_sampler(weight_space, criteria, constraint_data, use_random_weights=F
         raw = np.random.dirichlet(np.ones(n))
         return {crit: raw[i] for i, crit in enumerate(criteria)}
 
-    while True:
-        # Randomly sample one weight per criterion
-        sampled_weights = {}
-        for crit in criteria:
-            if crit in weight_space:
-                sampled_weights[crit] = np.random.choice(weight_space[crit])
+    if not isinstance(weight_solutions, list) or len(weight_solutions) == 0:
+        # Fallback: equal weights if no solutions are available
+        n = max(1, len(criteria))
+        return {crit: 1.0 / n for crit in criteria}
 
-        # Check if they sum to 1
-        total = sum(sampled_weights.values())
-        if not np.isclose(total, 1.0, atol=1e-3):
-            continue
+    selected = weight_solutions[np.random.randint(len(weight_solutions))]
+    if not isinstance(selected, dict):
+        n = max(1, len(criteria))
+        return {crit: 1.0 / n for crit in criteria}
 
-        # Check constraints
-        ordered_criteria = constraint_data['criteria']
-        x_temp = np.concatenate(([sampled_weights.get(c, 0.0) for c in ordered_criteria], [0]))
-        cons = ws_constraint_func(x_temp, constraint_data)
-        if any(c < 0 for c in cons):
-            continue
-
-        return sampled_weights
+    return {crit: float(selected.get(crit, 0.0)) for crit in criteria}
 
 
 # ============================================================================
@@ -470,7 +460,7 @@ def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_list
 # ============================================================================
 # MONTE CARLO SIMULATION
 # ============================================================================
-def run_monte_carlo(alternatives, criteria, weight_spaces, vf_lists,
+def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
                     confidence_lists, constraint_data_list, aggregation_method,
                     opinion_weights, num_iterations, mc_mode, use_random_weights=False,
                     qualitative_indicators=None, print_fn=None):
@@ -478,8 +468,8 @@ def run_monte_carlo(alternatives, criteria, weight_spaces, vf_lists,
 
     Parameters
     ----------
-    weight_spaces : list[dict]
-        One weight space dict per elicitation.
+    weight_solutions_list : list[list[dict]]
+        One feasible weight solutions list per elicitation.
     vf_lists : list[dict]
         One value function dict per elicitation.
     confidence_lists : list[dict]
@@ -510,7 +500,7 @@ def run_monte_carlo(alternatives, criteria, weight_spaces, vf_lists,
     }
     agg_func = agg_funcs.get(aggregation_method, weighted_sum)
 
-    num_elicitations = len(weight_spaces)
+    num_elicitations = len(weight_solutions_list)
     results = {}
 
     if mc_mode == "strict":
@@ -523,7 +513,7 @@ def run_monte_carlo(alternatives, criteria, weight_spaces, vf_lists,
                 sys.stdout.flush()
             for elicit_idx in range(num_elicitations):
                 sampled_weights = weight_sampler(
-                    weight_spaces[elicit_idx], criteria,
+                    weight_solutions_list[elicit_idx], criteria,
                     constraint_data_list[elicit_idx],
                     use_random_weights=use_random_weights
                 )
@@ -544,7 +534,7 @@ def run_monte_carlo(alternatives, criteria, weight_spaces, vf_lists,
                 sys.stdout.flush()
             weight_elicit_idx = np.random.choice(num_elicitations, p=opinion_weights)
             sampled_weights = weight_sampler(
-                weight_spaces[weight_elicit_idx], criteria,
+                weight_solutions_list[weight_elicit_idx], criteria,
                 constraint_data_list[weight_elicit_idx],
                 use_random_weights=use_random_weights
             )
@@ -614,7 +604,7 @@ def run_upmavt(session_docs, criteria, computed_weights, params, print_fn=None):
     criteria : list[dict]
         Criteria from the study input document.
     computed_weights : dict
-        The computed_weights document containing weight_spaces keyed by session ID.
+        The computed_weights document containing weight_solutions keyed by session ID.
     params : dict
         Parameters:
         - mc_iterations: int
@@ -655,10 +645,12 @@ def run_upmavt(session_docs, criteria, computed_weights, params, print_fn=None):
     print_fn("\nLoading elicitation data...")
     vf_lists = []
     confidence_lists = []
-    weight_spaces_list = []
+    weight_solutions_list = []
     constraint_data_list = []
 
-    weight_spaces_data = computed_weights.get('weight_spaces', {})
+    weight_solutions_data = computed_weights.get('weight_solutions', {})
+    if not isinstance(weight_solutions_data, dict) or not weight_solutions_data:
+        weight_solutions_data = computed_weights.get('weight_spaces', {})
 
     for i, session_doc in enumerate(session_docs):
         session_id = str(session_doc.get('_id', session_doc.get('session_id', i)))
@@ -675,13 +667,13 @@ def run_upmavt(session_docs, criteria, computed_weights, params, print_fn=None):
         vf_lists.append(vf_dict)
         confidence_lists.append(conf_dict)
 
-        # Get weight space for this session
-        ws = weight_spaces_data.get(session_id, {})
+        # Get precomputed weight solutions for this session
+        ws = weight_solutions_data.get(session_id, [])
         if not ws:
-            print_fn(f"    ⚠ No weight space found for session {session_id}")
+            print_fn(f"    ⚠ No weight solutions found for session {session_id}")
         else:
-            print_fn(f"    ✓ Loaded weight space for {len(ws)} criteria")
-        weight_spaces_list.append(ws)
+            print_fn(f"    ✓ Loaded {len(ws)} feasible weight solutions")
+        weight_solutions_list.append(ws)
         
         # Build constraint data from BWT comparisons
         bwt_data = session_doc.get('bwt')
@@ -727,7 +719,7 @@ def run_upmavt(session_docs, criteria, computed_weights, params, print_fn=None):
             all_qi.update(qi)
     
     results = run_monte_carlo(
-        alternatives, criteria_names, weight_spaces_list, vf_lists,
+        alternatives, criteria_names, weight_solutions_list, vf_lists,
         confidence_lists, constraint_data_list, aggregation_method,
         opinion_weights, mc_iterations, mc_mode, use_random_weights=use_random_weights,
         qualitative_indicators=all_qi if all_qi else None, print_fn=print_fn,
