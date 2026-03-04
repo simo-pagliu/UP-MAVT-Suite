@@ -4,6 +4,7 @@ import {
   Heading,
   VStack,
   HStack,
+  SimpleGrid,
   Button,
   Select,
   Checkbox,
@@ -34,7 +35,20 @@ import { ExternalLinkIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import PdfModal from '../components/PdfModal'
 
+import {
+  AreaChart,
+  Area,
+  ScatterChart,
+  Scatter,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  Legend as RechartsLegend,
+  ResponsiveContainer,
+} from 'recharts'
 const API_URL = 'http://localhost:5000/api'
+const STEP2_COLORS = ['#3182CE', '#E57373', '#C77DFF', '#4DD0E1', '#38A169', '#D69E2E']
 
 // ============================================================================
 // COMPLETION CHECKS (unchanged)
@@ -162,6 +176,12 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [selectedWeightSession, setSelectedWeightSession] = useState('')
   const [weightSpaceData, setWeightSpaceData] = useState(null)
 
+  // Step 2 results state
+  const [step2Results, setStep2Results] = useState(null)
+  const [step5Results, setStep5Results] = useState(null)
+  const [step3Results, setStep3Results] = useState(null)
+  const [step4Results, setStep4Results] = useState(null)
+  const [step6Results, setStep6Results] = useState(null)
   // PDF Modal states
   const { isOpen: isUncertaintiesOpen, onOpen: onUncertaintiesOpen, onClose: onUncertaintiesClose } = useDisclosure()
   const { isOpen: isMcModesOpen, onOpen: onMcModesOpen, onClose: onMcModesClose } = useDisclosure()
@@ -183,6 +203,55 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     }
   }, [studySessionId])
 
+  const fetchStep2Results = useCallback(async () => {
+    if (!studySessionId) return
+    try {
+      const response = await axios.get(`${API_URL}/study-session/${studySessionId}/step-results/2`)
+      setStep2Results(response.data)
+    } catch (error) {
+      console.error('Error fetching step 2 results:', error)
+    }
+  }, [studySessionId])
+
+  const fetchStep5Results = useCallback(async () => {
+    if (!studySessionId) return
+    try {
+      const response = await axios.get(`${API_URL}/study-session/${studySessionId}/step-results/5`)
+      setStep5Results(response.data)
+    } catch (error) {
+      console.error('Error fetching step 5 results:', error)
+    }
+  }, [studySessionId])
+
+  const fetchStep3Results = useCallback(async () => {
+    if (!studySessionId) return
+    try {
+      const response = await axios.get(`${API_URL}/study-session/${studySessionId}/step-results/3`)
+      setStep3Results(response.data)
+    } catch (error) {
+      console.error('Error fetching step 3 results:', error)
+    }
+  }, [studySessionId])
+
+  const fetchStep4Results = useCallback(async () => {
+    if (!studySessionId) return
+    try {
+      const response = await axios.get(`${API_URL}/study-session/${studySessionId}/step-results/4`)
+      setStep4Results(response.data)
+    } catch (error) {
+      console.error('Error fetching step 4 results:', error)
+    }
+  }, [studySessionId])
+
+  const fetchStep6Results = useCallback(async () => {
+    if (!studySessionId) return
+    try {
+      const response = await axios.get(`${API_URL}/study-session/${studySessionId}/step-results/6`)
+      setStep6Results(response.data)
+    } catch (error) {
+      console.error('Error fetching step 6 results:', error)
+    }
+  }, [studySessionId])
   useEffect(() => {
     const fetchSessions = async () => {
       if (!studySessionId) return
@@ -217,6 +286,36 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     fetchWorkflowStatus()
   }, [studySessionId, toast, fetchWorkflowStatus])
 
+  // Fetch step 2 results when step 2 is completed
+  useEffect(() => {
+    if (workflowStatus?.steps?.['2']?.completed) {
+      fetchStep2Results()
+    }
+  }, [workflowStatus?.steps?.['2']?.completed, fetchStep2Results])
+
+  useEffect(() => {
+    if (workflowStatus?.steps?.['5']?.completed) {
+      fetchStep5Results()
+    }
+  }, [workflowStatus?.steps?.['5']?.completed, fetchStep5Results])
+
+  useEffect(() => {
+    if (workflowStatus?.steps?.['3']?.completed) {
+      fetchStep3Results()
+    }
+  }, [workflowStatus?.steps?.['3']?.completed, fetchStep3Results])
+
+  useEffect(() => {
+    if (workflowStatus?.steps?.['4']?.completed) {
+      fetchStep4Results()
+    }
+  }, [workflowStatus?.steps?.['4']?.completed, fetchStep4Results])
+
+  useEffect(() => {
+    if (workflowStatus?.steps?.['6']?.completed) {
+      fetchStep6Results()
+    }
+  }, [workflowStatus?.steps?.['6']?.completed, fetchStep6Results])
   // ============================================================================
   // TASK POLLING
   // ============================================================================
@@ -271,7 +370,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         // Restore task state
         setActiveTaskId(activeTask.task_id)
         setConsoleOutput(activeTask.console_output || 'Task in progress...\n')
-        setShowConsole(true)
         
         // Determine which step is running
         const taskType = activeTask.type
@@ -337,7 +435,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
     setRunningStep('weights')
     setConsoleOutput('Submitting weight computation task...\n')
-    setShowConsole(true)
 
     try {
       const response = await axios.post(
@@ -399,7 +496,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
     setRunningStep(stepName)
     setConsoleOutput(`Submitting Step ${stepNumber} task...\n`)
-    setShowConsole(true)
 
     try {
       const response = await axios.post(
@@ -506,6 +602,207 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   }
 
   // ============================================================================
+  // STEP 2: DISTRIBUTION PLOT HELPERS
+  // ============================================================================
+  const getDistributionDataForAlternative = (stepResults, altIndex) => {
+    if (!stepResults?.results_by_elicitation || !stepResults?.alternative_names) return null
+
+    const expertValues = {}
+    const allValues = []
+    const sortedElicitations = Object.entries(stepResults.results_by_elicitation)
+      .sort((a, b) => Number(a[0]) - Number(b[0]))
+
+    sortedElicitations.forEach(([expertIdx, iterations]) => {
+      const expertName = sessions[parseInt(expertIdx)]?.name || `Expert ${parseInt(expertIdx) + 1}`
+      const values = iterations.map((row) => Number(row[altIndex])).filter((v) => Number.isFinite(v))
+      expertValues[expertName] = values
+      allValues.push(...values)
+    })
+
+    if (allValues.length === 0) return null
+
+    const numBins = 180
+    const gaussianSigma = 2.5
+    const kernelRadius = 7
+
+    const smoothSeries = (series) => {
+      const out = new Array(series.length).fill(0)
+      const weights = []
+      for (let k = -kernelRadius; k <= kernelRadius; k += 1) {
+        weights.push(Math.exp(-0.5 * ((k / gaussianSigma) ** 2)))
+      }
+
+      for (let i = 0; i < series.length; i += 1) {
+        let weighted = 0
+        let totalW = 0
+        for (let k = -kernelRadius; k <= kernelRadius; k += 1) {
+          const idx = Math.max(0, Math.min(series.length - 1, i + k))
+          const w = weights[k + kernelRadius]
+          weighted += series[idx] * w
+          totalW += w
+        }
+        out[i] = totalW > 0 ? weighted / totalW : 0
+      }
+      return out
+    }
+
+    const densityByExpert = {}
+    Object.entries(expertValues).forEach(([expertName, values]) => {
+      const bins = new Array(numBins).fill(0)
+      values.forEach((value) => {
+        const clamped = Math.max(0, Math.min(1, value))
+        const idx = Math.min(numBins - 1, Math.floor(clamped * numBins))
+        bins[idx] += 1
+      })
+
+      const normalized = values.length > 0 ? bins.map((count) => count / values.length) : bins
+      const smoothed = smoothSeries(normalized)
+
+      const total = smoothed.reduce((acc, value) => acc + value, 0)
+      densityByExpert[expertName] = total > 0 ? smoothed.map((value) => value / total) : smoothed
+    })
+
+    const densityData = Array.from({ length: numBins }, (_, i) => {
+      const x = (i + 0.5) / numBins
+      const row = { x }
+      Object.keys(densityByExpert).forEach((expertName) => {
+        row[expertName] = densityByExpert[expertName][i] || 0
+      })
+      return row
+    })
+
+    return {
+      altName: stepResults.alternative_names[altIndex],
+      densityData,
+      expertNames: sortedElicitations.map(([expertIdx]) => (
+        sessions[parseInt(expertIdx)]?.name || `Expert ${parseInt(expertIdx) + 1}`
+      )),
+    }
+  }
+
+  const getLegendItems = (stepResults) => {
+    if (!stepResults?.results_by_elicitation) return []
+    return Object.entries(stepResults.results_by_elicitation)
+      .sort((a, b) => Number(a[0]) - Number(b[0]))
+      .map(([expertIdx], idx) => ({
+        label: `E${idx + 1}`,
+        expertName: sessions[parseInt(expertIdx)]?.name || `Expert ${parseInt(expertIdx) + 1}`,
+      }))
+  }
+
+  const interpolateValueFunction = (points, xValue) => {
+    const numericX = Number(xValue)
+    if (!Array.isArray(points) || points.length < 2 || !Number.isFinite(numericX)) return null
+
+    const sorted = points
+      .map((point) => ({ x: Number(point?.x), y: Number(point?.y) }))
+      .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+      .sort((a, b) => a.x - b.x)
+
+    if (sorted.length < 2) return null
+    if (numericX <= sorted[0].x) return sorted[0].y
+    if (numericX >= sorted[sorted.length - 1].x) return sorted[sorted.length - 1].y
+
+    for (let i = 0; i < sorted.length - 1; i += 1) {
+      const left = sorted[i]
+      const right = sorted[i + 1]
+      if (numericX >= left.x && numericX <= right.x) {
+        const span = right.x - left.x
+        if (span === 0) return left.y
+        const t = (numericX - left.x) / span
+        return left.y + t * (right.y - left.y)
+      }
+    }
+
+    return null
+  }
+
+  const normalizeWeightSamples = (rawWeightData) => {
+    if (Array.isArray(rawWeightData)) {
+      return rawWeightData
+        .filter((sample) => sample && typeof sample === 'object')
+        .map((sample) => Object.fromEntries(
+          Object.entries(sample).map(([criterion, value]) => [criterion, Number(value)])
+        ))
+    }
+
+    if (!rawWeightData || typeof rawWeightData !== 'object') return []
+
+    const criteriaNames = Object.keys(rawWeightData)
+      .filter((criterion) => Array.isArray(rawWeightData[criterion]))
+
+    if (criteriaNames.length === 0) return []
+
+    const sampleCount = Math.min(...criteriaNames.map((criterion) => rawWeightData[criterion].length))
+    if (!Number.isFinite(sampleCount) || sampleCount <= 0) return []
+
+    return Array.from({ length: sampleCount }, (_, idx) => {
+      const row = {}
+      criteriaNames.forEach((criterion) => {
+        row[criterion] = Number(rawWeightData[criterion][idx])
+      })
+      return row
+    })
+  }
+
+  const getConsistencyPlotData = () => {
+    const sessionDoc = sessions.find((session) => session?._id === selectedWeightSession)
+    const comparisons = Array.isArray(sessionDoc?.bwt?.comparisons) ? sessionDoc.bwt.comparisons : []
+    const weightSamples = normalizeWeightSamples(weightSpaceData)
+
+    if (!sessionDoc || comparisons.length === 0 || weightSamples.length === 0) return { data: [], comparisons: [] }
+
+    const valueFunctionMap = sessionDoc?.value_functions?.criteria || {}
+    const allDataPoints = []
+    const comparisonLabels = []
+
+    comparisons.forEach((comparison, idx) => {
+      const referenceCriterion = comparison?.reference_criterion
+      const adjustedCriterion = comparison?.adjusted_criterion
+      const comparisonValue = Number(comparison?.data_value)
+
+      if (!referenceCriterion || !adjustedCriterion || !Number.isFinite(comparisonValue)) return
+
+      const adjustedVFPoints = valueFunctionMap?.[adjustedCriterion]?.points
+      const vfValue = interpolateValueFunction(adjustedVFPoints, comparisonValue)
+      const declaredRatio = Number.isFinite(vfValue) && vfValue > 0 ? (1 / vfValue) : null
+
+      const computedRatios = weightSamples
+        .map((sample) => {
+          const wReference = Number(sample?.[referenceCriterion])
+          const wAdjusted = Number(sample?.[adjustedCriterion])
+          if (!Number.isFinite(wReference) || !Number.isFinite(wAdjusted) || wReference <= 0) return null
+          return wAdjusted / wReference
+        })
+        .filter((value) => Number.isFinite(value))
+
+      if (!Number.isFinite(declaredRatio) || computedRatios.length === 0) return
+
+      const comparisonLabel = `${referenceCriterion} / ${adjustedCriterion}`
+      comparisonLabels.push(comparisonLabel)
+
+      // Add declared ratio as a single point
+      allDataPoints.push({
+        comparison: comparisonLabel,
+        yIndex: idx,
+        value: Number(declaredRatio.toFixed(4)),
+        type: 'declared'
+      })
+
+      // Add all computed ratios as individual points
+      computedRatios.forEach((ratio) => {
+        allDataPoints.push({
+          comparison: comparisonLabel,
+          yIndex: idx,
+          value: Number(ratio.toFixed(4)),
+          type: 'computed'
+        })
+      })
+    })
+
+    return { data: allDataPoints, comparisons: comparisonLabels }
+  }
+  // ============================================================================
   // RENDER
   // ============================================================================
   if (loadingStudy) {
@@ -518,6 +815,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       </Box>
     )
   }
+
+  const step1ConsistencyResult = getConsistencyPlotData()
+  const step1ConsistencyData = step1ConsistencyResult.data
+  const step1ConsistencyComparisons = step1ConsistencyResult.comparisons
 
   return (
     <Box bg="white" p={6} borderRadius="lg" boxShadow="sm">
@@ -533,9 +834,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
               PLACEHOLDER <ExternalLinkIcon mx="2px" />
             </Link>
             ).
-          </Text>
-          <Text color="gray.700">
-            This method uses Monte Carlo simulations to propagate uncertainties arising from any component of the analysis.{' '}
             <Link color="blue.600" textDecoration="underline" cursor="pointer" onClick={onUncertaintiesOpen}>
               This diagram illustrates the sources of uncertainty considered in the framework.
             </Link>
@@ -753,10 +1051,81 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                       <Text>Weight Space Plot</Text>
                       <WeightSpacePlot data={weightSpaceData} />
 
-                      <Text mt={4}>Horizontal Bar Plot</Text>
-                      <Box bg="gray.100" h={200} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                        <Text color="gray.500">[Horizontal Bar Plot - Coming Soon]</Text>
-                      </Box>
+                      <Text mt={4}>Declared vs Computed Ratios</Text>
+                      {step1ConsistencyData.length > 0 ? (
+                        <Box borderWidth={1} borderRadius="md" p={3} bg="white">
+                          <ResponsiveContainer width="100%" height={Math.max(300, step1ConsistencyComparisons.length * 28 + 100)}>
+                            <ScatterChart
+                              margin={{ top: 35, right: 20, left: 10, bottom: 5 }}
+                            >
+                              <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
+                              <XAxis 
+                                type="number" 
+                                dataKey="value"
+                                name="Ratio"
+                                label={{ value: 'Ratio Value', position: 'insideBottom', offset: -3, fontSize: 11 }}
+                                tick={{ fontSize: 10 }}
+                              />
+                              <YAxis
+                                type="category"
+                                dataKey="comparison"
+                                name="Comparison"
+                                width={240}
+                                tick={{ fontSize: 10 }}
+                                interval={0}
+                              />
+                              <RechartsTooltip
+                                cursor={{ strokeDasharray: '3 3' }}
+                                content={({ active, payload }) => {
+                                  if (!active || !payload || payload.length === 0) return null
+                                  const data = payload[0].payload
+                                  return (
+                                    <Box bg="white" p={2} borderWidth={1} borderRadius="md" boxShadow="md">
+                                      <Text fontSize="xs" fontWeight="bold" mb={1}>{data.comparison}</Text>
+                                      <Text fontSize="xs" color={payload[0].color}>
+                                        {payload[0].name}: {Number(data.value).toFixed(4)}
+                                      </Text>
+                                    </Box>
+                                  )
+                                }}
+                              />
+                              <RechartsLegend 
+                                verticalAlign="top"
+                                height={30}
+                                iconSize={10}
+                              />
+                              <Scatter 
+                                name="Computed (w_adj / w_ref)" 
+                                data={step1ConsistencyData.filter(d => d.type === 'computed')}
+                                fill="#48BB78"
+                                fillOpacity={0.6}
+                                shape="circle"
+                              />
+                              <Scatter 
+                                name="Declared (1 / vf(value))" 
+                                data={step1ConsistencyData.filter(d => d.type === 'declared')}
+                                fill="#DD6B20"
+                                shape={(props) => {
+                                  const { cx, cy } = props;
+                                  const size = 6;
+                                  return (
+                                    <polygon
+                                      points={`${cx},${cy-size} ${cx+size},${cy} ${cx},${cy+size} ${cx-size},${cy}`}
+                                      fill="#DD6B20"
+                                      stroke="#DD6B20"
+                                      strokeWidth={1}
+                                    />
+                                  );
+                                }}
+                              />
+                            </ScatterChart>
+                          </ResponsiveContainer>
+                        </Box>
+                      ) : (
+                        <Box bg="gray.100" h={200} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
+                          <Text color="gray.500">No comparable declared/computed ratio data available for this elicitation.</Text>
+                        </Box>
+                      )}
                     </VStack>
                   )}
                 </StepSection>
@@ -818,16 +1187,89 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     </HStack>
                   }
                 >
-                  <VStack spacing={3} align="stretch">
-                    <Text>Distribution Plot 1</Text>
-                    <Box bg="gray.100" h={200} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                      <Text color="gray.500">[Distribution Histogram Placeholder]</Text>
-                    </Box>
-                    <Text mt={4}>Distribution Plot 2</Text>
-                    <Box bg="gray.100" h={200} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                      <Text color="gray.500">[Distribution Histogram Placeholder]</Text>
-                    </Box>
-                  </VStack>
+                  {step2Results ? (
+                    <VStack spacing={8} align="stretch">
+                      {(() => {
+                        const legendItems = getLegendItems(step2Results)
+                        return (
+                          <HStack spacing={4} flexWrap="wrap">
+                            <Text fontSize="sm" fontWeight="semibold">Elicitation:</Text>
+                            {legendItems.map((item, idx) => (
+                              <HStack key={`${item.label}-${idx}`} spacing={2}>
+                                <Box
+                                  w={3}
+                                  h={3}
+                                  bg={STEP2_COLORS[idx % STEP2_COLORS.length]}
+                                  opacity={0.45}
+                                  borderRadius="sm"
+                                />
+                                <Text fontSize="sm">{item.label}</Text>
+                              </HStack>
+                            ))}
+                          </HStack>
+                        )
+                      })()}
+                      <Text fontSize="sm" color="gray.600">
+                        One plot per alternative with smooth overlapping distributions for each elicitation.
+                      </Text>
+                      <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={5}>
+                        {step2Results.alternative_names?.map((altName, altIndex) => {
+                          const distData = getDistributionDataForAlternative(step2Results, altIndex)
+                          if (!distData) return null
+                          const legendItems = getLegendItems(step2Results)
+                          const legendLabelByExpert = Object.fromEntries(
+                            legendItems.map((item) => [item.expertName, item.label])
+                          )
+                          return (
+                            <Box key={`${altName}-${altIndex}`} borderWidth={1} borderRadius="md" p={3} bg="gray.50">
+                              <Text fontWeight="semibold" fontSize="sm" mb={2}>{`Distribution of Values for ${altName}`}</Text>
+                              <ResponsiveContainer width="100%" height={250}>
+                                <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 0, bottom: 24 }}>
+                                  <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
+                                  <XAxis
+                                    type="number"
+                                    dataKey="x"
+                                    domain={[0, 1]}
+                                    ticks={[0, 0.2, 0.4, 0.6, 0.8, 1]}
+                                    tickFormatter={(v) => Number(v).toFixed(1)}
+                                    tick={{ fontSize: 11 }}
+                                    label={{ value: 'Value', position: 'insideBottom', offset: -10 }}
+                                  />
+                                  <YAxis
+                                    tickFormatter={(v) => `${(Number(v) * 100).toFixed(1)}%`}
+                                    tick={{ fontSize: 11 }}
+                                    label={{ value: 'Probability', angle: -90, position: 'insideLeft' }}
+                                  />
+                                  <RechartsTooltip
+                                    formatter={(value, name) => [`${(Number(value) * 100).toFixed(2)}%`, String(name)]}
+                                    labelFormatter={(v) => `Value ${Number(v).toFixed(3)}`}
+                                  />
+                                  {distData.expertNames.map((expertName, idx) => (
+                                    <Area
+                                      key={`${expertName}-${idx}`}
+                                      dataKey={expertName}
+                                      fill={STEP2_COLORS[idx % STEP2_COLORS.length]}
+                                      fillOpacity={0.22}
+                                      stroke={STEP2_COLORS[idx % STEP2_COLORS.length]}
+                                      strokeWidth={2}
+                                      type="monotone"
+                                      dot={false}
+                                      isAnimationActive={false}
+                                      name={legendLabelByExpert[expertName] || expertName}
+                                    />
+                                  ))}
+                                </AreaChart>
+                              </ResponsiveContainer>
+                            </Box>
+                          )
+                        })}
+                      </SimpleGrid>
+                    </VStack>
+                  ) : (
+                    <VStack spacing={3} align="stretch">
+                      <Text color="gray.600" fontSize="sm">Run Step 2 to display one distribution plot per alternative.</Text>
+                    </VStack>
+                  )}
                 </StepSection>
               </TabPanel>
 
@@ -887,12 +1329,16 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     </HStack>
                   }
                 >
-                  <VStack spacing={3} align="stretch">
-                    <Text>Dominance Heatmap</Text>
-                    <Box bg="gray.100" h={300} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                      <Text color="gray.500">[Heatmap Placeholder]</Text>
+                  {step3Results ? (
+                    <RankingHeatmap
+                      title="Dominance Heatmap"
+                      results={step3Results}
+                    />
+                  ) : (
+                    <Box bg="gray.100" h={220} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
+                      <Text color="gray.500">Run Step 3 to display the dominance ranking heatmap.</Text>
                     </Box>
-                  </VStack>
+                  )}
                 </StepSection>
               </TabPanel>
 
@@ -938,26 +1384,26 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     </HStack>
                   }
                 >
-                  <VStack spacing={4} align="stretch">
-                    <VStack spacing={2} align="stretch">
-                      <Text fontWeight="bold">SUM Aggregation Heatmap</Text>
-                      <Box bg="gray.100" h={250} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                        <Text color="gray.500">[Heatmap Placeholder]</Text>
-                      </Box>
+                  {step4Results?.results_by_aggregation ? (
+                    <VStack spacing={4} align="stretch">
+                      <RankingHeatmap
+                        title="SUM Aggregation Heatmap"
+                        results={step4Results.results_by_aggregation.weighted_sum}
+                      />
+                      <RankingHeatmap
+                        title="GEO Aggregation Heatmap"
+                        results={step4Results.results_by_aggregation.geometric_mean}
+                      />
+                      <RankingHeatmap
+                        title="HAR Aggregation Heatmap"
+                        results={step4Results.results_by_aggregation.harmonic_mean}
+                      />
                     </VStack>
-                    <VStack spacing={2} align="stretch">
-                      <Text fontWeight="bold">GEO Aggregation Heatmap</Text>
-                      <Box bg="gray.100" h={250} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                        <Text color="gray.500">[Heatmap Placeholder]</Text>
-                      </Box>
-                    </VStack>
-                    <VStack spacing={2} align="stretch">
-                      <Text fontWeight="bold">HAR Aggregation Heatmap</Text>
-                      <Box bg="gray.100" h={250} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                        <Text color="gray.500">[Heatmap Placeholder]</Text>
-                      </Box>
-                    </VStack>
-                  </VStack>
+                  ) : (
+                    <Box bg="gray.100" h={220} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
+                      <Text color="gray.500">Run Step 4 to display compensation ranking heatmaps.</Text>
+                    </Box>
+                  )}
                 </StepSection>
               </TabPanel>
 
@@ -1022,16 +1468,89 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     </HStack>
                   }
                 >
-                  <VStack spacing={3} align="stretch">
-                    <Text>Uncertainty Distribution Plot 1</Text>
-                    <Box bg="gray.100" h={200} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                      <Text color="gray.500">[Distribution Histogram Placeholder]</Text>
-                    </Box>
-                    <Text mt={4}>Uncertainty Distribution Plot 2</Text>
-                    <Box bg="gray.100" h={200} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                      <Text color="gray.500">[Distribution Histogram Placeholder]</Text>
-                    </Box>
-                  </VStack>
+                  {step5Results ? (
+                    <VStack spacing={8} align="stretch">
+                      {(() => {
+                        const legendItems = getLegendItems(step5Results)
+                        return (
+                          <HStack spacing={4} flexWrap="wrap">
+                            <Text fontSize="sm" fontWeight="semibold">Elicitation:</Text>
+                            {legendItems.map((item, idx) => (
+                              <HStack key={`${item.label}-${idx}`} spacing={2}>
+                                <Box
+                                  w={3}
+                                  h={3}
+                                  bg={STEP2_COLORS[idx % STEP2_COLORS.length]}
+                                  opacity={0.45}
+                                  borderRadius="sm"
+                                />
+                                <Text fontSize="sm">{item.label}</Text>
+                              </HStack>
+                            ))}
+                          </HStack>
+                        )
+                      })()}
+                      <Text fontSize="sm" color="gray.600">
+                        One plot per alternative with smooth overlapping distributions for each elicitation.
+                      </Text>
+                      <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={5}>
+                        {step5Results.alternative_names?.map((altName, altIndex) => {
+                          const distData = getDistributionDataForAlternative(step5Results, altIndex)
+                          if (!distData) return null
+                          const legendItems = getLegendItems(step5Results)
+                          const legendLabelByExpert = Object.fromEntries(
+                            legendItems.map((item) => [item.expertName, item.label])
+                          )
+                          return (
+                            <Box key={`${altName}-${altIndex}`} borderWidth={1} borderRadius="md" p={3} bg="gray.50">
+                              <Text fontWeight="semibold" fontSize="sm" mb={2}>{`Distribution of Values for ${altName}`}</Text>
+                              <ResponsiveContainer width="100%" height={250}>
+                                <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 0, bottom: 24 }}>
+                                  <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
+                                  <XAxis
+                                    type="number"
+                                    dataKey="x"
+                                    domain={[0, 1]}
+                                    ticks={[0, 0.2, 0.4, 0.6, 0.8, 1]}
+                                    tickFormatter={(v) => Number(v).toFixed(1)}
+                                    tick={{ fontSize: 11 }}
+                                    label={{ value: 'Value', position: 'insideBottom', offset: -10 }}
+                                  />
+                                  <YAxis
+                                    tickFormatter={(v) => `${(Number(v) * 100).toFixed(1)}%`}
+                                    tick={{ fontSize: 11 }}
+                                    label={{ value: 'Probability', angle: -90, position: 'insideLeft' }}
+                                  />
+                                  <RechartsTooltip
+                                    formatter={(value, name) => [`${(Number(value) * 100).toFixed(2)}%`, String(name)]}
+                                    labelFormatter={(v) => `Value ${Number(v).toFixed(3)}`}
+                                  />
+                                  {distData.expertNames.map((expertName, idx) => (
+                                    <Area
+                                      key={`${expertName}-${idx}`}
+                                      dataKey={expertName}
+                                      fill={STEP2_COLORS[idx % STEP2_COLORS.length]}
+                                      fillOpacity={0.22}
+                                      stroke={STEP2_COLORS[idx % STEP2_COLORS.length]}
+                                      strokeWidth={2}
+                                      type="monotone"
+                                      dot={false}
+                                      isAnimationActive={false}
+                                      name={legendLabelByExpert[expertName] || expertName}
+                                    />
+                                  ))}
+                                </AreaChart>
+                              </ResponsiveContainer>
+                            </Box>
+                          )
+                        })}
+                      </SimpleGrid>
+                    </VStack>
+                  ) : (
+                    <VStack spacing={3} align="stretch">
+                      <Text color="gray.600" fontSize="sm">Run Step 5 to display uncertainty distributions for each alternative.</Text>
+                    </VStack>
+                  )}
                 </StepSection>
               </TabPanel>
 
@@ -1093,12 +1612,16 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     </HStack>
                   }
                 >
-                  <VStack spacing={3} align="stretch">
-                    <Text>Results Heatmap</Text>
-                    <Box bg="gray.100" h={300} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                      <Text color="gray.500">[Heatmap Placeholder]</Text>
+                  {step6Results ? (
+                    <RankingHeatmap
+                      title="Results Heatmap"
+                      results={step6Results}
+                    />
+                  ) : (
+                    <Box bg="gray.100" h={220} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
+                      <Text color="gray.500">Run Step 6 to display the final ranking heatmap.</Text>
                     </Box>
-                  </VStack>
+                  )}
                 </StepSection>
               </TabPanel>
             </TabPanels>
@@ -1120,6 +1643,123 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         />
       </VStack>
     </Box>
+  )
+}
+
+function buildRankProbabilityMatrix(results) {
+  const alternatives = Array.isArray(results?.alternative_names) ? results.alternative_names : []
+  const rows = Array.isArray(results?.aggregated_results) ? results.aggregated_results : []
+
+  if (alternatives.length === 0 || rows.length === 0) return null
+
+  const altCount = alternatives.length
+  const rankCounts = Array.from({ length: altCount }, () => Array(altCount).fill(0))
+
+  rows.forEach((scoresRow) => {
+    if (!Array.isArray(scoresRow) || scoresRow.length < altCount) return
+
+    const ranked = alternatives
+      .map((_, altIndex) => ({
+        altIndex,
+        score: Number(scoresRow[altIndex]) || 0,
+      }))
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score
+        return a.altIndex - b.altIndex
+      })
+
+    ranked.forEach((entry, rankIndex) => {
+      rankCounts[rankIndex][entry.altIndex] += 1
+    })
+  })
+
+  const totalIterations = rows.length
+  const probabilities = rankCounts.map((rankRow) => (
+    rankRow.map((count) => (totalIterations > 0 ? count / totalIterations : 0))
+  ))
+
+  return {
+    alternatives,
+    probabilities,
+  }
+}
+
+function getHeatColor(probability) {
+  if (probability >= 0.9) return 'blue.900'
+  if (probability >= 0.8) return 'blue.800'
+  if (probability >= 0.7) return 'blue.700'
+  if (probability >= 0.6) return 'blue.600'
+  if (probability >= 0.5) return 'blue.500'
+  if (probability >= 0.4) return 'blue.400'
+  if (probability >= 0.3) return 'blue.300'
+  if (probability >= 0.2) return 'blue.200'
+  if (probability >= 0.1) return 'blue.100'
+  return 'blue.50'
+}
+
+function RankingHeatmap({ title, results }) {
+  const matrix = buildRankProbabilityMatrix(results)
+
+  if (!matrix) {
+    return (
+      <Box bg="gray.100" h={220} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
+        <Text color="gray.500">No ranking data available.</Text>
+      </Box>
+    )
+  }
+
+  const { alternatives, probabilities } = matrix
+  const cellSize = 70
+  const cellGap = 4
+  const rowLabelWidth = 90
+  const minGridWidth = rowLabelWidth + alternatives.length * (cellSize + cellGap)
+
+  return (
+    <VStack spacing={2} align="stretch">
+      <Text fontWeight="bold">{title}</Text>
+
+      <Box overflowX="auto" overflowY="hidden" pb={1}>
+        <VStack spacing={cellGap / 4} align="stretch" minW={`${minGridWidth}px`}>
+          <HStack spacing={1} align="stretch">
+            <Box minW={`${rowLabelWidth}px`} />
+            {alternatives.map((altName, colIndex) => (
+              <Box key={`header-${altName}-${colIndex}`} w={`${cellSize}px`} textAlign="center" px={1}>
+                <Text fontSize="xs" fontWeight="semibold" noOfLines={2}>{altName}</Text>
+              </Box>
+            ))}
+          </HStack>
+
+          {probabilities.map((rankRow, rankIndex) => (
+            <HStack key={`rank-row-${rankIndex}`} spacing={1} align="stretch">
+              <Box minW={`${rowLabelWidth}px`} display="flex" alignItems="center" justifyContent="flex-end" pr={2}>
+                <Text fontSize="xs" fontWeight="medium">Rank {rankIndex + 1}</Text>
+              </Box>
+
+              {rankRow.map((probability, colIndex) => {
+                const cellColor = getHeatColor(probability)
+                const textColor = probability >= 0.6 ? 'white' : 'gray.800'
+                return (
+                  <Box
+                    key={`cell-${rankIndex}-${colIndex}`}
+                    w={`${cellSize}px`}
+                    h={`${cellSize}px`}
+                    borderRadius="sm"
+                    bg={cellColor}
+                    display="flex"
+                    alignItems="center"
+                    justifyContent="center"
+                  >
+                    <Text fontSize="xs" color={textColor} fontWeight="semibold">
+                      {(probability * 100).toFixed(1)}%
+                    </Text>
+                  </Box>
+                )
+              })}
+            </HStack>
+          ))}
+        </VStack>
+      </Box>
+    </VStack>
   )
 }
 
