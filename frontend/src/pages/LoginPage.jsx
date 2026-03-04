@@ -110,7 +110,7 @@ function LoginPage({ onLogin }) {
   }
 
   return (
-    <Box minH="100vh" bg="gray.100" display="flex" alignItems="center" justifyContent="center" p={4}>
+    <Box minH="100vh" display="flex" alignItems="center" justifyContent="center" p={4}>
       <Card maxW="md" w="full" boxShadow="lg">
         <CardHeader bg="blue.700" color="white" borderRadius="md 0 0 0">
           <Heading size="lg" letterSpacing="wide">UP-MAVT Suite</Heading>
