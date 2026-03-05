@@ -287,7 +287,6 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
           duration: 3000,
           isClosable: true,
         })
-        setLoading(false)
         return
       }
 

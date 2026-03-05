@@ -1,8 +1,0 @@
-Alternative,Cost,Power,GHG
-Group,Technoeconomic,Technoeconomic,Environmental
-Description,Total capital investment cost,Installed electrical capacity,Lifecycle greenhouse gas emissions
-Nuclear,"N(1000, 50)",1000 ± 100,6
-Solar,50 ± 5%,"{45, 50, 55}",20 ± 2
-Gas,"TRAP(20, 25, 30, 35, 0)",300 ± 15%,50
-Coal,10,100,300
-Unit,EUR,MWe,gCO2eq/kWh
