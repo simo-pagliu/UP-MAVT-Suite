@@ -8,16 +8,25 @@ function Navigation({
   onPageChange,
   sessionId,
   studySessionId,
+  features = { qi: false, vf: false, bwt: false },
   onLogin,
   onLogout,
   onDocumentation,
 }) {
-  const stakeholderPages = [
-    { id: 'qualitative', label: 'Qualitative Indicators', requiresSession: true },
-    { id: 'value', label: 'Value Functions', requiresSession: true },
-    { id: 'pile', label: 'PILE-BWT', requiresSession: true },
+  const baseStakeholderPages = [
+    { id: 'qualitative', label: 'Qualitative Indicators', requiresSession: true, featureKey: 'qi' },
+    { id: 'value', label: 'Value Functions', requiresSession: true, featureKey: 'vf' },
+    { id: 'pile', label: 'PILE-BWT', requiresSession: true, featureKey: 'bwt' },
     { id: 'recap', label: 'Recap', requiresSession: true },
   ]
+
+  // Filter pages based on enabled features
+  const stakeholderPages = baseStakeholderPages.filter(page => {
+    if (page.featureKey) {
+      return features[page.featureKey]
+    }
+    return true // Recap always shown
+  })
 
   const practitionerPages = [
     { id: 'case-study', label: 'Manage Case Studies' },

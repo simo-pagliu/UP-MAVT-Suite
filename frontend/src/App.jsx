@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Box, Container, VStack } from '@chakra-ui/react'
 import Navigation from './components/Navigation'
 import LoginPage from './pages/LoginPage'
@@ -27,10 +27,32 @@ function App() {
   // Stakeholder session credentials (for loading specific sessions)
   const [sessionId, setSessionId] = useState(null)
   const [sessionCode, setSessionCode] = useState('')
+  const [features, setFeatures] = useState({ qi: false, vf: false, bwt: false })
 
   // Practitioner session credentials
   const [studySessionId, setStudySessionId] = useState(null)
   const [studyCode, setStudyCode] = useState('')
+
+  const fetchSessionFeatures = async (sessionId) => {
+    try {
+      const response = await fetch(`http://localhost:5000/api/session/${sessionId}`)
+      if (response.ok) {
+        const data = await response.json()
+        // Get the study session ID and fetch features from there
+        if (data.study_session_id) {
+          const studyResponse = await fetch(`http://localhost:5000/api/study-session/${data.study_session_id}`)
+          if (studyResponse.ok) {
+            const studyData = await studyResponse.json()
+            if (studyData.features) {
+              setFeatures(studyData.features)
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch features:', error)
+    }
+  }
 
   const handleLogin = (id, code, role) => {
     setIsLoggedIn(true)
@@ -44,6 +66,8 @@ function App() {
       setSessionId(id)
       setSessionCode(code)
       setStakeholderPage('qualitative')
+      // Fetch features for this session
+      fetchSessionFeatures(id)
     } else if (role === 'practitioner') {
       // For practitioner, the id is the study session id
       setStudySessionId(id)
@@ -65,6 +89,7 @@ function App() {
     setStakeholderPage('qualitative')
     setPractitionerPage('case-study')
     setShowDocumentation(false)
+    setFeatures({ qi: false, vf: false, bwt: false })
   }
 
   const handlePageChange = (page) => {
@@ -83,11 +108,14 @@ function App() {
   const handleSessionAccessed = (id, code) => {
     setSessionId(id)
     setSessionCode(code || '')
+    // Fetch features for this session
+    fetchSessionFeatures(id)
   }
 
   const handleSessionCleared = () => {
     setSessionId(null)
     setSessionCode('')
+    setFeatures({ qi: false, vf: false, bwt: false })
   }
 
   const handleStudySessionAccessed = (id, code) => {
@@ -102,6 +130,21 @@ function App() {
 
   const currentPage = currentRole === 'stakeholder' ? stakeholderPage : practitionerPage
 
+  // Reset page if current page becomes disabled due to feature changes
+  useEffect(() => {
+    if (currentRole === 'stakeholder' && features) {
+      const isCurrentPageDisabled = 
+        (stakeholderPage === 'qualitative' && !features.qi) ||
+        (stakeholderPage === 'value' && !features.vf) ||
+        (stakeholderPage === 'pile' && !features.bwt)
+      
+      if (isCurrentPageDisabled) {
+        // Switch to recap or the first enabled feature page
+        setStakeholderPage('recap')
+      }
+    }
+  }, [features, stakeholderPage, currentRole])
+
   return (
     <Box minH="100vh" bg="gray.50">
       <Navigation
@@ -111,6 +154,7 @@ function App() {
         onPageChange={handlePageChange}
         sessionId={sessionId}
         studySessionId={studySessionId}
+        features={features}
         onLogin={() => handleLogout()} // Show login page by logging out
         onLogout={handleLogout}
         onDocumentation={handleDocumentation}
@@ -129,13 +173,13 @@ function App() {
           {/* Stakeholder Pages */}
           {isLoggedIn && currentRole === 'stakeholder' && !showDocumentation && (
             <>
-              {currentPage === 'qualitative' && sessionId && (
+              {currentPage === 'qualitative' && sessionId && features.qi && (
                 <QualitativeIndicatorsPage sessionId={sessionId} />
               )}
-              {currentPage === 'value' && sessionId && (
+              {currentPage === 'value' && sessionId && features.vf && (
                 <ValueFunctionsPage sessionId={sessionId} />
               )}
-              {currentPage === 'pile' && sessionId && (
+              {currentPage === 'pile' && sessionId && features.bwt && (
                 <PileBwtPage sessionId={sessionId} onPageChange={handlePageChange} />
               )}
               {currentPage === 'recap' && sessionId && (
