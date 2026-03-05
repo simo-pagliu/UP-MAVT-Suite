@@ -1,6 +1,12 @@
 import { AddIcon, DeleteIcon } from '@chakra-ui/icons'
 import { useRef, forwardRef, useImperativeHandle } from 'react'
 import {
+  AlertDialog,
+  AlertDialogBody,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogOverlay,
   Box,
   Button,
   Heading,
@@ -33,8 +39,7 @@ import {
   computeDistributionBounds,
 } from '../utils/distributionUtils'
 import { generateInputCSV, downloadCSVFile } from '../utils/csvExport'
-
-const API_URL = 'http://localhost:5000/api'
+import { API_URL } from '../config'
 
 function InputPage({ studySessionId }, ref) {
   const [name, setName] = useState('')
@@ -51,6 +56,10 @@ function InputPage({ studySessionId }, ref) {
   const { isOpen: isDistModalOpen, onOpen: onDistModalOpen, onClose: onDistModalClose } = useDisclosure()
   const [editingCell, setEditingCell] = useState(null) // {criterionIdx, altIdx}
   const [currentCellValue, setCurrentCellValue] = useState('')
+
+  // Unlock confirmation dialog
+  const { isOpen: isUnlockOpen, onOpen: onUnlockOpen, onClose: onUnlockClose } = useDisclosure()
+  const unlockCancelRef = useRef()
   
   const toast = useToast()
   const fileInputRef = useRef(null)
@@ -148,12 +157,15 @@ function InputPage({ studySessionId }, ref) {
 
   const handleUnlock = () => {
     if (hasExistingSessions) {
-      const confirmed = window.confirm(
-        'Are you sure you want to modify the input?\n\n' +
-        'Warning: All existing elicitation sessions will be reset when you save changes.'
-      )
-      if (!confirmed) return
+      onUnlockOpen()
+    } else {
+      setIsEditing(true)
+      setIsLocked(false)
     }
+  }
+
+  const handleUnlockConfirm = () => {
+    onUnlockClose()
     setIsEditing(true)
     setIsLocked(false)
   }
@@ -399,7 +411,7 @@ function InputPage({ studySessionId }, ref) {
             title: 'Saved',
             description: 'Distribution saved to study input',
             status: 'success',
-            duration: 2,
+            duration: 2000,
             isClosable: true,
           })
         } catch (error) {
@@ -407,7 +419,7 @@ function InputPage({ studySessionId }, ref) {
             title: 'Error',
             description: error.response?.data?.error || 'Failed to save distribution',
             status: 'error',
-            duration: 3,
+            duration: 3000,
             isClosable: true,
           })
         }
@@ -416,7 +428,7 @@ function InputPage({ studySessionId }, ref) {
           title: 'Distribution Updated',
           description: 'Click "Confirm input to continue" to save all changes to the database',
           status: 'success',
-          duration: 3,
+          duration: 3000,
           isClosable: true,
         })
       }
@@ -588,7 +600,7 @@ function InputPage({ studySessionId }, ref) {
             ? 'Input saved and elicitation sessions reset'
             : 'Input saved successfully',
           status: 'success',
-          duration: 3,
+          duration: 3000,
           isClosable: true,
         })
       } else {
@@ -596,7 +608,7 @@ function InputPage({ studySessionId }, ref) {
           title: 'Missing study session',
           description: 'Access or create a study session before saving input.',
           status: 'error',
-          duration: 3,
+          duration: 3000,
           isClosable: true,
         })
       }
@@ -606,7 +618,7 @@ function InputPage({ studySessionId }, ref) {
         title: 'Error',
         description: error.response?.data?.error || error.message || 'Failed to save input',
         status: 'error',
-        duration: 5,
+        duration: 5000,
         isClosable: true,
       })
     } finally {
@@ -930,6 +942,34 @@ function InputPage({ studySessionId }, ref) {
         onSave={handleDistributionSave}
         title="Edit Distribution"
       />
+
+      {/* Unlock confirmation dialog */}
+      <AlertDialog
+        isOpen={isUnlockOpen}
+        leastDestructiveRef={unlockCancelRef}
+        onClose={onUnlockClose}
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              Modify Input
+            </AlertDialogHeader>
+            <AlertDialogBody>
+              Are you sure you want to modify the input?
+              <br /><br />
+              Warning: All existing elicitation sessions will be reset when you save changes.
+            </AlertDialogBody>
+            <AlertDialogFooter>
+              <Button ref={unlockCancelRef} onClick={onUnlockClose}>
+                Cancel
+              </Button>
+              <Button colorScheme="orange" onClick={handleUnlockConfirm} ml={3}>
+                Continue
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
     </Box>
   )
 }

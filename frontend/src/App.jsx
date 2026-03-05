@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Box, Container, VStack } from '@chakra-ui/react'
+import { API_URL } from './config'
 import Navigation from './components/Navigation'
 import LoginPage from './pages/LoginPage'
 import DocumentationPage from './pages/DocumentationPage'
@@ -35,12 +36,12 @@ function App() {
 
   const fetchSessionFeatures = async (sessionId) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/session/${sessionId}`)
+      const response = await fetch(`${API_URL}/session/${sessionId}`)
       if (response.ok) {
         const data = await response.json()
         // Get the study session ID and fetch features from there
         if (data.study_session_id) {
-          const studyResponse = await fetch(`http://localhost:5000/api/study-session/${data.study_session_id}`)
+          const studyResponse = await fetch(`${API_URL}/study-session/${data.study_session_id}`)
           if (studyResponse.ok) {
             const studyData = await studyResponse.json()
             if (studyData.features) {

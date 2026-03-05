@@ -28,8 +28,7 @@ import {
 import { ArrowBackIcon, ArrowForwardIcon, CheckCircleIcon, QuestionIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useState, useRef } from 'react'
-
-const API_URL = 'http://localhost:5000/api'
+import { API_URL } from '../config'
 
 const clamp = (v, min, max) => {
   const num = Number.isFinite(v) ? v : min
@@ -803,7 +802,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
           title: 'Error',
           description: 'Failed to load session',
           status: 'error',
-          duration: 3,
+          duration: 3000,
           isClosable: true,
         })
       } finally {
@@ -905,7 +904,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
         title: 'Error',
         description: error.response?.data?.error || 'Failed to save',
         status: 'error',
-        duration: 3,
+        duration: 3000,
         isClosable: true,
       })
     } finally {
@@ -924,7 +923,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
         title: 'Session locked',
         description: 'This session is locked. You cannot save changes.',
         status: 'warning',
-        duration: 3,
+        duration: 3000,
         isClosable: true,
       })
       return
@@ -950,7 +949,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
         title: 'Success',
         description: `Saved ${activeIndicator.criterion_name}`,
         status: 'success',
-        duration: 2,
+        duration: 2000,
         isClosable: true,
       })
 
@@ -964,7 +963,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
           title: 'Complete',
           description: 'All qualitative indicators have been elicited',
           status: 'success',
-          duration: 2,
+          duration: 2000,
           isClosable: true,
         })
       }
@@ -973,7 +972,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
         title: 'Error',
         description: error.response?.data?.error || 'Failed to save',
         status: 'error',
-        duration: 3,
+        duration: 3000,
         isClosable: true,
       })
     } finally {
@@ -1020,7 +1019,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
           title: 'Error',
           description: error.response?.data?.error || 'Failed to save',
           status: 'error',
-          duration: 3,
+          duration: 3000,
           isClosable: true,
         })
       } finally {

@@ -1,4 +1,10 @@
 import {
+  AlertDialog,
+  AlertDialogBody,
+  AlertDialogContent,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogOverlay,
   Badge,
   Box,
   Button,
@@ -22,13 +28,13 @@ import {
   Tr,
   Text,
   VStack,
+  useDisclosure,
   useToast,
 } from '@chakra-ui/react'
 import { DeleteIcon, LockIcon, UnlockIcon, HamburgerIcon, RepeatIcon } from '@chakra-ui/icons'
 import axios from 'axios'
-import { useEffect, useMemo, useState } from 'react'
-
-const API_URL = 'http://localhost:5000/api'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { API_URL } from '../config'
 
 const generateRandomCode = () => {
   const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
@@ -178,6 +184,9 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
   const [newCode, setNewCode] = useState('')
   const [features, setFeatures] = useState({ qi: false, vf: false, bwt: false })
   const [savingFeatures, setSavingFeatures] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState(null)
+  const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onClose: onDeleteClose } = useDisclosure()
+  const deleteCancelRef = useRef()
   const toast = useToast()
 
   const canCreateSession = Boolean(studySessionId)
@@ -278,6 +287,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
           duration: 3000,
           isClosable: true,
         })
+        setLoading(false)
         return
       }
 
@@ -399,12 +409,16 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
     }
   }
 
-  const handleDeleteSession = async (sessionId) => {
-    if (!window.confirm('Delete this elicitation session? This cannot be undone.')) return
+  const handleDeleteSession = (sessionId) => {
+    setPendingDeleteId(sessionId)
+    onDeleteOpen()
+  }
 
+  const handleDeleteSessionConfirm = async () => {
     setLoading(true)
+    onDeleteClose()
     try {
-      await axios.delete(`${API_URL}/session/${sessionId}`)
+      await axios.delete(`${API_URL}/session/${pendingDeleteId}`)
       toast({
         title: 'Session deleted',
         status: 'success',
@@ -422,6 +436,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
       })
     } finally {
       setLoading(false)
+      setPendingDeleteId(null)
     }
   }
 
@@ -463,7 +478,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
                 placeholder="Enter study code"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleAccess()}
+                onKeyDown={(e) => e.key === 'Enter' && handleAccess()}
               />
               <Button colorScheme="blue" onClick={handleAccess} isLoading={loading} minW="120px">
                 Access
@@ -661,6 +676,31 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
           </Table>
         </Box>
       </VStack>
+
+      <AlertDialog
+        isOpen={isDeleteOpen}
+        leastDestructiveRef={deleteCancelRef}
+        onClose={onDeleteClose}
+      >
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader fontSize="lg" fontWeight="bold">
+              Delete Session
+            </AlertDialogHeader>
+            <AlertDialogBody>
+              Are you sure you want to delete this elicitation session? This action cannot be undone.
+            </AlertDialogBody>
+            <AlertDialogFooter>
+              <Button ref={deleteCancelRef} onClick={onDeleteClose}>
+                Cancel
+              </Button>
+              <Button colorScheme="red" onClick={handleDeleteSessionConfirm} ml={3}>
+                Delete
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
     </Box>
   )
 }
