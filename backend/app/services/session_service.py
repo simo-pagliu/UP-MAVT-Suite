@@ -1,3 +1,10 @@
+"""Business logic for elicitation sessions.
+
+This module provides :class:`SessionService`, which handles creation,
+retrieval, validation, locking, and data updates for individual elicitation
+sessions.
+"""
+
 from datetime import datetime, timezone
 from bson.objectid import ObjectId
 
@@ -6,7 +13,14 @@ from app.exceptions import NotFoundError, ValidationError, ConflictError, Locked
 
 
 class SessionService:
+    """Service layer for elicitation session operations."""
+
     def __init__(self, db):
+        """Initialise the service with a database handle.
+
+        Args:
+            db: A PyMongo (or mongomock) database object.
+        """
         self._db = db
         self._sessions = SessionRepository(db)
         self._inputs = InputRepository(db)
@@ -14,8 +28,18 @@ class SessionService:
     # ------------------------------------------------------------------ #
     # Internal normalization helpers
     # ------------------------------------------------------------------ #
+
     @staticmethod
     def _normalize_rank_key(value):
+        """Convert a rank value to an integer when possible.
+
+        Args:
+            value: A rank value (typically an int or numeric string).
+
+        Returns:
+            int | value: The integer rank, or the original value if
+            conversion fails.
+        """
         try:
             return int(value)
         except (TypeError, ValueError):
@@ -23,6 +47,16 @@ class SessionService:
 
     @staticmethod
     def _normalize_confidence_value(value, default=4):
+        """Clamp a confidence value to the valid range [0, 4].
+
+        Args:
+            value: The raw confidence value.
+            default (int): Fallback value used when *value* cannot be parsed
+                as an integer.  Defaults to ``4``.
+
+        Returns:
+            int: The clamped confidence in the range [0, 4].
+        """
         try:
             confidence = int(value)
         except (TypeError, ValueError):
@@ -31,6 +65,21 @@ class SessionService:
 
     @classmethod
     def _build_rank_confidences_from_alternatives(cls, ranking, confidences_alternatives):
+        """Build a rank → confidence mapping from per-alternative confidence data.
+
+        This supports a legacy input format where confidences are keyed by
+        alternative name rather than by rank.  When multiple alternatives share
+        the same rank their confidences are averaged.
+
+        Args:
+            ranking (dict): Mapping of alternative name → rank.
+            confidences_alternatives (dict): Mapping of alternative name →
+                raw confidence value.
+
+        Returns:
+            dict: Mapping of rank (int) → averaged confidence (int).  Returns
+            an empty dict if either argument is not a dict.
+        """
         if not isinstance(ranking, dict) or not isinstance(confidences_alternatives, dict):
             return {}
         confidence_by_rank = {}
@@ -50,6 +99,23 @@ class SessionService:
 
     @classmethod
     def _normalize_qualitative_confidences(cls, ranking, confidences, confidences_alternatives=None):
+        """Build a normalised rank → confidence mapping for a single qualitative criterion.
+
+        Merges confidence data from two possible sources:
+
+        * *confidences* – a dict keyed by rank (preferred).
+        * *confidences_alternatives* – a legacy dict keyed by alternative name.
+
+        Args:
+            ranking (dict): Mapping of alternative name → rank.
+            confidences (dict | None): Mapping of rank → raw confidence value.
+            confidences_alternatives (dict | None): Legacy mapping of
+                alternative name → raw confidence value.
+
+        Returns:
+            dict: Mapping of str(rank) → clamped confidence int [0, 4].  Returns
+            an empty dict when *ranking* is not a dict.
+        """
         if not isinstance(ranking, dict):
             return {}
         legacy = cls._build_rank_confidences_from_alternatives(ranking, confidences_alternatives)
@@ -68,6 +134,27 @@ class SessionService:
 
     @classmethod
     def normalize_qualitative_indicators(cls, criteria, qualitative_indicators):
+        """Normalise all qualitative indicator entries in a session document.
+
+        For each qualitative criterion the method:
+
+        * Ensures ``ranking`` and ``values`` are dicts (substituting empty
+          dicts when absent).
+        * Normalises ``confidences`` via
+          :meth:`_normalize_qualitative_confidences` so that every rank has a
+          valid, clamped confidence value and all keys are strings.
+        * Passes through entries for non-qualitative criteria unchanged.
+
+        Args:
+            criteria (list[dict]): The session's criteria list (used to
+                identify which criteria are qualitative).
+            qualitative_indicators (dict): Raw ``qualitative_indicators`` value
+                from a session document.
+
+        Returns:
+            dict: A normalised copy of *qualitative_indicators*.  Returns an
+            empty dict when *qualitative_indicators* is not a dict.
+        """
         if not isinstance(qualitative_indicators, dict):
             return {}
         qualitative_names = set()
@@ -105,7 +192,23 @@ class SessionService:
     # ------------------------------------------------------------------ #
     @staticmethod
     def validate_criteria(criteria):
-        """Returns normalized criteria list or raises ValidationError."""
+        """Validate and normalise a list of criterion definitions.
+
+        Required fields per criterion: ``criterion_name``, ``unit``,
+        ``alternatives``.  Optional fields ``group`` and ``description`` are
+        defaulted to empty strings when absent.
+
+        Args:
+            criteria (list[dict]): The raw criteria data supplied by the
+                caller.
+
+        Returns:
+            list[dict]: The normalised criteria list.
+
+        Raises:
+            ValidationError: When *criteria* is empty, contains non-dict
+                items, is missing required fields, or has invalid alternatives.
+        """
         if not isinstance(criteria, list) or len(criteria) == 0:
             raise ValidationError('At least one criterion is required')
         required_fields = {'criterion_name', 'unit', 'alternatives'}
@@ -135,7 +238,23 @@ class SessionService:
 
     @staticmethod
     def validate_input_for_features(criteria, features):
-        """Raises ValidationError if criteria do not satisfy activated features."""
+        """Validate that the criteria list satisfies the enabled study features.
+
+        Checks:
+
+        * ``qi`` (Qualitative Indicators): every criterion must have at least
+          one alternative.
+        * ``vf`` / ``bwt`` (Value Functions / Best-Worst Technique): every
+          criterion must have a non-empty ``criterion_name``.
+
+        Args:
+            criteria (list[dict]): The criteria to validate.
+            features (dict | None): Feature flags, e.g.
+                ``{'qi': True, 'vf': False, 'bwt': False}``.
+
+        Raises:
+            ValidationError: When a feature constraint is violated.
+        """
         if not isinstance(criteria, list) or len(criteria) == 0:
             raise ValidationError('At least one criterion is required')
         features = features or {'qi': False, 'vf': False, 'bwt': False}
@@ -159,7 +278,18 @@ class SessionService:
     # Criteria resolution
     # ------------------------------------------------------------------ #
     def resolve_session_criteria(self, session):
-        """Return the criteria list for a session (from input doc or embedded)."""
+        """Return the criteria list for a session.
+
+        Fetches criteria from the linked input document when the session has an
+        ``input_id``; otherwise returns the criteria embedded directly in the
+        session document.
+
+        Args:
+            session (dict): A session document.
+
+        Returns:
+            list[dict]: The criteria list, or an empty list when none is found.
+        """
         if not isinstance(session, dict):
             return []
         input_id = self._sessions._to_oid(session.get('input_id'))
@@ -170,7 +300,18 @@ class SessionService:
         return session.get('criteria', [])
 
     def _serialize_session(self, session):
-        """Serialize ObjectId fields and attach criteria to a session dict."""
+        """Serialize ObjectId fields and attach resolved criteria to a session dict.
+
+        Mutates *session* in-place and returns it.
+
+        Args:
+            session (dict): A raw MongoDB session document.
+
+        Returns:
+            dict: The same document with ``_id``, ``input_id``, and
+            ``study_session_id`` converted to strings and ``criteria``
+            populated.
+        """
         session['_id'] = str(session['_id'])
         if 'input_id' in session:
             session['input_id'] = self._sessions._str_id(session.get('input_id'))
@@ -184,6 +325,21 @@ class SessionService:
     # ------------------------------------------------------------------ #
     @staticmethod
     def is_qualitative_complete(criteria, qualitative_indicators):
+        """Check whether all qualitative criteria have filled-in indicator data.
+
+        A qualitative criterion is considered complete when its entry in
+        *qualitative_indicators* contains non-empty ``ranking`` and ``values``
+        dicts.
+
+        Args:
+            criteria (list[dict]): The session's criteria list.
+            qualitative_indicators (dict): The session's qualitative indicator
+                data.
+
+        Returns:
+            bool: ``True`` when every qualitative criterion has complete data;
+            ``False`` otherwise.
+        """
         if not isinstance(criteria, list):
             return False
         if not isinstance(qualitative_indicators, dict):
@@ -205,6 +361,22 @@ class SessionService:
 
     @staticmethod
     def is_value_functions_complete(criteria, value_functions):
+        """Check whether all non-qualitative criteria have defined value functions.
+
+        A criterion's value function is considered complete when its entry in
+        ``value_functions['criteria']`` contains a non-empty ``points`` list.
+        Qualitative criteria are skipped (their value functions are generated
+        automatically from the ranking data).
+
+        Args:
+            criteria (list[dict]): The session's criteria list.
+            value_functions (dict): The session's value functions object,
+                expected to contain a ``'criteria'`` sub-dict.
+
+        Returns:
+            bool: ``True`` when every non-qualitative criterion has at least
+            one value function point; ``False`` otherwise.
+        """
         if not isinstance(criteria, list):
             return False
         criteria_map = value_functions.get('criteria') if isinstance(value_functions, dict) else {}
@@ -224,6 +396,18 @@ class SessionService:
     # CRUD
     # ------------------------------------------------------------------ #
     def create(self, name, criteria):
+        """Create a new standalone elicitation session.
+
+        Args:
+            name (str): Unique session name (used as the stakeholder code).
+            criteria (list[dict]): The criteria definitions for this session.
+
+        Returns:
+            str: The ``_id`` of the newly created session as a hex string.
+
+        Raises:
+            ValidationError: When *criteria* fails validation.
+        """
         criteria = self.validate_criteria(criteria)
         doc = {
             'name': name,
@@ -239,12 +423,33 @@ class SessionService:
         return str(inserted_id)
 
     def get_by_id(self, session_id):
+        """Retrieve and serialise a session by its identifier.
+
+        Args:
+            session_id: The session's ``_id`` (string or ObjectId).
+
+        Returns:
+            dict: The serialised session document (all ObjectId fields are
+            strings and ``criteria`` is populated).
+
+        Raises:
+            NotFoundError: When no session with that ``_id`` exists.
+        """
         session = self._sessions.find_by_id(session_id)
         if not session:
             raise NotFoundError('Session not found')
         return self._serialize_session(session)
 
     def get_by_name(self, name):
+        """Retrieve a session by name, returning ``None`` when not found.
+
+        Args:
+            name (str): The session's unique name / stakeholder code.
+
+        Returns:
+            dict | None: The serialised session document (with ``exists=True``
+            added) when found, or ``None`` when not found.
+        """
         session = self._sessions.find_by_name(name)
         if not session:
             return None
@@ -253,6 +458,11 @@ class SessionService:
         return session
 
     def get_all(self):
+        """Return all elicitation sessions, newest first.
+
+        Returns:
+            list[dict]: Serialised session documents.
+        """
         sessions = self._sessions.find_all()
         for s in sessions:
             s['_id'] = str(s['_id'])
@@ -260,7 +470,25 @@ class SessionService:
         return sessions
 
     def detect_type(self, code):
-        """Returns {'exists': bool, 'type': ..., '_id': ..., 'code': ...}."""
+        """Determine whether a code belongs to a stakeholder or practitioner session.
+
+        Searches first in the sessions collection (stakeholder codes), then in
+        the study_sessions collection (practitioner codes).
+
+        Args:
+            code (str): The code to look up.
+
+        Returns:
+            dict: A result dict with the following keys:
+
+            * ``'exists'`` (bool) – whether the code was found.
+            * ``'type'`` (str) – ``'stakeholder'`` or ``'practitioner'``
+              (only present when ``exists`` is ``True``).
+            * ``'_id'`` (str) – the document's ``_id`` as a hex string
+              (only present when ``exists`` is ``True``).
+            * ``'code'`` (str) – the code that was searched
+              (only present when ``exists`` is ``True``).
+        """
         stakeholder = self._sessions.find_by_name(code)
         if stakeholder:
             return {'exists': True, 'type': 'stakeholder', '_id': str(stakeholder['_id']), 'code': code}
@@ -272,11 +500,41 @@ class SessionService:
         return {'exists': False}
 
     def delete(self, session_id):
+        """Delete an elicitation session by its identifier.
+
+        Args:
+            session_id: The session's ``_id`` (string or ObjectId).
+
+        Raises:
+            NotFoundError: When no session with that ``_id`` exists.
+        """
         deleted = self._sessions.delete(session_id)
         if deleted == 0:
             raise NotFoundError('Session not found')
 
     def update_criteria(self, session_id, criteria):
+        """Update the criteria list for a session.
+
+        Automatically reconciles dependent data:
+
+        * Criteria that become qualitative have their value function entries
+          removed.
+        * Criteria that become non-qualitative have their qualitative indicator
+          entries removed.
+
+        When the session is linked to a shared input document the update is
+        written to that document; otherwise it is written directly to the
+        session.
+
+        Args:
+            session_id: The session's ``_id`` (string or ObjectId).
+            criteria (list[dict]): The new criteria definitions.
+
+        Raises:
+            ValidationError: When *criteria* fails validation.
+            NotFoundError: When the session does not exist.
+            LockedError: When the session or its input is locked.
+        """
         criteria = self.validate_criteria(criteria)
         session = self._sessions.find_by_id(session_id)
         if not session:
@@ -323,6 +581,19 @@ class SessionService:
         self._sessions.update(session_id, payload)
 
     def toggle_lock(self, session_id):
+        """Toggle the input-lock flag on a session.
+
+        When locked, the input (criteria) cannot be modified.
+
+        Args:
+            session_id: The session's ``_id`` (string or ObjectId).
+
+        Returns:
+            bool: The new value of the ``locked`` flag.
+
+        Raises:
+            NotFoundError: When the session does not exist.
+        """
         session = self._sessions.find_by_id(session_id)
         if not session:
             raise NotFoundError('Session not found')
@@ -331,6 +602,20 @@ class SessionService:
         return new_locked
 
     def toggle_session_lock(self, session_id):
+        """Toggle the session-lock flag on a session.
+
+        When session-locked, all data fields (qualitative indicators, value
+        functions, BWT) become read-only.
+
+        Args:
+            session_id: The session's ``_id`` (string or ObjectId).
+
+        Returns:
+            bool: The new value of the ``session_locked`` flag.
+
+        Raises:
+            NotFoundError: When the session does not exist.
+        """
         session = self._sessions.find_by_id(session_id)
         if not session:
             raise NotFoundError('Session not found')
@@ -339,6 +624,16 @@ class SessionService:
         return new_locked
 
     def update_qualitative(self, session_id, value):
+        """Save qualitative indicator data for a session after normalisation.
+
+        Args:
+            session_id: The session's ``_id`` (string or ObjectId).
+            value (dict): Raw qualitative indicators keyed by criterion name.
+
+        Raises:
+            NotFoundError: When the session does not exist.
+            LockedError: When the session is locked.
+        """
         session = self._sessions.find_by_id(session_id)
         if not session:
             raise NotFoundError('Session not found')
@@ -349,6 +644,17 @@ class SessionService:
         self._sessions.update(session_id, {'qualitative_indicators': normalized})
 
     def update_value_functions(self, session_id, value):
+        """Save value function data for a session.
+
+        Args:
+            session_id: The session's ``_id`` (string or ObjectId).
+            value (dict): Value functions object, expected to contain a
+                ``'criteria'`` sub-dict mapping criterion names to point lists.
+
+        Raises:
+            NotFoundError: When the session does not exist.
+            LockedError: When the session is locked.
+        """
         session = self._sessions.find_by_id(session_id)
         if not session:
             raise NotFoundError('Session not found')
@@ -357,6 +663,16 @@ class SessionService:
         self._sessions.update(session_id, {'value_functions': value})
 
     def update_bwt(self, session_id, value):
+        """Save Best-Worst Technique (PILE-BWT) data for a session.
+
+        Args:
+            session_id: The session's ``_id`` (string or ObjectId).
+            value (dict): The BWT data object.
+
+        Raises:
+            NotFoundError: When the session does not exist.
+            LockedError: When the session is locked.
+        """
         session = self._sessions.find_by_id(session_id)
         if not session:
             raise NotFoundError('Session not found')

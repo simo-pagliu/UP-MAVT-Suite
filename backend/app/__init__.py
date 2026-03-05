@@ -1,9 +1,20 @@
+"""Application factory for the elicitation-tools Flask backend."""
+
 from flask import Flask
 from flask_cors import CORS
 from pymongo import MongoClient
 import os
 
+
 def create_app():
+    """Create and configure the Flask application.
+
+    Reads configuration from environment variables, sets up CORS, connects to
+    MongoDB, and registers all blueprints.
+
+    Returns:
+        Flask: The configured Flask application instance.
+    """
     app = Flask(__name__)
 
     cors_origins_raw = os.getenv("CORS_ORIGIN", "*")

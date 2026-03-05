@@ -1,3 +1,10 @@
+"""Business logic for the UP-MAVT workflow.
+
+This module provides :class:`WorkflowService`, which manages background tasks
+for weight computation and step execution, and exposes helpers for querying
+task state and exporting results.
+"""
+
 import csv
 import io
 from datetime import datetime, timezone
@@ -8,13 +15,37 @@ from app.exceptions import NotFoundError, ValidationError
 
 
 class WorkflowService:
+    """Service layer for the UP-MAVT workflow task management."""
+
     def __init__(self, db):
+        """Initialise the service with a database handle.
+
+        Args:
+            db: A PyMongo (or mongomock) database object.
+        """
         self._studies = StudySessionRepository(db)
         self._sessions = SessionRepository(db)
         self._tasks = TaskRepository(db)
         self._session_svc = SessionService(db)
 
     def create_compute_weights_task(self, study_session_id, selected_session_ids):
+        """Enqueue a background task to compute weights for the selected sessions.
+
+        Any existing pending or running ``compute_weights`` tasks for the same
+        study session are cancelled before the new task is created.
+
+        Args:
+            study_session_id: The parent study session's ``_id``.
+            selected_session_ids (list): The ``_id`` values of the elicitation
+                sessions to include.
+
+        Returns:
+            str: The ``_id`` of the newly created task as a hex string.
+
+        Raises:
+            ValidationError: When *selected_session_ids* is empty.
+            NotFoundError: When the study session does not exist.
+        """
         if not selected_session_ids:
             raise ValidationError('No sessions selected')
         study = self._studies.find_by_id(study_session_id)
@@ -35,6 +66,35 @@ class WorkflowService:
 
     def create_run_step_task(self, study_session_id, step_number, selected_session_ids,
                              mc_iterations, aggregation_method, mc_mode, use_random_weights):
+        """Enqueue a background task to execute a UP-MAVT analysis step.
+
+        Validates preconditions, normalises qualitative indicators for the
+        selected sessions, and cancels any existing pending tasks for the same
+        step before creating the new task.
+
+        Args:
+            study_session_id: The parent study session's ``_id``.
+            step_number (int): The UP-MAVT step to run (2–6).
+            selected_session_ids (list): The elicitation session IDs to include.
+            mc_iterations (int): Number of Monte-Carlo iterations (clamped to
+                [100, 5000]).
+            aggregation_method (str): Aggregation method shortcode or full
+                name (``'SUM'``/``'weighted_sum'``, ``'GEO'``/``'geometric_mean'``,
+                ``'HAR'``/``'harmonic_mean'``).
+            mc_mode (str): Monte-Carlo mode string passed directly to the
+                worker (e.g. ``'non_strict'``).
+            use_random_weights (bool): Whether to use random weights in the
+                computation.
+
+        Returns:
+            str: The ``_id`` of the newly created task as a hex string.
+
+        Raises:
+            ValidationError: When *step_number* is not in [2, 6],
+                *selected_session_ids* is empty, or weights have not been
+                computed yet.
+            NotFoundError: When the study session does not exist.
+        """
         if step_number not in [2, 3, 4, 5, 6]:
             raise ValidationError('Invalid step number (must be 2-6)')
         if not selected_session_ids:
@@ -105,6 +165,19 @@ class WorkflowService:
         return str(self._tasks.insert(doc))
 
     def get_task_status(self, task_id):
+        """Return the current status and metadata of a task.
+
+        Args:
+            task_id: The task's ``_id`` (string or ObjectId).
+
+        Returns:
+            dict: A dict with keys ``task_id``, ``type``, ``status``,
+            ``console_output``, ``error``, ``created_at``, ``started_at``,
+            and ``completed_at`` (ISO-8601 strings where applicable).
+
+        Raises:
+            NotFoundError: When no task with that ``_id`` exists.
+        """
         task = self._tasks.find_by_id(task_id)
         if not task:
             raise NotFoundError('Task not found')
@@ -120,11 +193,30 @@ class WorkflowService:
         }
 
     def cancel_task(self, task_id):
+        """Cancel a pending or running task.
+
+        Args:
+            task_id: The task's ``_id`` (string or ObjectId).
+
+        Raises:
+            NotFoundError: When no task with that ``_id`` exists, or when the
+                task is already in a terminal state.
+        """
         modified = self._tasks.cancel_task(task_id)
         if modified == 0:
             raise NotFoundError('Task not found or already completed')
 
     def get_active_task(self, study_session_id):
+        """Return the currently pending or running task for a study session.
+
+        Args:
+            study_session_id: The study session's ``_id``.
+
+        Returns:
+            dict | None: A partial task status dict (``task_id``, ``type``,
+            ``status``, ``console_output``, ``params``, ``created_at``), or
+            ``None`` when there is no active task.
+        """
         task = self._tasks.find_active_for_study(study_session_id)
         if not task:
             return None
@@ -138,12 +230,30 @@ class WorkflowService:
         }
 
     def reset_weights(self, study_session_id):
+        """Remove computed weights and all step results from a study session.
+
+        Args:
+            study_session_id: The study session's ``_id``.
+
+        Raises:
+            NotFoundError: When the study session does not exist.
+        """
         fields = ['computed_weights', 'step_2_results', 'step_3_results', 'step_4_results', 'step_5_results', 'step_6_results']
         matched = self._studies.unset_fields(study_session_id, fields)
         if matched == 0:
             raise NotFoundError('Study session not found')
 
     def reset_step(self, study_session_id, step_number):
+        """Remove the results for a specific UP-MAVT step.
+
+        Args:
+            study_session_id: The study session's ``_id``.
+            step_number (int): The step whose results should be cleared (2–6).
+
+        Raises:
+            ValidationError: When *step_number* is not in [2, 6].
+            NotFoundError: When the study session does not exist.
+        """
         if step_number not in [2, 3, 4, 5, 6]:
             raise ValidationError('Invalid step number')
         matched = self._studies.unset_fields(study_session_id, [f'step_{step_number}_results'])
@@ -151,6 +261,26 @@ class WorkflowService:
             raise NotFoundError('Study session not found')
 
     def get_workflow_status(self, study_session_id):
+        """Return a summary of computed weights and step results for a study session.
+
+        Args:
+            study_session_id: The study session's ``_id``.
+
+        Returns:
+            dict: A dict with two keys:
+
+            * ``'weights'`` – either ``None`` (not computed) or a dict with
+              ``'computed'``, ``'timestamp'``, and ``'session_count'``.
+            * ``'steps'`` – a dict mapping step numbers (``'2'``–``'6'``) to
+              step-status dicts.  Each step-status dict contains at least
+              ``'completed'`` (bool).  Completed steps also include
+              ``'timestamp'``, ``'mc_iterations'``, ``'mc_mode'``, and
+              ``'aggregation_method'`` (or ``'aggregation_methods'`` for
+              step 4).
+
+        Raises:
+            NotFoundError: When the study session does not exist.
+        """
         study = self._studies.find_by_id(study_session_id)
         if not study:
             raise NotFoundError('Study session not found')
@@ -187,6 +317,19 @@ class WorkflowService:
         return {'weights': weights_status, 'steps': steps_status}
 
     def get_weight_space(self, study_session_id, session_id):
+        """Return the weight-space data for a specific elicitation session.
+
+        Args:
+            study_session_id: The study session's ``_id``.
+            session_id (str): The elicitation session's ``_id`` string.
+
+        Returns:
+            list[dict]: The list of weight solution dicts for the session.
+
+        Raises:
+            NotFoundError: When the study session does not exist, weights have
+                not been computed, or no data is available for *session_id*.
+        """
         study = self._studies.find_by_id(study_session_id)
         if not study:
             raise NotFoundError('Study session not found')
@@ -202,6 +345,23 @@ class WorkflowService:
         return data
 
     def get_step_results(self, study_session_id, step_number):
+        """Return the stored results for a specific UP-MAVT step.
+
+        Timestamps within the result document are converted to ISO-8601
+        strings for JSON serialisability.
+
+        Args:
+            study_session_id: The study session's ``_id``.
+            step_number (int): The step number (2–6).
+
+        Returns:
+            dict: The step results document.
+
+        Raises:
+            ValidationError: When *step_number* is not in [2, 6].
+            NotFoundError: When the study session or its step results do not
+                exist.
+        """
         if step_number not in [2, 3, 4, 5, 6]:
             raise ValidationError('Invalid step number')
         study = self._studies.find_by_id(study_session_id)
@@ -219,6 +379,21 @@ class WorkflowService:
         return step_data
 
     def export_weight_solutions_csv(self, study_session_id):
+        """Export all weight solutions for a study session as a CSV file.
+
+        The CSV has a column for each criterion plus ``SESSION_ID`` and
+        ``SOLUTION_INDEX`` columns.
+
+        Args:
+            study_session_id: The study session's ``_id``.
+
+        Returns:
+            tuple[bytes, str, str]: A 3-tuple of (content, filename, mimetype).
+
+        Raises:
+            NotFoundError: When the study session, its weight solutions, or
+                any non-empty solution set is not found.
+        """
         study = self._studies.find_by_id(study_session_id)
         if not study:
             raise NotFoundError('Study session not found')
@@ -256,6 +431,22 @@ class WorkflowService:
         return output.getvalue().encode(), filename, 'text/csv'
 
     def export_weight_solutions_single_csv(self, study_session_id, session_id):
+        """Export weight solutions for a single elicitation session as a CSV file.
+
+        Falls back to ``weight_spaces`` format when ``weight_solutions`` is
+        not available for the requested session.
+
+        Args:
+            study_session_id: The study session's ``_id``.
+            session_id (str): The elicitation session's ``_id`` string.
+
+        Returns:
+            tuple[bytes, str, str]: A 3-tuple of (content, filename, mimetype).
+
+        Raises:
+            NotFoundError: When the study session, its weights, or the
+                session's solutions are not found.
+        """
         study = self._studies.find_by_id(study_session_id)
         if not study:
             raise NotFoundError('Study session not found')
