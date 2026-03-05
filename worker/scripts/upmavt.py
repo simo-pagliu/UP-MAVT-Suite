@@ -10,7 +10,6 @@ import numpy as np
 from scipy.interpolate import interp1d
 import sys
 from .weight_space_definition import (
-    load_comparisons_from_db,
     build_constraint_structure,
 )
 
@@ -18,65 +17,6 @@ from .weight_space_definition import (
 # ============================================================================
 # LOAD VALUE FUNCTIONS AND CONFIDENCE FROM DB
 # ============================================================================
-def load_value_functions_with_confidence_from_db(criteria, value_functions_data, qualitative_indicators=None):
-    """Load value functions and confidence levels from DB session data.
-
-    For quantitative criteria: interpolation function + single confidence level.
-    For qualitative criteria: per-rank confidences dict (rank -> confidence), no VF needed.
-
-    Parameters
-    ----------
-    criteria : list[dict]
-        Criteria from the input document.
-    value_functions_data : dict
-        The ``value_functions`` field from the session document.
-    qualitative_indicators : dict or None
-        The ``qualitative_indicators`` field from the session document.
-
-    Returns
-    -------
-    tuple(dict, dict)
-        (vf_dict, confidence_dict) where:
-        - For quantitative: vf_dict[name] -> interp1d, confidence_dict[name] -> int
-        - For qualitative: vf_dict[name] -> None, confidence_dict[name] -> dict {rank -> int}
-    """
-    vf_dict = {}
-    confidence_dict = {}
-    criteria_map = value_functions_data.get('criteria', {}) if isinstance(value_functions_data, dict) else {}
-
-    for criterion in criteria:
-        if not isinstance(criterion, dict):
-            continue
-        name = criterion.get('criterion_name')
-        if not name:
-            continue
-
-        if criterion.get('is_qualitative'):
-            # For qualitative: keep per-rank confidences dict
-            qual_data = qualitative_indicators[name]
-            confidences_dict = qual_data['confidences']
-            # Convert keys to int for consistency
-            confidence_dict[name] = {int(k) if k.isdigit() else k: int(v) 
-                                     for k, v in confidences_dict.items()}
-            vf_dict[name] = None  # No VF needed for qualitative
-        else:
-            # For quantitative: traditional VF + single confidence
-            cfg = criteria_map[name]
-            points = cfg['points']
-            confidence = cfg['confidence']
-
-            x_vals = [float(p['x']) for p in points if 'x' in p and 'y' in p]
-            y_vals = [float(p['y']) for p in points if 'x' in p and 'y' in p]
-
-            interp_func = interp1d(x_vals, y_vals, kind='linear',
-                                   fill_value=(0, 1), bounds_error=False)
-            vf_dict[name] = interp_func
-            confidence_dict[name] = int(confidence)
-
-    return vf_dict, confidence_dict
-
-
-
 # ============================================================================
 # WEIGHT SAMPLER (direct sampling from precomputed feasible solutions)
 # ============================================================================
@@ -121,148 +61,6 @@ def weight_sampler(weight_solutions, criteria, constraint_data=None, use_random_
         return {crit: 1.0 / n for crit in criteria}
 
     return {crit: float(selected.get(crit, 0.0)) for crit in criteria}
-
-
-# ============================================================================
-# LOAD ALTERNATIVES FROM DB
-# ============================================================================
-def load_alternatives_from_db(criteria):
-    """Build alternatives dict from the criteria stored in the DB input.
-
-    The input criteria list has the structure:
-    [
-      {
-        "criterion_name": "Capital Investment Budgeted",
-        "unit": "EUR",
-        "group": "Economic",
-        "alternatives": [
-          {"name": "Nuclear", "value": "N(8000, 1000)"},
-          {"name": "Solar", "value": "N(5000, 500)"},
-          ...
-        ]
-      },
-      ...
-    ]
-
-    Returns
-    -------
-    tuple(dict, list)
-        alternatives: {alt_name: {crit_name: value_string, ...}, ...}
-        criteria_names: [crit_name, ...]
-    """
-    alternatives = {}
-    criteria_names = []
-
-    for criterion in criteria:
-        if not isinstance(criterion, dict):
-            continue
-        crit_name = criterion.get('criterion_name')
-        if not crit_name:
-            continue
-        criteria_names.append(crit_name)
-
-        for alt in criterion.get('alternatives', []):
-            if not isinstance(alt, dict):
-                continue
-            alt_name = alt.get('name', '')
-            if not alt_name:
-                continue
-            if alt_name not in alternatives:
-                alternatives[alt_name] = {}
-
-            value = alt.get('value', '')
-
-            # For qualitative criteria, use normalized x position
-            if criterion.get('is_qualitative'):
-                value = _get_qualitative_x_value_for_alt(criterion, alt_name)
-
-            alternatives[alt_name][crit_name] = str(value) if value is not None else ''
-
-    return alternatives, criteria_names
-
-
-def _get_qualitative_x_value_for_alt(criterion, alt_name):
-    """Placeholder - qualitative x values need to come from qualitative_indicators.
-
-    This is handled later when we have access to qualitative_indicators.
-    """
-    return ''
-
-
-def load_alternatives_from_db_with_qualitative(criteria, qualitative_indicators):
-    """Build alternatives dict, substituting qualitative values with their x-positions.
-
-    Parameters
-    ----------
-    criteria : list[dict]
-        Criteria from the input document.
-    qualitative_indicators : dict or None
-        Qualitative indicators from the session.
-
-    Returns
-    -------
-    tuple(dict, list)
-        alternatives dict and criteria_names list.
-    """
-    alternatives = {}
-    criteria_names = []
-
-    for criterion in criteria:
-        if not isinstance(criterion, dict):
-            continue
-        crit_name = criterion.get('criterion_name')
-        if not crit_name:
-            continue
-        criteria_names.append(crit_name)
-
-        for alt in criterion.get('alternatives', []):
-            if not isinstance(alt, dict):
-                continue
-            alt_name = alt.get('name', '')
-            if not alt_name:
-                continue
-            if alt_name not in alternatives:
-                alternatives[alt_name] = {}
-
-            if criterion.get('is_qualitative'):
-                # Use x-position from qualitative ranking
-                value = _get_qualitative_x_value(qualitative_indicators, crit_name, alt_name)
-            else:
-                value = alt.get('value', '')
-
-            alternatives[alt_name][crit_name] = str(value) if value is not None else ''
-
-    return alternatives, criteria_names
-
-
-def _get_qualitative_x_value(qualitative_indicators, criterion_name, alt_name):
-    """Get the normalized X value for a qualitative alternative."""
-    if not isinstance(qualitative_indicators, dict):
-        return ''
-    data = qualitative_indicators.get(criterion_name)
-    if not isinstance(data, dict):
-        return ''
-    ranking = data.get('ranking')
-    if not isinstance(ranking, dict):
-        return ''
-
-    rank = ranking.get(alt_name)
-    if rank is None:
-        return ''
-
-    unique_ranks = sorted(set(ranking.values()))
-    if len(unique_ranks) == 0:
-        return ''
-
-    total_points = len(unique_ranks) + 2
-    rank_list = list(reversed(unique_ranks))
-    if rank not in rank_list:
-        return ''
-
-    idx = rank_list.index(rank)
-    x_pos = idx + 1
-    x_normalized = x_pos / (total_points - 1)
-    return x_normalized
 
 
 # ============================================================================
@@ -594,17 +392,22 @@ def format_results_for_db(results, alternatives, mc_mode):
 # ============================================================================
 # MAIN ENTRY POINT (called by the worker)
 # ============================================================================
-def run_upmavt(session_docs, criteria, computed_weights, params, print_fn=None):
+def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives, 
+               criteria_names, params, print_fn=None):
     """Run UP-MAVT simulation.
 
     Parameters
     ----------
-    session_docs : list[dict]
-        List of elicitation session documents (one per selected session).
-    criteria : list[dict]
-        Criteria from the study input document.
-    computed_weights : dict
-        The computed_weights document containing weight_solutions keyed by session ID.
+    vf_lists : list[dict]
+        List of value function dicts (one per elicitation), mapping criterion_name -> interp1d.
+    confidence_lists : list[dict]
+        List of confidence dicts (one per elicitation), mapping criterion_name -> confidence_int.
+    weight_solutions_list : list[list]
+        List of weight solution lists (one per elicitation).
+    alternatives : dict
+        Alternatives mapping: {alt_name: {criterion_name: value, ...}, ...}
+    criteria_names : list[str]
+        List of criterion names.
     params : dict
         Parameters:
         - mc_iterations: int
@@ -629,7 +432,7 @@ def run_upmavt(session_docs, criteria, computed_weights, params, print_fn=None):
     use_random_weights = params.get('use_random_weights', False)
     opinion_weights_raw = params.get('opinion_weights', None)
 
-    num_elicitations = len(session_docs)
+    num_elicitations = len(vf_lists)
 
     if opinion_weights_raw is None:
         opinion_weights = np.ones(num_elicitations) / num_elicitations
@@ -641,63 +444,10 @@ def run_upmavt(session_docs, criteria, computed_weights, params, print_fn=None):
     print_fn("UP-MAVT: Uncertainty Propagated Multi-Attribute Value Theory")
     print_fn("=" * 60)
 
-    # Load data for each elicitation
-    print_fn("\nLoading elicitation data...")
-    vf_lists = []
-    confidence_lists = []
-    weight_solutions_list = []
-    constraint_data_list = []
-
-    weight_solutions_data = computed_weights.get('weight_solutions', {})
-    if not isinstance(weight_solutions_data, dict) or not weight_solutions_data:
-        weight_solutions_data = computed_weights.get('weight_spaces', {})
-
-    for i, session_doc in enumerate(session_docs):
-        session_id = str(session_doc.get('_id', session_doc.get('session_id', i)))
-        session_name = session_doc.get('name', session_id)
-        print_fn(f"  - Elicitation {session_name} (ID: {session_id}):")
-
-        value_functions_data = session_doc.get('value_functions')
-        qualitative_indicators = session_doc.get('qualitative_indicators')
-
-        vf_dict, conf_dict = load_value_functions_with_confidence_from_db(
-            criteria, value_functions_data, qualitative_indicators
-        )
-        print_fn(f"    ✓ Loaded {len(vf_dict)} value functions")
-        vf_lists.append(vf_dict)
-        confidence_lists.append(conf_dict)
-
-        # Get precomputed weight solutions for this session
-        ws = weight_solutions_data.get(session_id, [])
-        if not ws:
-            print_fn(f"    ⚠ No weight solutions found for session {session_id}")
-        else:
-            print_fn(f"    ✓ Loaded {len(ws)} feasible weight solutions")
-        weight_solutions_list.append(ws)
-        
-        # Build constraint data from BWT comparisons
-        bwt_data = session_doc.get('bwt')
-        comparisons = load_comparisons_from_db(bwt_data) if bwt_data else []
-        if comparisons:
-            constraint_data = build_constraint_structure(comparisons, vf_dict)
-            print_fn(f"    ✓ Built constraint structure with {len(comparisons)} comparisons")
-            constraint_data_list.append(constraint_data)
-        else:
-            print_fn(f"    ⚠ No BWT comparisons found, using empty constraints")
-            # Create minimal constraint structure (no comparisons, just criteria)
-            constraint_data = {
-                'criteria': constraint_data_list[-1]['criteria'] if constraint_data_list else list(vf_dict.keys()),
-                'criterion_to_index': {c: i for i, c in enumerate(list(vf_dict.keys()))},
-                'comparisons': [],
-                'value_functions': vf_dict
-            }
-            constraint_data_list.append(constraint_data)
-
-    # Load alternatives (same for all elicitations since they share input)
-    print_fn("\nLoading alternatives...")
-    # Use first session for qualitative indicators (they should be the same structure)
-    first_qi = session_docs[0].get('qualitative_indicators') if session_docs else None
-    alternatives, criteria_names = load_alternatives_from_db_with_qualitative(criteria, first_qi)
+    print_fn(f"\n✓ Loaded {num_elicitations} elicitations")
+    for i, vf_dict in enumerate(vf_lists):
+        print_fn(f"  - Elicitation {i+1}: {len(vf_dict)} value functions")
+    
     print_fn(f"✓ Loaded {len(alternatives)} alternatives")
     print_fn(f"✓ Criteria: {criteria_names}")
 
@@ -711,18 +461,25 @@ def run_upmavt(session_docs, criteria, computed_weights, params, print_fn=None):
     print_fn(f"  Opinion weights: {opinion_weights.tolist()}")
     sys.stdout.flush()
 
-    # Gather all qualitative indicators for access during MC
-    all_qi = {}
-    for session_doc in session_docs:
-        qi = session_doc.get('qualitative_indicators')
-        if qi:
-            all_qi.update(qi)
+    # Build constraint data for each elicitation
+    print_fn("\nBuilding constraint structures...")
+    constraint_data_list = []
+    for i, vf_dict in enumerate(vf_lists):
+        # Create constraint structure with criteria and value functions
+        constraint_data = {
+            'criteria': list(vf_dict.keys()),
+            'criterion_to_index': {c: j for j, c in enumerate(vf_dict.keys())},
+            'comparisons': [],
+            'value_functions': vf_dict
+        }
+        constraint_data_list.append(constraint_data)
+        print_fn(f"  - Elicitation {i+1}: {len(vf_dict)} value functions")
     
     results = run_monte_carlo(
         alternatives, criteria_names, weight_solutions_list, vf_lists,
         confidence_lists, constraint_data_list, aggregation_method,
         opinion_weights, mc_iterations, mc_mode, use_random_weights=use_random_weights,
-        qualitative_indicators=all_qi if all_qi else None, print_fn=print_fn,
+        qualitative_indicators=None, print_fn=print_fn,
     )
     print_fn("✓ Simulation complete")
 
@@ -740,8 +497,7 @@ def run_upmavt(session_docs, criteria, computed_weights, params, print_fn=None):
 
     if mc_mode == "strict":
         for elicit_idx_str, rows in formatted.get('results_by_elicitation', {}).items():
-            session_name = session_docs[int(elicit_idx_str)].get('name', elicit_idx_str)
-            print_fn(f"\nElicitation {session_name}:")
+            print_fn(f"\nElicitation {int(elicit_idx_str) + 1}:")
             scores_array = np.array(rows)
             for j, alt in enumerate(alt_names):
                 col = scores_array[:, j]

@@ -23,140 +23,6 @@ LHS_SAMPLES = 100  # Number of Latin Hypercube samples
 
 
 # ============================================================================
-# LOAD AND PARSE VALUE FUNCTIONS FROM DB DATA
-# ============================================================================
-def load_value_functions_from_db(criteria, value_functions_data, qualitative_indicators=None):
-    """Build interpolation functions from DB value_functions and qualitative data.
-
-    Parameters
-    ----------
-    criteria : list[dict]
-        The criteria list from the input document.
-    value_functions_data : dict
-        The ``value_functions`` field stored on the session document.
-    qualitative_indicators : dict or None
-        The ``qualitative_indicators`` field stored on the session document.
-
-    Returns
-    -------
-    dict
-        Mapping criterion_name -> scipy interp1d function.
-    """
-    vf_dict = {}
-    criteria_map = value_functions_data.get('criteria', {}) if isinstance(value_functions_data, dict) else {}
-
-    for criterion in criteria:
-        if not isinstance(criterion, dict):
-            continue
-        name = criterion.get('criterion_name')
-        if not name:
-            continue
-
-        points = []
-
-        if criterion.get('is_qualitative'):
-            points = _generate_qualitative_value_function(qualitative_indicators, name)
-        else:
-            cfg = criteria_map.get(name, {})
-            if isinstance(cfg, dict):
-                points = cfg.get('points', [])
-
-        if not points or len(points) < 2:
-            continue
-
-        x_vals = [float(p['x']) for p in points if 'x' in p and 'y' in p]
-        y_vals = [float(p['y']) for p in points if 'x' in p and 'y' in p]
-
-        if len(x_vals) < 2:
-            continue
-
-        min_y, max_y = min(y_vals), max(y_vals)
-        interp_func = interp1d(
-            x_vals,
-            y_vals,
-            kind='linear',
-            fill_value=(min_y, max_y),
-            bounds_error=False,
-        )
-        vf_dict[name] = interp_func
-
-    return vf_dict
-
-
-def _generate_qualitative_value_function(qualitative_indicators, criterion_name):
-    """Generate value function points for a qualitative indicator."""
-    if not isinstance(qualitative_indicators, dict):
-        return []
-    data = qualitative_indicators.get(criterion_name)
-    if not isinstance(data, dict):
-        return []
-
-    ranking = data.get('ranking')
-    values = data.get('values')
-    is_increasing = data.get('isIncreasing', True)
-
-    if not isinstance(ranking, dict) or not isinstance(values, dict):
-        return []
-
-    unique_ranks = sorted(set(ranking.values()))
-    if len(unique_ranks) == 0:
-        return []
-
-    points = []
-    total_points = len(unique_ranks) + 2
-
-    points.append({'x': 0, 'y': 0 if is_increasing else 1})
-
-    for idx, rank in enumerate(reversed(unique_ranks)):
-        x_pos = idx + 1
-        x_normalized = x_pos / (total_points - 1)
-        y_value = values.get(rank)
-        if y_value is None:
-            y_value = values.get(str(rank))
-        if y_value is None:
-            y_value = x_normalized
-        points.append({'x': x_normalized, 'y': y_value})
-
-    points.append({'x': 1, 'y': 1 if is_increasing else 0})
-
-    return points
-
-
-# ============================================================================
-# LOAD COMPARISONS FROM DB DATA
-# ============================================================================
-def load_comparisons_from_db(bwt_data):
-    """Convert DB bwt data to comparison records.
-
-    Parameters
-    ----------
-    bwt_data : dict
-        The ``bwt`` field stored on the session document.
-
-    Returns
-    -------
-    list[dict]
-        Each dict has REFERENCE_CRITERION, ADJUSTED_CRITERION, DATA_VALUE, TYPE, GROUP.
-    """
-    if not isinstance(bwt_data, dict):
-        return []
-
-    comparisons_raw = bwt_data.get('comparisons', [])
-    comparisons = []
-    for comp in comparisons_raw:
-        if not isinstance(comp, dict):
-            continue
-        comparisons.append({
-            'REFERENCE_CRITERION': comp.get('reference_criterion', ''),
-            'ADJUSTED_CRITERION': comp.get('adjusted_criterion', ''),
-            'DATA_VALUE': float(comp.get('data_value', 0)),
-            'TYPE': comp.get('type', ''),
-            'GROUP': comp.get('group', ''),
-        })
-    return comparisons
-
-
-# ============================================================================
 # BUILD CONSTRAINT STRUCTURE
 # ============================================================================
 def build_constraint_structure(comparisons, value_functions):
@@ -541,8 +407,8 @@ def enumerate_weight_space(weights_list, criterion_names, min_violation=0.0,
 # ============================================================================
 # MAIN ENTRY POINT (called by the worker)
 # ============================================================================
-def compute_weights(session_doc, criteria, print_fn=None):
-    """Compute weight space for a single elicitation session using three-phase approach.
+def compute_weights(value_functions, comparisons, criteria_names=None, print_fn=None):
+    """Compute weight space using three-phase approach.
     
     PHASE 1: Find minimum infeasibility (best possible constraint satisfaction)
     PHASE 2: Sample feasible region via Latin Hypercube + local refinement
@@ -550,10 +416,12 @@ def compute_weights(session_doc, criteria, print_fn=None):
 
     Parameters
     ----------
-    session_doc : dict
-        The full session document from MongoDB.
-    criteria : list[dict]
-        The criteria from the input document.
+    value_functions : dict
+        Mapping criterion_name -> scipy interp1d function object.
+    comparisons : list[dict]
+        List of comparison dicts with REFERENCE_CRITERION, ADJUSTED_CRITERION, DATA_VALUE, TYPE, GROUP.
+    criteria_names : list[str] or None
+        List of criterion names. If None, extracted from value_functions.
     print_fn : callable or None
         Function to call for logging (defaults to ``print``).
 
@@ -565,21 +433,15 @@ def compute_weights(session_doc, criteria, print_fn=None):
     if print_fn is None:
         print_fn = print
 
-    bwt_data = session_doc.get('bwt')
-    value_functions_data = session_doc.get('value_functions')
-    qualitative_indicators = session_doc.get('qualitative_indicators')
-
     print_fn("=" * 70)
     print_fn("THREE-PHASE WEIGHT SPACE EXPLORATION")
     print_fn("=" * 70)
 
-    print_fn("\n[SETUP] Loading value functions from DB...")
-    value_functions = load_value_functions_from_db(criteria, value_functions_data, qualitative_indicators)
-    print_fn(f"  ✓ Loaded {len(value_functions)} value functions")
-
-    print_fn("\n[SETUP] Loading comparisons from DB...")
-    comparisons = load_comparisons_from_db(bwt_data)
-    print_fn(f"  ✓ Loaded {len(comparisons)} comparisons")
+    if not criteria_names:
+        criteria_names = list(value_functions.keys())
+    
+    print_fn(f"✓ Value functions: {len(value_functions)}")
+    print_fn(f"✓ Comparisons: {len(comparisons)}")
 
     if not comparisons:
         print_fn("ERROR: No comparisons found.")
