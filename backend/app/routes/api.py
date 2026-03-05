@@ -41,7 +41,7 @@ def admin_login():
 @bp.route('/session/detect/<code>', methods=['GET'])
 def detect_session_type(code):
     svc = SessionService(current_app.db)
-    return jsonify(svc.detect_type(current_app.db, code)), 200
+    return jsonify(svc.detect_type(code)), 200
 
 
 # --------------------------------------------------------------------------- #

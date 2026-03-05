@@ -40,6 +40,12 @@ class SessionRepository(BaseRepository):
             return 0
         return self._col.delete_one({'_id': oid}).deleted_count
 
+    def find_by_ids(self, session_ids):
+        oids = [oid for sid in session_ids if (oid := self._to_oid(sid)) is not None]
+        if not oids:
+            return []
+        return list(self._col.find({'_id': {'$in': oids}}))
+
     def delete_many_by_study_session_id(self, study_session_id):
         oid = self._to_oid(study_session_id)
         if not oid:

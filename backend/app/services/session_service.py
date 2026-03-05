@@ -7,6 +7,7 @@ from app.exceptions import NotFoundError, ValidationError, ConflictError, Locked
 
 class SessionService:
     def __init__(self, db):
+        self._db = db
         self._sessions = SessionRepository(db)
         self._inputs = InputRepository(db)
 
@@ -258,13 +259,13 @@ class SessionService:
             self._serialize_session(s)
         return sessions
 
-    def detect_type(self, db, code):
+    def detect_type(self, code):
         """Returns {'exists': bool, 'type': ..., '_id': ..., 'code': ...}."""
         stakeholder = self._sessions.find_by_name(code)
         if stakeholder:
             return {'exists': True, 'type': 'stakeholder', '_id': str(stakeholder['_id']), 'code': code}
         from app.repositories import StudySessionRepository
-        study_repo = StudySessionRepository(db)
+        study_repo = StudySessionRepository(self._db)
         practitioner = study_repo.find_by_code(code)
         if practitioner:
             return {'exists': True, 'type': 'practitioner', '_id': str(practitioner['_id']), 'code': code}

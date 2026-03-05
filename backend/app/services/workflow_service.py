@@ -64,12 +64,11 @@ class WorkflowService:
             raise NotFoundError('Study session not found')
 
         # Normalize qualitative indicators for selected sessions
-        selected_oids = [self._sessions._to_oid(sid) for sid in selected_session_ids]
-        selected_oids = [oid for oid in selected_oids if oid is not None]
+        selected_oids = [oid for sid in selected_session_ids if (oid := self._sessions._to_oid(sid)) is not None]
         if not selected_oids:
             raise ValidationError('No valid session IDs selected')
 
-        session_docs = list(self._sessions._col.find({'_id': {'$in': selected_oids}}))
+        session_docs = self._sessions.find_by_ids(selected_session_ids)
         for session_doc in session_docs:
             session_study_id = self._sessions._to_oid(session_doc.get('study_session_id'))
             if session_study_id != self._studies._to_oid(study_session_id):
