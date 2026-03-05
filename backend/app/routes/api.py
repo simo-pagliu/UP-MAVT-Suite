@@ -1,13 +1,24 @@
 from flask import Blueprint, request, jsonify, current_app, send_file
 from bson.objectid import ObjectId
-from datetime import datetime
+from datetime import datetime, timezone
 import csv
+import hmac
 import io
 import json
 import os
 import zipfile
 
-bp = Blueprint('api', __name__, url_prefix='/api')
+def _serialize_computed_weights(study):
+    """Return a serialized computed_weights dict ready for JSON responses."""
+    computed_weights = study.get('computed_weights', {})
+    if not isinstance(computed_weights, dict) or not computed_weights:
+        return {}
+    serialized = dict(computed_weights)
+    if 'weight_solutions' in serialized:
+        weight_sols = serialized['weight_solutions']
+        if isinstance(weight_sols, dict):
+            serialized['weight_solutions'] = {str(k): v for k, v in weight_sols.items()}
+    return serialized
 
 def _ensure_object_id(value):
     if isinstance(value, ObjectId):
@@ -207,10 +218,14 @@ def admin_login():
     """Verify admin password"""
     data = request.json or {}
     password = data.get('password')
-    
+
+    if not password:
+        return jsonify({'success': False, 'error': 'Password is required'}), 400
+
     admin_password = os.getenv('ADMIN_PASSWORD', 'admin123')
-    
-    if password == admin_password:
+
+    # Use constant-time comparison to prevent timing-based enumeration of the password.
+    if hmac.compare_digest(str(password), str(admin_password)):
         return jsonify({'success': True}), 200
     else:
         return jsonify({'success': False, 'error': 'Invalid password'}), 401
@@ -269,7 +284,7 @@ def create_session():
         'bwt': None,
         'locked': False,
         'session_locked': False,
-        'created_at': datetime.utcnow()
+        'created_at': datetime.now(timezone.utc)
     }
 
     result = db.sessions.insert_one(session_doc)
@@ -297,7 +312,7 @@ def create_study_session():
             'vf': False,
             'bwt': False
         },
-        'created_at': datetime.utcnow(),
+        'created_at': datetime.now(timezone.utc),
     }
     result = db.study_sessions.insert_one(study_doc)
     return jsonify({'study_session_id': str(result.inserted_id)}), 201
@@ -343,10 +358,8 @@ def get_study_session(study_session_id):
         study['input_id'] = _serialize_object_id(study.get('input_id'))
         study['criteria'] = criteria
         return jsonify(study), 200
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid study session ID'}), 400
-
-@bp.route('/study-session/<study_session_id>', methods=['PATCH'])
 def update_study_session(study_session_id):
     """Update study session features."""
     data = request.json or {}
@@ -378,7 +391,7 @@ def update_study_session(study_session_id):
         updated_study['_id'] = str(updated_study['_id'])
         updated_study['input_id'] = _serialize_object_id(updated_study.get('input_id'))
         return jsonify(updated_study), 200
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid study session ID'}), 400
 
 @bp.route('/study-session/<study_session_id>', methods=['DELETE'])
@@ -403,7 +416,7 @@ def delete_study_session(study_session_id):
         # Delete the study session
         db.study_sessions.delete_one({'_id': ObjectId(study_session_id)})
         return jsonify({'success': True}), 200
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid study session ID'}), 400
 
 @bp.route('/study-session/<study_session_id>/input', methods=['PUT'])
@@ -424,7 +437,7 @@ def update_study_input(study_session_id):
             return jsonify({'error': 'Study session not found'}), 404
 
         input_id = _ensure_object_id(study.get('input_id'))
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if input_id:
             db.inputs.update_one(
                 {'_id': input_id},
@@ -443,7 +456,7 @@ def update_study_input(study_session_id):
             )
 
         return jsonify({'status': 'updated'}), 200
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid study session ID'}), 400
 
 @bp.route('/study-session/<study_session_id>/reset-sessions', methods=['POST'])
@@ -482,7 +495,7 @@ def get_study_input(study_session_id):
                 criteria = input_doc.get('criteria', [])
 
         return jsonify({'criteria': criteria}), 200
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid study session ID'}), 400
 
 @bp.route('/study-session/<study_session_id>/elicitation-session', methods=['POST'])
@@ -528,7 +541,7 @@ def create_elicitation_session(study_session_id):
             'bwt': None,
             'locked': False,
             'session_locked': False,
-            'created_at': datetime.utcnow()
+            'created_at': datetime.now(timezone.utc)
         }
         result = db.sessions.insert_one(session_doc)
         return jsonify({'session_id': str(result.inserted_id)}), 201
@@ -557,17 +570,7 @@ def list_elicitation_sessions(study_session_id):
             session['study_session_id'] = _serialize_object_id(session.get('study_session_id'))
             session['input_id'] = _serialize_object_id(session.get('input_id'))
             # Include computed_weights from parent study for checking if weights are available
-            computed_weights = study.get('computed_weights', {})
-            if isinstance(computed_weights, dict) and computed_weights:
-                # Serialize weight_solutions keys to strings
-                serialized_cw = dict(computed_weights)
-                if 'weight_solutions' in serialized_cw:
-                    weight_sols = serialized_cw['weight_solutions']
-                    if isinstance(weight_sols, dict):
-                        serialized_cw['weight_solutions'] = {str(k): v for k, v in weight_sols.items()}
-                session['computed_weights'] = serialized_cw
-            else:
-                session['computed_weights'] = {}
+            session['computed_weights'] = _serialize_computed_weights(study)
 
         return jsonify({
             'study_session_id': str(study.get('_id')),
@@ -575,7 +578,7 @@ def list_elicitation_sessions(study_session_id):
             'criteria': criteria,
             'sessions': sessions,
         }), 200
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid study session ID'}), 400
 
 # Get all study sessions (for admin)
@@ -601,17 +604,7 @@ def get_all_study_sessions():
             session['study_session_id'] = _serialize_object_id(session.get('study_session_id'))
             session['input_id'] = _serialize_object_id(session.get('input_id'))
             # Include computed_weights from parent study for checking if weights are available
-            computed_weights = study.get('computed_weights', {})
-            if isinstance(computed_weights, dict) and computed_weights:
-                # Serialize weight_solutions keys to strings
-                serialized_cw = dict(computed_weights)
-                if 'weight_solutions' in serialized_cw:
-                    weight_sols = serialized_cw['weight_solutions']
-                    if isinstance(weight_sols, dict):
-                        serialized_cw['weight_solutions'] = {str(k): v for k, v in weight_sols.items()}
-                session['computed_weights'] = serialized_cw
-            else:
-                session['computed_weights'] = {}
+            session['computed_weights'] = _serialize_computed_weights(study)
         
         study['_id'] = str(study_id)
         study['input_id'] = _serialize_object_id(study.get('input_id'))
@@ -659,7 +652,7 @@ def get_session(session_id):
         session['_id'] = str(session['_id'])
         _attach_session_criteria(session, db)
         return jsonify(session), 200
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Delete session
@@ -672,7 +665,7 @@ def delete_session(session_id):
         if result.deleted_count == 0:
             return jsonify({'error': 'Session not found'}), 404
         return jsonify({'status': 'deleted'}), 200
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Update criteria
@@ -737,7 +730,7 @@ def update_criteria(session_id):
         if input_id:
             db.inputs.update_one(
                 {'_id': input_id},
-                {'$set': {'criteria': criteria, 'updated_at': datetime.utcnow()}}
+                {'$set': {'criteria': criteria, 'updated_at': datetime.now(timezone.utc)}}
             )
             update_payload = {'value_functions': value_functions, 'qualitative_indicators': qualitative_indicators}
         else:
@@ -748,7 +741,7 @@ def update_criteria(session_id):
             {'$set': update_payload}
         )
         return jsonify({'status': 'updated'}), 200
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Toggle input lock
@@ -770,7 +763,7 @@ def toggle_session_lock(session_id):
         )
         
         return jsonify({'locked': new_locked}), 200
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Toggle session lock
@@ -792,7 +785,7 @@ def toggle_full_session_lock(session_id):
         )
 
         return jsonify({'session_locked': new_locked}), 200
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Update qualitative indicators
@@ -800,6 +793,8 @@ def toggle_full_session_lock(session_id):
 def update_qualitative(session_id):
     """Update qualitative indicators"""
     data = request.json
+    if data is None:
+        return jsonify({'error': 'Request must include Content-Type: application/json header with a valid JSON body'}), 400
     value = data.get('value')
     
     if value is None:
@@ -821,7 +816,7 @@ def update_qualitative(session_id):
             {'$set': {'qualitative_indicators': normalized_value}}
         )
         return jsonify({'status': 'updated'}), 200
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Update value functions
@@ -829,6 +824,8 @@ def update_qualitative(session_id):
 def update_value(session_id):
     """Update value functions"""
     data = request.json
+    if data is None:
+        return jsonify({'error': 'Request must include Content-Type: application/json header with a valid JSON body'}), 400
     value = data.get('value')
     
     if value is None:
@@ -847,7 +844,7 @@ def update_value(session_id):
             {'$set': {'value_functions': value}}
         )
         return jsonify({'status': 'updated'}), 200
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 def _is_qualitative_complete(criteria, qualitative_indicators):
@@ -1236,7 +1233,7 @@ def export_value_functions_csv(session_id):
             as_attachment=True,
             download_name=f'value_functions_{session.get("name", session_id)}.csv'
         )
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Export value functions as JSON
@@ -1294,7 +1291,7 @@ def export_value_functions_json(session_id):
             as_attachment=True,
             download_name=f'value_functions_{session.get("name", session_id)}.json'
         )
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Update BWT (Best-Worst Technique)
@@ -1302,6 +1299,8 @@ def export_value_functions_json(session_id):
 def update_bwt(session_id):
     """Update BWT data"""
     data = request.json
+    if data is None:
+        return jsonify({'error': 'Request must include Content-Type: application/json header with a valid JSON body'}), 400
     value = data.get('value')
     
     if value is None:
@@ -1320,7 +1319,7 @@ def update_bwt(session_id):
             {'$set': {'bwt': value}}
         )
         return jsonify({'status': 'updated'}), 200
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Export BWT as CSV
@@ -1359,7 +1358,7 @@ def export_bwt_csv(session_id):
             as_attachment=True,
             download_name=f'bwt_{session.get("name", session_id)}.csv'
         )
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Export input data as CSV
@@ -1385,7 +1384,7 @@ def export_input_csv(session_id):
             as_attachment=True,
             download_name=f'input_{session.get("name", session_id)}.csv'
         )
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Export input data as JSON
@@ -1438,7 +1437,7 @@ def export_input_json(session_id):
             as_attachment=True,
             download_name=f'input_{session.get("name", session_id)}.json'
         )
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Export raw input data as CSV
@@ -1462,7 +1461,7 @@ def export_input_raw_csv(session_id):
             as_attachment=True,
             download_name=f'input_raw_{session.get("name", session_id)}.csv'
         )
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Export qualitative indicators as CSV
@@ -1487,7 +1486,7 @@ def export_qualitative_csv(session_id):
             as_attachment=True,
             download_name=f'qualitative_indicators_{session.get("name", session_id)}.csv'
         )
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Export PILE-BWT as CSV
@@ -1511,7 +1510,7 @@ def export_pile_csv(session_id):
             as_attachment=True,
             download_name=f'pile_bwt_{session.get("name", session_id)}.csv'
         )
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Export PILE-BWT as JSON
@@ -1540,7 +1539,7 @@ def export_pile_json(session_id):
             as_attachment=True,
             download_name=f'pile_bwt_{session.get("name", session_id)}.json'
         )
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Export combined outputs as ZIP
@@ -1586,40 +1585,34 @@ def export_all_outputs_zip(session_id):
             as_attachment=True,
             download_name=f'outputs_{session.get("name", session_id)}.zip'
         )
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 # Export results as CSV
 @bp.route('/session/<session_id>/export', methods=['GET'])
 def export_csv(session_id):
-    """Export session data as CSV"""
+    """Export a summary of session completion status as CSV"""
     db = current_app.db
     try:
         session = db.sessions.find_one({'_id': ObjectId(session_id)})
         if not session:
             return jsonify({'error': 'Session not found'}), 404
-        
-        # Calculate sum and division
-        values = [
-            session.get('qualitative_indicators') or 0,
-            session.get('value_functions') or 0,
-            session.get('bwt') or 0
-        ]
-        total_sum = sum(values)
-        division = total_sum / 3 if total_sum != 0 else 0
-        
+
+        has_qualitative = session.get('qualitative_indicators') is not None
+        has_value_functions = session.get('value_functions') is not None
+        has_bwt = session.get('bwt') is not None
+        completed_count = sum([has_qualitative, has_value_functions, has_bwt])
+
         # Create CSV in memory
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(['Field', 'Value'])
         writer.writerow(['Name', session.get('name')])
-        writer.writerow(['Qualitative Indicators', session.get('qualitative_indicators')])
-        writer.writerow(['Value Functions', session.get('value_functions')])
-        writer.writerow(['PILE-BWT', session.get('bwt')])
-        writer.writerow(['Sum', total_sum])
-        writer.writerow(['Division (Sum / 3)', division])
-        
-        # Convert to bytes
+        writer.writerow(['Qualitative Indicators Filled', has_qualitative])
+        writer.writerow(['Value Functions Filled', has_value_functions])
+        writer.writerow(['PILE-BWT Filled', has_bwt])
+        writer.writerow(['Completed Sections', f'{completed_count}/3'])
+
         output.seek(0)
         return send_file(
             io.BytesIO(output.getvalue().encode()),
@@ -1627,7 +1620,7 @@ def export_csv(session_id):
             as_attachment=True,
             download_name=f'output_{session.get("name", session_id)}.csv'
         )
-    except:
+    except Exception:
         return jsonify({'error': 'Invalid session ID'}), 400
 
 
@@ -1668,7 +1661,7 @@ def compute_weights_endpoint(study_session_id):
                 'selected_session_ids': selected_session_ids,
             },
             'console_output': '',
-            'created_at': datetime.utcnow(),
+            'created_at': datetime.now(timezone.utc),
         }
         result = db.tasks.insert_one(task_doc)
         return jsonify({'task_id': str(result.inserted_id)}), 202
@@ -1695,7 +1688,10 @@ def run_step_endpoint(study_session_id):
         return jsonify({'error': 'No sessions selected'}), 400
 
     # Validate mc_iterations
-    mc_iterations = max(100, min(5000, int(mc_iterations)))
+    try:
+        mc_iterations = max(100, min(5000, int(mc_iterations)))
+    except (TypeError, ValueError):
+        mc_iterations = 1000
 
     # Map aggregation method shortcodes
     agg_map = {
@@ -1773,7 +1769,7 @@ def run_step_endpoint(study_session_id):
                 'opinion_weights': None,
             },
             'console_output': '',
-            'created_at': datetime.utcnow(),
+            'created_at': datetime.now(timezone.utc),
         }
         result = db.tasks.insert_one(task_doc)
         return jsonify({'task_id': str(result.inserted_id)}), 202
@@ -1813,7 +1809,7 @@ def cancel_task(task_id):
     try:
         result = db.tasks.update_one(
             {'_id': ObjectId(task_id), 'status': {'$in': ['pending', 'running']}},
-            {'$set': {'status': 'cancelled', 'completed_at': datetime.utcnow()}}
+            {'$set': {'status': 'cancelled', 'completed_at': datetime.now(timezone.utc)}}
         )
         if result.modified_count == 0:
             return jsonify({'error': 'Task not found or already completed'}), 404
@@ -2046,11 +2042,8 @@ def export_weight_solutions_csv_single_session(study_session_id, session_id):
             as_attachment=True,
             download_name=f'weight_solutions_{session_name}.csv'
         )
-    except Exception as e:
-        import traceback
-        print(f"Error in export_weight_solutions_csv_single_session: {str(e)}")
-        print(traceback.format_exc())
-        return jsonify({'error': f'Error: {str(e)}'}), 400
+    except Exception:
+        return jsonify({'error': 'Invalid study session ID'}), 400
 
 
 @bp.route('/study-session/<study_session_id>/workflow-status', methods=['GET'])

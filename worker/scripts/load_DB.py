@@ -88,6 +88,7 @@ def load_input_data(db, study_session_id):
         'criteria': criteria,
         'alternatives': alternatives,
         'criteria_names': criteria_names,
+        'input_id': input_id,
     }
 
 
