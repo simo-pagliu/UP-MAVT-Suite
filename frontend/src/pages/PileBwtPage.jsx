@@ -46,8 +46,7 @@ import {
   ReferenceDot,
 } from 'recharts'
 import { parseDistribution, computeDistributionBounds } from '../utils/distributionUtils'
-
-const API_URL = 'http://localhost:5000/api'
+import { API_URL } from '../config'
 
 function PileBwtPage({ sessionId, onPageChange }, ref) {
   const [criteria, setCriteria] = useState([])

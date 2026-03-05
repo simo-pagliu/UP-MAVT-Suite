@@ -37,8 +37,7 @@ import { CheckCircleIcon, WarningIcon, CloseIcon, QuestionIcon } from '@chakra-u
 import axios from 'axios'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { parseDistribution, computeDistributionBounds } from '../utils/distributionUtils'
-
-const API_URL = 'http://localhost:5000/api'
+import { API_URL } from '../config'
 
 const SHAPES = [
   { value: 'linear_increasing', label: 'Piecewise linear increasing', helper: 'Starts at 0 and rises to 1.' },

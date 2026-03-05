@@ -1,3 +1,7 @@
 __pycache__/
 **/__pycache__/
 *.py[cod]
+# Frontend build artifacts and dependencies
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/

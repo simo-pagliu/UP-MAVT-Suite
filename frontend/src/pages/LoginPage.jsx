@@ -1,8 +1,7 @@
 import { Box, Button, FormControl, FormLabel, Heading, HStack, Input, Text, VStack, useToast, Card, CardBody, CardHeader } from '@chakra-ui/react'
 import axios from 'axios'
 import { useState } from 'react'
-
-const API_URL = 'http://localhost:5000/api'
+import { API_URL } from '../config'
 
 function LoginPage({ onLogin }) {
   const [code, setCode] = useState('')
@@ -153,7 +152,7 @@ function LoginPage({ onLogin }) {
                     placeholder="Enter session code"
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleDetectAndLogin()}
+                    onKeyDown={(e) => e.key === 'Enter' && handleDetectAndLogin()}
                     isDisabled={loading}
                   />
                 </Box>
@@ -180,7 +179,7 @@ function LoginPage({ onLogin }) {
                     placeholder="Enter new study code"
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleCreatePractitionerSession()}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreatePractitionerSession()}
                     isDisabled={loading}
                   />
                 </Box>

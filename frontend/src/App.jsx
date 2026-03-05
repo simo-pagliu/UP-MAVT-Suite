@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Box, Container, VStack } from '@chakra-ui/react'
+import axios from 'axios'
+import { API_URL } from './config'
 import Navigation from './components/Navigation'
 import LoginPage from './pages/LoginPage'
 import DocumentationPage from './pages/DocumentationPage'
@@ -33,20 +35,21 @@ function App() {
   const [studySessionId, setStudySessionId] = useState(null)
   const [studyCode, setStudyCode] = useState('')
 
+  /**
+   * Fetches the enabled feature flags (qi, vf, bwt) for a given stakeholder
+   * session by first resolving its parent study session and then reading the
+   * `features` field from that study session document.
+   *
+   * @param {string} sessionId - The stakeholder elicitation session ID.
+   */
   const fetchSessionFeatures = async (sessionId) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/session/${sessionId}`)
-      if (response.ok) {
-        const data = await response.json()
-        // Get the study session ID and fetch features from there
-        if (data.study_session_id) {
-          const studyResponse = await fetch(`http://localhost:5000/api/study-session/${data.study_session_id}`)
-          if (studyResponse.ok) {
-            const studyData = await studyResponse.json()
-            if (studyData.features) {
-              setFeatures(studyData.features)
-            }
-          }
+      const { data } = await axios.get(`${API_URL}/session/${sessionId}`)
+      // Get the study session ID and fetch features from there
+      if (data.study_session_id) {
+        const { data: studyData } = await axios.get(`${API_URL}/study-session/${data.study_session_id}`)
+        if (studyData.features) {
+          setFeatures(studyData.features)
         }
       }
     } catch (error) {
@@ -54,6 +57,15 @@ function App() {
     }
   }
 
+  /**
+   * Called by LoginPage on successful authentication.  Updates the shared
+   * session state, routes to the correct landing page for the role, and — for
+   * stakeholders — fetches the feature flags.
+   *
+   * @param {string|null} id   - Session ID (stakeholder) or study-session ID (practitioner). Null for admin.
+   * @param {string}      code - Human-readable session code.
+   * @param {'stakeholder'|'practitioner'|'admin'} role - Authenticated role.
+   */
   const handleLogin = (id, code, role) => {
     setIsLoggedIn(true)
     setCurrentRole(role)
@@ -77,6 +89,7 @@ function App() {
     // For admin role, no additional setup needed
   }
 
+  /** Resets all session state and returns to the login screen. */
   const handleLogout = () => {
     setIsLoggedIn(false)
     setCurrentRole(null)
@@ -92,6 +105,12 @@ function App() {
     setFeatures({ qi: false, vf: false, bwt: false })
   }
 
+  /**
+   * Switches the active page for the current role and hides the documentation
+   * panel if it is visible.
+   *
+   * @param {string} page - The page identifier to navigate to.
+   */
   const handlePageChange = (page) => {
     if (currentRole === 'stakeholder') {
       setStakeholderPage(page)
@@ -101,10 +120,18 @@ function App() {
     setShowDocumentation(false)
   }
 
+  /** Toggles the documentation overlay on/off. */
   const handleDocumentation = () => {
     setShowDocumentation(!showDocumentation)
   }
 
+  /**
+   * Stores the accessed stakeholder session and immediately fetches its
+   * feature flags so the navigation reflects the correct enabled steps.
+   *
+   * @param {string}      id   - Stakeholder elicitation session ID.
+   * @param {string|null} code - Session code (may be empty for admin-created sessions).
+   */
   const handleSessionAccessed = (id, code) => {
     setSessionId(id)
     setSessionCode(code || '')
@@ -112,17 +139,25 @@ function App() {
     fetchSessionFeatures(id)
   }
 
+  /** Clears the active stakeholder session and resets feature flags. */
   const handleSessionCleared = () => {
     setSessionId(null)
     setSessionCode('')
     setFeatures({ qi: false, vf: false, bwt: false })
   }
 
+  /**
+   * Stores the accessed practitioner study session.
+   *
+   * @param {string}      id   - Study session ID.
+   * @param {string|null} code - Study code displayed in the UI.
+   */
   const handleStudySessionAccessed = (id, code) => {
     setStudySessionId(id)
     setStudyCode(code || '')
   }
 
+  /** Clears the active practitioner study session. */
   const handleStudySessionCleared = () => {
     setStudySessionId(null)
     setStudyCode('')

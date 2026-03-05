@@ -44,6 +44,8 @@ import {
 } from '@chakra-ui/react'
 import { LockIcon, UnlockIcon, SettingsIcon, DeleteIcon } from '@chakra-ui/icons'
 import { useRef } from 'react'
+import axios from 'axios'
+import { API_URL } from '../config'
 
 function AdminPage(props, ref) {
   const [studySessions, setStudySessions] = useState([])
@@ -90,17 +92,9 @@ function AdminPage(props, ref) {
     setIsAuthenticating(true)
     
     try {
-      const response = await fetch('http://localhost:5000/api/admin/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ password }),
-      })
+      const response = await axios.post(`${API_URL}/admin/login`, { password })
       
-      const data = await response.json()
-      
-      if (data.success) {
+      if (response.data.success) {
         setIsAuthenticated(true)
         sessionStorage.setItem('adminAuthenticated', 'true')
         setPassword('')
@@ -116,7 +110,7 @@ function AdminPage(props, ref) {
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to authenticate',
+        description: error.response?.data?.error || 'Failed to authenticate',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -135,9 +129,8 @@ function AdminPage(props, ref) {
   const fetchSessions = async () => {
     try {
       setLoading(true)
-      const response = await fetch('http://localhost:5000/api/study-sessions')
-      if (!response.ok) throw new Error('Failed to fetch study sessions')
-      const data = await response.json()
+      const response = await axios.get(`${API_URL}/study-sessions`)
+      const data = response.data
       setStudySessions(data)
       if (selectedSession) {
         // Find the selected session in the new data
@@ -151,7 +144,7 @@ function AdminPage(props, ref) {
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to load sessions',
+        description: error.response?.data?.error || 'Failed to load sessions',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -179,11 +172,7 @@ function AdminPage(props, ref) {
 
   const handleDeleteConfirm = async () => {
     try {
-      const response = await fetch(`http://localhost:5000/api/session/${deleteId}`, {
-        method: 'DELETE',
-      })
-      
-      if (!response.ok) throw new Error('Failed to delete session')
+      await axios.delete(`${API_URL}/session/${deleteId}`)
       
       toast({
         title: 'Success',
@@ -198,7 +187,7 @@ function AdminPage(props, ref) {
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to delete session',
+        description: error.response?.data?.error || 'Failed to delete session',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -217,15 +206,7 @@ function AdminPage(props, ref) {
 
   const handleDeleteStudyConfirm = async () => {
     try {
-      const response = await fetch(`http://localhost:5000/api/study-session/${deleteStudyId}`, {
-        method: 'DELETE',
-      })
-      
-      const data = await response.json()
-      
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to delete study session')
-      }
+      await axios.delete(`${API_URL}/study-session/${deleteStudyId}`)
       
       toast({
         title: 'Success',
@@ -240,7 +221,7 @@ function AdminPage(props, ref) {
     } catch (error) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to delete study session',
+        description: error.response?.data?.error || 'Failed to delete study session',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -256,31 +237,25 @@ function AdminPage(props, ref) {
     return new Date(dateString).toLocaleString()
   }
 
-  const handleDownloadInput = (sessionId, sessionName) => {
-    window.open(`http://localhost:5000/api/session/${sessionId}/export-input`, '_blank')
+  const handleDownloadInput = (sessionId) => {
+    window.open(`${API_URL}/session/${sessionId}/export-input`, '_blank')
   }
 
-  const handleDownloadOutput = (sessionId, sessionName) => {
-    window.open(`http://localhost:5000/api/session/${sessionId}/export`, '_blank')
+  const handleDownloadOutput = (sessionId) => {
+    window.open(`${API_URL}/session/${sessionId}/export`, '_blank')
   }
 
-  const handleDownloadBWT = (sessionId, sessionName) => {
-    window.open(`http://localhost:5000/api/session/${sessionId}/bwt/export`, '_blank')
+  const handleDownloadBWT = (sessionId) => {
+    window.open(`${API_URL}/session/${sessionId}/bwt/export`, '_blank')
   }
 
   const handleToggleInputLock = async (sessionId) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/session/${sessionId}/lock`, {
-        method: 'PUT',
-      })
-      
-      if (!response.ok) throw new Error('Failed to toggle lock')
-      
-      const data = await response.json()
+      const response = await axios.put(`${API_URL}/session/${sessionId}/lock`)
       
       toast({
         title: 'Success',
-        description: data.locked ? 'Input locked' : 'Input unlocked',
+        description: response.data.locked ? 'Input locked' : 'Input unlocked',
         status: 'success',
         duration: 2000,
         isClosable: true,
@@ -291,7 +266,7 @@ function AdminPage(props, ref) {
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to toggle lock',
+        description: error.response?.data?.error || 'Failed to toggle lock',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -301,17 +276,11 @@ function AdminPage(props, ref) {
 
   const handleToggleSessionLock = async (sessionId) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/session/${sessionId}/lock-session`, {
-        method: 'PUT',
-      })
-
-      if (!response.ok) throw new Error('Failed to toggle session lock')
-
-      const data = await response.json()
+      const response = await axios.put(`${API_URL}/session/${sessionId}/lock-session`)
 
       toast({
         title: 'Success',
-        description: data.session_locked ? 'Session locked' : 'Session unlocked',
+        description: response.data.session_locked ? 'Session locked' : 'Session unlocked',
         status: 'success',
         duration: 2000,
         isClosable: true,
@@ -322,7 +291,7 @@ function AdminPage(props, ref) {
     } catch (error) {
       toast({
         title: 'Error',
-        description: 'Failed to toggle session lock',
+        description: error.response?.data?.error || 'Failed to toggle session lock',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -581,7 +550,7 @@ function AdminPage(props, ref) {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleDownloadInput(selectedSession._id, selectedSession.name)}
+                      onClick={() => handleDownloadInput(selectedSession._id)}
                       justifyContent="flex-start"
                     >
                       Input
@@ -589,7 +558,7 @@ function AdminPage(props, ref) {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleDownloadOutput(selectedSession._id, selectedSession.name)}
+                      onClick={() => handleDownloadOutput(selectedSession._id)}
                       justifyContent="flex-start"
                     >
                       Output
@@ -597,7 +566,7 @@ function AdminPage(props, ref) {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleDownloadBWT(selectedSession._id, selectedSession.name)}
+                      onClick={() => handleDownloadBWT(selectedSession._id)}
                       justifyContent="flex-start"
                     >
                       BWT
