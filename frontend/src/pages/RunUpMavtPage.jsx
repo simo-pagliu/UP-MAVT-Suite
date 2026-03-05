@@ -859,6 +859,14 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           </Text>
         </Box>
 
+        <Text color="gray.700">
+          If you want to do stuff offline or run the analysis locally, check our{' '}
+          <Link href="https://github.com/your-repo/elicitation-tools/tree/main/local" isExternal color="blue.600" textDecoration="underline">
+            repository <ExternalLinkIcon mx="2px" />
+          </Link>
+          {' '}where there is a local version of the code as well.
+        </Text>
+
         <Divider />
 
         {/* Session Selection */}
