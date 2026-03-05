@@ -4,6 +4,13 @@
  * and RunUpMavtPage to avoid duplicating the same logic in multiple files.
  */
 
+/**
+ * Returns `true` when every criterion has a name, a unit, at least one
+ * alternative, and every alternative has a name.
+ *
+ * @param {Array} criteria - Array of criterion objects from the study session.
+ * @returns {boolean}
+ */
 export const isInputComplete = (criteria) => {
   if (!Array.isArray(criteria) || criteria.length === 0) return false
   return criteria.every((crit) => {
@@ -14,6 +21,15 @@ export const isInputComplete = (criteria) => {
   })
 }
 
+/**
+ * Returns `true` when all qualitative criteria have a complete ranking and
+ * value mapping in `qualitativeIndicators`, or when no qualitative criteria
+ * exist (nothing to check).
+ *
+ * @param {Array}  criteria               - Array of criterion objects.
+ * @param {object} qualitativeIndicators  - Map of criterion name → { ranking, values }.
+ * @returns {boolean}
+ */
 export const isQualitativeComplete = (criteria, qualitativeIndicators) => {
   if (!Array.isArray(criteria)) return false
   const qualitativeCriteria = criteria.filter((crit) => crit?.is_qualitative)
@@ -28,6 +44,14 @@ export const isQualitativeComplete = (criteria, qualitativeIndicators) => {
   })
 }
 
+/**
+ * Returns `true` when every non-qualitative criterion has at least one value
+ * function point defined, or when all criteria are qualitative.
+ *
+ * @param {Array}  criteria       - Array of criterion objects.
+ * @param {object} valueFunctions - Value-functions config object (`{ criteria: { [name]: { points } } }`).
+ * @returns {boolean}
+ */
 export const isValueFunctionsComplete = (criteria, valueFunctions) => {
   if (!Array.isArray(criteria)) return false
   const criteriaMap = valueFunctions?.criteria || {}
@@ -41,6 +65,19 @@ export const isValueFunctionsComplete = (criteria, valueFunctions) => {
   })
 }
 
+/**
+ * Returns `true` when the PILE-BWT comparison data contains enough comparisons
+ * for every criterion group, and — when multiple groups exist — also enough
+ * intra-B and intra-W comparisons to rank the groups relative to each other.
+ *
+ * The minimum comparisons required per group is `max(1, 2n − 3)` where `n` is
+ * the number of items being compared (criteria within a group, or groups when
+ * computing intra-B/intra-W).
+ *
+ * @param {Array}  criteria - Array of criterion objects (must have a `group` field).
+ * @param {object} bwtData  - BWT data object (`{ comparisons: Array }`).
+ * @returns {boolean}
+ */
 export const isPileBwtComplete = (criteria, bwtData) => {
   if (!Array.isArray(criteria) || criteria.length === 0) return false
   const comparisons = Array.isArray(bwtData?.comparisons) ? bwtData.comparisons : []
@@ -73,6 +110,15 @@ export const isPileBwtComplete = (criteria, bwtData) => {
   return baseGroups.length > 0 && completedBaseGroups && completedIntraB && completedIntraW
 }
 
+/**
+ * Convenience wrapper that checks all four steps for a single session.
+ * Uses `session.criteria` when available; falls back to the study-level
+ * `criteria` array otherwise.
+ *
+ * @param {object} session  - Elicitation session document from the API.
+ * @param {Array}  criteria - Fallback array of criterion objects from the study session.
+ * @returns {boolean}
+ */
 export const isSessionComplete = (session, criteria) => {
   if (!session) return false
   const sessionCriteria =
