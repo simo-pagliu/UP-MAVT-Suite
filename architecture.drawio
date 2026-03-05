@@ -355,10 +355,10 @@
           vertex="1" parent="mongo-cols">
           <mxGeometry x="195" y="85" width="170" height="28" as="geometry" />
         </mxCell>
-        <mxCell id="mc-4" value="tasks"
+        <mxCell id="mc-4" value="&lt;b&gt;tasks&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:9px;&quot;&gt;background job queue (compute_weights, run_step)&lt;br/&gt;polled by Worker; status: pending → running → completed/failed/cancelled&lt;/font&gt;"
           style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5ff;strokeColor=#9673a6;fontSize=10;"
           vertex="1" parent="mongo-cols">
-          <mxGeometry x="10" y="125" width="355" height="28" as="geometry" />
+          <mxGeometry x="10" y="125" width="355" height="38" as="geometry" />
         </mxCell>
         <mxCell id="mc-vol" value="Volume: mongo_data  (persistent)"
           style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5ff;strokeColor=#9673a6;fontSize=10;fontStyle=2;"
