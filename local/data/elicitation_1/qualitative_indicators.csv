@@ -1,0 +1,5 @@
+CRITERION_NAME,ALTERNATIVE,RANK,VALUE,CONFIDENCE
+Criterion_D,Nuclear,1,1.0,3
+Criterion_D,Gas,2,0.7,3
+Criterion_D,Solar,3,0.4,3
+Criterion_D,Coal,4,0.2,3
