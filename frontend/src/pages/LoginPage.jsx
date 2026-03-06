@@ -1,18 +1,17 @@
-import { Box, Button, FormControl, FormLabel, Heading, HStack, Input, Text, VStack, useToast, Card, CardBody, CardHeader } from '@chakra-ui/react'
+import { Box, Button, Divider, FormLabel, Heading, HStack, Input, Link, Text, VStack, useToast } from '@chakra-ui/react'
 import axios from 'axios'
 import { useState } from 'react'
 import { API_URL } from '../config'
 
-function LoginPage({ onLogin }) {
+function LoginPage({ onLogin, onDocumentation }) {
   const [code, setCode] = useState('')
   const [loading, setLoading] = useState(false)
-  const [mode, setMode] = useState('access') // 'access' or 'create'
   const toast = useToast()
 
   const handleDetectAndLogin = async () => {
     if (!code.trim()) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: 'Please enter a session code',
         status: 'error',
         duration: 3000,
@@ -62,7 +61,7 @@ function LoginPage({ onLogin }) {
       })
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to access session',
         status: 'error',
         duration: 3000,
@@ -73,32 +72,21 @@ function LoginPage({ onLogin }) {
   }
 
   const handleCreatePractitionerSession = async () => {
-    if (!code.trim()) {
-      toast({
-        title: 'Error',
-        description: 'Please enter a study code to create',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      })
-      return
-    }
-
     setLoading(true)
     try {
-      const response = await axios.post(`${API_URL}/study-session`, { code: code.trim() })
-      onLogin(response.data.study_session_id, code.trim(), 'practitioner')
-      setCode('')
+      const response = await axios.post(`${API_URL}/study-session`, { auto_generate: true })
+      const generatedCode = response.data?.code || ''
+      onLogin(response.data.study_session_id, generatedCode, 'practitioner')
       toast({
         title: 'Study session created',
-        description: `Study code: ${code.trim()}`,
+        description: `Study code: ${generatedCode}`,
         status: 'success',
         duration: 3000,
         isClosable: true,
       })
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to create study session',
         status: 'error',
         duration: 3000,
@@ -109,94 +97,69 @@ function LoginPage({ onLogin }) {
   }
 
   return (
-    <Box minH="100vh" display="flex" alignItems="center" justifyContent="center" p={4}>
-      <Card maxW="md" w="full" boxShadow="lg">
-        <CardHeader bg="blue.700" color="white" borderRadius="md 0 0 0">
+    <Box minH="100vh" bg="white" borderWidth={1} borderRadius="lg" p={10}>
+      <VStack maxW="900px" mx="auto" align="stretch" spacing={8}>
+        <VStack align="stretch" spacing={3}>
           <Heading size="lg" letterSpacing="wide">UP-MAVT Suite</Heading>
-          <Text fontSize="sm" mt={2} opacity={0.9}>Welcome to the UP-MAVT Suite</Text>
-        </CardHeader>
-        <CardBody>
-          <VStack spacing={6}>
-            {/* Tab-like switching between access and create */}
-            <HStack width="100%" spacing={2} borderBottom="1px" borderColor="gray.200" pb={4}>
-              <Button
-                flex={1}
-                variant={mode === 'access' ? 'solid' : 'ghost'}
-                colorScheme={mode === 'access' ? 'blue' : 'gray'}
-                onClick={() => setMode('access')}
-                size="sm"
-              >
-                Access Session
-              </Button>
-              <Button
-                flex={1}
-                variant={mode === 'create' ? 'solid' : 'ghost'}
-                colorScheme={mode === 'create' ? 'blue' : 'gray'}
-                onClick={() => setMode('create')}
-                size="sm"
-              >
-                Create Study
-              </Button>
-            </HStack>
+          <Text color="gray.700">
+            This suite supports stakeholder elicitation and practitioner analysis using Qualitative Indicators,
+            Value Functions, and PILE-BWT.
+          </Text>
+          <Text color="gray.600" fontSize="sm">
+            Use a session code to continue an existing session, or create a new case study as a practitioner.
+          </Text>
+        </VStack>
 
-            {mode === 'access' ? (
-              <VStack spacing={4} align="stretch" width="100%">
-                <Box>
-                  <FormLabel fontWeight="medium" mb={2}>
-                    Enter Code
-                  </FormLabel>
-                  <Text fontSize="sm" color="gray.600" mb={3}>
-                    Enter your stakeholder or practitioner session code to continue
-                  </Text>
-                  <Input
-                    placeholder="Enter session code"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleDetectAndLogin()}
-                    isDisabled={loading}
-                  />
-                </Box>
-                <Button
-                  colorScheme="blue"
-                  isLoading={loading}
-                  onClick={handleDetectAndLogin}
-                  width="100%"
-                  size="lg"
-                >
-                  Access
-                </Button>
-              </VStack>
-            ) : (
-              <VStack spacing={4} align="stretch" width="100%">
-                <Box>
-                  <FormLabel fontWeight="medium" mb={2}>
-                    Create New Study Session
-                  </FormLabel>
-                  <Text fontSize="sm" color="gray.600" mb={3}>
-                    Enter a unique code for your new practitioner study session
-                  </Text>
-                  <Input
-                    placeholder="Enter new study code"
-                    value={code}
-                    onChange={(e) => setCode(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleCreatePractitionerSession()}
-                    isDisabled={loading}
-                  />
-                </Box>
-                <Button
-                  colorScheme="green"
-                  isLoading={loading}
-                  onClick={handleCreatePractitionerSession}
-                  width="100%"
-                  size="lg"
-                >
-                  Create Study
-                </Button>
-              </VStack>
-            )}
-          </VStack>
-        </CardBody>
-      </Card>
+        <Divider />
+
+        <VStack spacing={4} align="stretch" width="100%">
+          <Box>
+            <FormLabel fontWeight="medium" mb={2}>
+              Access existing session
+            </FormLabel>
+            <Input
+              placeholder="Enter session code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleDetectAndLogin()}
+              isDisabled={loading}
+            />
+          </Box>
+          <Button
+            colorScheme="blue"
+            isLoading={loading}
+            onClick={handleDetectAndLogin}
+            width="fit-content"
+          >
+            Access session
+          </Button>
+        </VStack>
+
+        <Divider />
+
+        <VStack spacing={3} align="stretch">
+          <Text fontWeight="medium">Create new case study</Text>
+          <Text fontSize="sm" color="gray.600">
+            A unique alphanumeric study code is generated automatically.
+          </Text>
+          <Button
+            colorScheme="green"
+            isLoading={loading}
+            onClick={handleCreatePractitionerSession}
+            width="fit-content"
+          >
+            Create new
+          </Button>
+        </VStack>
+
+        <Divider />
+
+        <HStack>
+          <Link color="blue.600" onClick={onDocumentation}>
+            Open documentation
+          </Link>
+        </HStack>
+      </VStack>
     </Box>
   )
 }

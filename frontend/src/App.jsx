@@ -197,7 +197,7 @@ function App() {
       <Container maxW="container.xl" py={8}>
         <VStack spacing={8} align="stretch">
           {/* Login Page - Landing page */}
-          {!isLoggedIn && <LoginPage onLogin={handleLogin} />}
+          {!isLoggedIn && <LoginPage onLogin={handleLogin} onDocumentation={handleDocumentation} />}
 
           {/* Admin Page */}
           {isLoggedIn && currentRole === 'admin' && <AdminPage />}

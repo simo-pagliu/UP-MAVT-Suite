@@ -26,24 +26,12 @@ import {
   FormControl,
   FormLabel,
   IconButton,
-  Drawer,
-  DrawerBody,
-  DrawerFooter,
-  DrawerHeader,
-  DrawerOverlay,
-  DrawerContent,
-  DrawerCloseButton,
   Badge,
   Tooltip,
-  Icon,
-  Accordion,
-  AccordionItem,
-  AccordionButton,
-  AccordionPanel,
-  AccordionIcon,
+  Progress,
 } from '@chakra-ui/react'
-import { LockIcon, UnlockIcon, SettingsIcon, DeleteIcon } from '@chakra-ui/icons'
-import { useRef } from 'react'
+import { LockIcon, UnlockIcon, DeleteIcon, DownloadIcon, ArrowUpIcon, ChevronDownIcon, ChevronRightIcon } from '@chakra-ui/icons'
+import { useRef, Fragment } from 'react'
 import axios from 'axios'
 import { API_URL } from '../config'
 
@@ -51,25 +39,15 @@ function AdminPage(props, ref) {
   const [studySessions, setStudySessions] = useState([])
   const [loading, setLoading] = useState(true)
   const [deleteId, setDeleteId] = useState(null)
-  const [deleteStudyId, setDeleteStudyId] = useState(null)
+  const [deleteType, setDeleteType] = useState('study') // 'study' or 'session'
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [password, setPassword] = useState('')
   const [isAuthenticating, setIsAuthenticating] = useState(false)
+  const [expandedStudies, setExpandedStudies] = useState(new Set())
   const { isOpen, onOpen, onClose } = useDisclosure()
-  const {
-    isOpen: isStudyDeleteOpen,
-    onOpen: onStudyDeleteOpen,
-    onClose: onStudyDeleteClose,
-  } = useDisclosure()
-  const {
-    isOpen: isDrawerOpen,
-    onOpen: onDrawerOpen,
-    onClose: onDrawerClose,
-  } = useDisclosure()
   const cancelRef = useRef()
-  const studyDeleteCancelRef = useRef()
   const toast = useToast()
-  const [selectedSession, setSelectedSession] = useState(null)
+  const backupFileInputRef = useRef(null)
 
   useImperativeHandle(ref, () => ({
     async saveBeforeNavigate() {
@@ -100,7 +78,7 @@ function AdminPage(props, ref) {
         setPassword('')
       } else {
         toast({
-          title: 'Error',
+          title: 'Request failed',
           description: 'Invalid password',
           status: 'error',
           duration: 3000,
@@ -109,7 +87,7 @@ function AdminPage(props, ref) {
       }
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to authenticate',
         status: 'error',
         duration: 3000,
@@ -143,7 +121,7 @@ function AdminPage(props, ref) {
       }
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to load sessions',
         status: 'error',
         duration: 3000,
@@ -160,34 +138,39 @@ function AdminPage(props, ref) {
     }
   }, [isAuthenticated])
 
-  const handleDeleteClick = (sessionId) => {
-    setDeleteId(sessionId)
+  const handleDeleteClick = (studyId) => {
+    setDeleteId(studyId)
+    setDeleteType('study')
     onOpen()
-  }
-
-  const handleRowClick = (session) => {
-    setSelectedSession(session)
-    onDrawerOpen()
   }
 
   const handleDeleteConfirm = async () => {
     try {
-      await axios.delete(`${API_URL}/session/${deleteId}`)
+      if (deleteType === 'study') {
+        await axios.delete(`${API_URL}/study-session/${deleteId}`)
+        toast({
+          title: 'Completed',
+          description: 'Study session deleted successfully',
+          status: 'success',
+          duration: 3000,
+          isClosable: true,
+        })
+      } else {
+        await axios.delete(`${API_URL}/session/${deleteId}`)
+        toast({
+          title: 'Completed',
+          description: 'Session deleted successfully',
+          status: 'success',
+          duration: 3000,
+          isClosable: true,
+        })
+      }
       
-      toast({
-        title: 'Success',
-        description: 'Session deleted successfully',
-        status: 'success',
-        duration: 3000,
-        isClosable: true,
-      })
-      
-      // Refresh the sessions list
       fetchSessions()
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error.response?.data?.error || 'Failed to delete session',
+        title: 'Request failed',
+        description: error.response?.data?.error || `Failed to delete ${deleteType}`,
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -198,105 +181,197 @@ function AdminPage(props, ref) {
     }
   }
 
-  const handleDeleteStudyClick = (studyId, e) => {
-    e.stopPropagation() // Prevent accordion from toggling
-    setDeleteStudyId(studyId)
-    onStudyDeleteOpen()
-  }
-
-  const handleDeleteStudyConfirm = async () => {
-    try {
-      await axios.delete(`${API_URL}/study-session/${deleteStudyId}`)
-      
-      toast({
-        title: 'Success',
-        description: 'Study session deleted successfully',
-        status: 'success',
-        duration: 3000,
-        isClosable: true,
-      })
-      
-      // Refresh the sessions list
-      fetchSessions()
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.error || 'Failed to delete study session',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      })
-    } finally {
-      onStudyDeleteClose()
-      setDeleteStudyId(null)
-    }
-  }
-
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A'
     return new Date(dateString).toLocaleString()
   }
 
-  const handleDownloadInput = (sessionId) => {
-    window.open(`${API_URL}/session/${sessionId}/export-input`, '_blank')
-  }
-
-  const handleDownloadOutput = (sessionId) => {
-    window.open(`${API_URL}/session/${sessionId}/export`, '_blank')
-  }
-
-  const handleDownloadBWT = (sessionId) => {
-    window.open(`${API_URL}/session/${sessionId}/bwt/export`, '_blank')
-  }
-
-  const handleToggleInputLock = async (sessionId) => {
-    try {
-      const response = await axios.put(`${API_URL}/session/${sessionId}/lock`)
-      
-      toast({
-        title: 'Success',
-        description: response.data.locked ? 'Input locked' : 'Input unlocked',
-        status: 'success',
-        duration: 2000,
-        isClosable: true,
-      })
-      
-      // Refresh the sessions list
-      fetchSessions()
-    } catch (error) {
-      toast({
-        title: 'Error',
-        description: error.response?.data?.error || 'Failed to toggle lock',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      })
+  const calculateProgress = (study) => {
+    if (!study.sessions || study.sessions.length === 0) {
+      return { percentage: 0, details: 'No sessions created', detailedSteps: [] }
     }
+
+    let totalSteps = 0
+    let completedSteps = 0
+    const sessionDetails = []
+
+    study.sessions.forEach(session => {
+      const steps = [
+        { key: 'qualitative_indicators', label: 'Qualitative' },
+        { key: 'value_functions', label: 'Value Functions' },
+        { key: 'bwt', label: 'BWT' },
+        { key: 'pile_bwt', label: 'PILE-BWT' },
+      ]
+
+      const sessionSteps = []
+      steps.forEach(step => {
+        totalSteps++
+        const isCompleted = session[step.key] !== null && session[step.key] !== undefined
+        if (isCompleted) {
+          completedSteps++
+        }
+        sessionSteps.push({ label: step.label, completed: isCompleted })
+      })
+
+      sessionDetails.push({
+        name: session.name,
+        steps: sessionSteps
+      })
+    })
+
+    const percentage = totalSteps > 0 ? Math.round((completedSteps / totalSteps) * 100) : 0
+    
+    return { percentage, sessionDetails }
   }
 
-  const handleToggleSessionLock = async (sessionId) => {
+  const toggleExpanded = (studyId) => {
+    setExpandedStudies(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(studyId)) {
+        newSet.delete(studyId)
+      } else {
+        newSet.add(studyId)
+      }
+      return newSet
+    })
+  }
+
+  const calculateSessionProgress = (session) => {
+    const steps = [
+      { key: 'qualitative_indicators', label: 'Qualitative' },
+      { key: 'value_functions', label: 'Value Functions' },
+      { key: 'bwt', label: 'BWT' },
+      { key: 'pile_bwt', label: 'PILE-BWT' },
+    ]
+
+    const sessionSteps = []
+    let completed = 0
+
+    steps.forEach(step => {
+      const isCompleted = session[step.key] !== null && session[step.key] !== undefined
+      if (isCompleted) completed++
+      sessionSteps.push({ label: step.label, completed: isCompleted })
+    })
+
+    const percentage = Math.round((completed / steps.length) * 100)
+    return { percentage, steps: sessionSteps }
+  }
+
+  const handleToggleSessionStatus = async (sessionId) => {
     try {
       const response = await axios.put(`${API_URL}/session/${sessionId}/lock-session`)
 
       toast({
-        title: 'Success',
+        title: 'Completed',
         description: response.data.session_locked ? 'Session locked' : 'Session unlocked',
         status: 'success',
         duration: 2000,
         isClosable: true,
       })
 
-      // Refresh the sessions list
       fetchSessions()
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to toggle session lock',
         status: 'error',
         duration: 3000,
         isClosable: true,
       })
     }
+  }
+
+  const handleDeleteSession = (sessionId) => {
+    setDeleteId(sessionId)
+    setDeleteType('session')
+    onOpen()
+  }
+
+  const handleToggleStatus = async (studyId) => {
+    // Find the first session in the study to toggle its lock
+    const study = studySessions.find(s => s._id === studyId)
+    if (!study || !study.sessions || study.sessions.length === 0) return
+
+    const firstSession = study.sessions[0]
+    
+    try {
+      const response = await axios.put(`${API_URL}/session/${firstSession._id}/lock-session`)
+
+      toast({
+        title: 'Completed',
+        description: response.data.session_locked ? 'Study locked' : 'Study unlocked',
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
+      })
+
+      fetchSessions()
+    } catch (error) {
+      toast({
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to toggle status',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+    }
+  }
+
+  const getStudyLockStatus = (study) => {
+    if (!study.sessions || study.sessions.length === 0) return false
+    // Check if any session is locked
+    return study.sessions.some(s => s.session_locked || s.locked)
+  }
+
+  const handleDownloadCaseStudy = (studyId) => {
+    window.open(`${API_URL}/study-session/${studyId}/backup/export`, '_blank')
+  }
+
+  const uploadCaseStudy = async (onConflict = 'abort') => {
+    const file = backupFileInputRef.current?.files?.[0]
+    if (!file) return
+    const formData = new FormData()
+    formData.append('file', file)
+
+    try {
+      const response = await axios.post(
+        `${API_URL}/study-session/backup/import?on_conflict=${onConflict}`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+      toast({
+        title: 'Case study imported',
+        description: `Study code: ${response.data?.code || 'created'}`,
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      })
+      fetchSessions()
+    } catch (error) {
+      const message = error.response?.data?.error || 'Failed to import case study'
+      if (message.toLowerCase().includes('conflict') && onConflict === 'abort') {
+        const shouldRegenerate = window.confirm('Code conflict detected. Generate new codes and continue import?')
+        if (shouldRegenerate) {
+          await uploadCaseStudy('regenerate')
+          return
+        }
+      }
+      toast({
+        title: 'Request failed',
+        description: message,
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+    } finally {
+      if (backupFileInputRef.current) {
+        backupFileInputRef.current.value = ''
+      }
+    }
+  }
+
+  const handleUploadClick = async () => {
+    await uploadCaseStudy('abort')
   }
 
   // Show login form if not authenticated
@@ -341,108 +416,224 @@ function AdminPage(props, ref) {
     <Box p={8}>
       <HStack justify="space-between" mb={6}>
         <Heading>Admin - Manage Sessions</Heading>
-        <Button colorScheme="red" variant="outline" onClick={handleLogout}>
-          Logout
+        <Button
+          leftIcon={<ArrowUpIcon />}
+          colorScheme="blue"
+          onClick={() => backupFileInputRef.current?.click()}
+        >
+          Upload Case Study
         </Button>
+        <Input
+          ref={backupFileInputRef}
+          type="file"
+          accept=".zip"
+          display="none"
+          onChange={handleUploadClick}
+        />
       </HStack>
       
       {studySessions.length === 0 ? (
         <Text>No study sessions found.</Text>
       ) : (
-        <Accordion allowMultiple>
-          {studySessions.map((study) => (
-            <AccordionItem key={study._id} border="1px" borderColor="gray.200" borderRadius="md" mb={3}>
-              <h2>
-                <AccordionButton _expanded={{ bg: 'blue.50' }}>
-                  <Box flex="1" textAlign="left" fontWeight="semibold">
-                    Study: {study.code} ({study.sessions?.length || 0} elicitation session{study.sessions?.length !== 1 ? 's' : ''})
-                  </Box>
-                  {(!study.sessions || study.sessions.length === 0) && (
-                    <IconButton
-                      aria-label="Delete study session"
-                      icon={<DeleteIcon />}
-                      size="sm"
-                      colorScheme="red"
-                      variant="ghost"
-                      mr={2}
-                      onClick={(e) => handleDeleteStudyClick(study._id, e)}
-                    />
-                  )}
-                  <AccordionIcon />
-                </AccordionButton>
-              </h2>
-              <AccordionPanel pb={4} px={0}>
-                {!study.sessions || study.sessions.length === 0 ? (
-                  <Text px={4} color="gray.500">No elicitation sessions yet.</Text>
-                ) : (
-                  <Box overflowX="auto">
-                    <Table variant="simple" size="sm">
-                      <Thead>
-                        <Tr>
-                          <Th>Name</Th>
-                          <Th>Created At</Th>
-                          <Th>Criteria Count</Th>
-                          <Th>Locks</Th>
-                          <Th>Qualitative</Th>
-                          <Th>Value Functions</Th>
-                          <Th>BWT</Th>
-                          <Th>PILE-BWT</Th>
-                          <Th></Th>
-                        </Tr>
-                      </Thead>
-                      <Tbody>
-                        {study.sessions.map((session) => (
-                          <Tr key={session._id} _hover={{ bg: 'gray.50' }}>
-                            <Td>{session.name}</Td>
-                            <Td>{formatDate(session.created_at)}</Td>
-                            <Td>{session.criteria?.length || study.criteria?.length || 0}</Td>
-                            <Td>
-                              <HStack spacing={2}>
-                                <Tooltip
-                                  label={
-                                    session.session_locked
-                                      ? 'Session locked: all edits disabled; downloads allowed.'
-                                      : session.locked
-                                        ? 'Input locked: criteria edits disabled; other steps allowed.'
-                                        : 'Unlocked.'
-                                  }
-                                  hasArrow
-                                >
-                                  <Badge
-                                    colorScheme={session.session_locked ? 'red' : session.locked ? 'orange' : 'green'}
-                                    display="inline-flex"
-                                    alignItems="center"
-                                    gap={1}
-                                  >
-                                    <Icon as={session.session_locked || session.locked ? LockIcon : UnlockIcon} boxSize={3} />
-                                    {session.session_locked ? 'Session' : session.locked ? 'Input' : 'Unlocked'}
-                                  </Badge>
-                                </Tooltip>
-                              </HStack>
-                            </Td>
-                            <Td>{session.qualitative_indicators !== null ? '✓' : '—'}</Td>
-                            <Td>{session.value_functions !== null ? '✓' : '—'}</Td>
-                            <Td>{session.bwt !== null ? '✓' : '—'}</Td>
-                            <Td>{session.bwt !== null ? '✓' : '—'}</Td>
-                            <Td>
-                              <IconButton
-                                aria-label="Open session menu"
-                                icon={<SettingsIcon />}
+        <Box overflowX="auto">
+          <Table variant="simple" size="md">
+            <Thead>
+              <Tr>
+                <Th width="40px"></Th>
+                <Th>Name</Th>
+                <Th>Date Created</Th>
+                <Th>Status</Th>
+                <Th>Progress</Th>
+                <Th>Actions</Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {studySessions.map((study) => {
+                const progress = calculateProgress(study)
+                const isLocked = getStudyLockStatus(study)
+                const isExpanded = expandedStudies.has(study._id)
+
+                return (
+                  <Fragment key={study._id}>
+                    {/* Case Study Row */}
+                    <Tr _hover={{ bg: 'gray.50' }} bg="white">
+                      <Td>
+                        <IconButton
+                          aria-label="Expand sessions"
+                          icon={isExpanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => toggleExpanded(study._id)}
+                          isDisabled={!study.sessions || study.sessions.length === 0}
+                        />
+                      </Td>
+                      <Td fontWeight="bold">{study.code}</Td>
+                      <Td>{formatDate(study.created_at)}</Td>
+                      <Td>
+                        <Badge
+                          colorScheme={isLocked ? 'red' : 'green'}
+                          cursor="pointer"
+                          display="inline-flex"
+                          alignItems="center"
+                          gap={1}
+                          px={3}
+                          py={1}
+                          onClick={() => handleToggleStatus(study._id)}
+                          _hover={{ opacity: 0.8 }}
+                        >
+                          {isLocked ? <LockIcon boxSize={3} /> : <UnlockIcon boxSize={3} />}
+                          {isLocked ? 'Locked' : 'Unlocked'}
+                        </Badge>
+                      </Td>
+                      <Td>
+                        <Tooltip 
+                          label={
+                            <VStack align="stretch" spacing={1}>
+                              {progress.sessionDetails.map((session, idx) => (
+                                <Box key={idx}>
+                                  <Text fontWeight="bold" fontSize="xs">{session.name}:</Text>
+                                  {session.steps.map((step, stepIdx) => (
+                                    <Text key={stepIdx} fontSize="xs" pl={2}>
+                                      {step.completed ? '✓' : '✗'} {step.label}
+                                    </Text>
+                                  ))}
+                                </Box>
+                              ))}
+                            </VStack>
+                          } 
+                          hasArrow 
+                          placement="top"
+                        >
+                          <Box>
+                            <HStack spacing={2}>
+                              <Progress
+                                value={progress.percentage}
                                 size="sm"
-                                variant="ghost"
-                                onClick={() => handleRowClick(session)}
+                                colorScheme={progress.percentage === 100 ? 'green' : 'blue'}
+                                width="120px"
+                                borderRadius="md"
                               />
-                            </Td>
-                          </Tr>
-                        ))}
-                      </Tbody>
-                    </Table>
-                  </Box>
-                )}
-              </AccordionPanel>
-            </AccordionItem>
-          ))}
-        </Accordion>
+                              <Text fontSize="sm" fontWeight="medium" minW="45px">
+                                {progress.percentage}%
+                              </Text>
+                            </HStack>
+                          </Box>
+                        </Tooltip>
+                      </Td>
+                      <Td>
+                        <HStack spacing={2}>
+                          <Tooltip label="Download case study" hasArrow>
+                            <IconButton
+                              aria-label="Download case study"
+                              icon={<DownloadIcon />}
+                              size="sm"
+                              colorScheme="blue"
+                              variant="ghost"
+                              onClick={() => handleDownloadCaseStudy(study._id)}
+                            />
+                          </Tooltip>
+                          <Tooltip label="Delete case study" hasArrow>
+                            <IconButton
+                              aria-label="Delete case study"
+                              icon={<DeleteIcon />}
+                              size="sm"
+                              colorScheme="red"
+                              variant="ghost"
+                              onClick={() => handleDeleteClick(study._id)}
+                            />
+                          </Tooltip>
+                        </HStack>
+                      </Td>
+                    </Tr>
+
+                    {/* Elicitation Session Rows */}
+                    {isExpanded && study.sessions && study.sessions.map((session) => {
+                      const sessionProgress = calculateSessionProgress(session)
+                      const sessionLocked = session.session_locked || session.locked
+
+                      return (
+                        <Tr 
+                          key={session._id} 
+                          bg="gray.50" 
+                          _hover={{ bg: 'gray.100' }}
+                          borderLeft="4px"
+                          borderColor="blue.300"
+                        >
+                          <Td></Td>
+                          <Td pl={8} fontSize="sm">
+                            <Text color="gray.700">↳ {session.name}</Text>
+                          </Td>
+                          <Td fontSize="sm">{formatDate(session.created_at)}</Td>
+                          <Td>
+                            <Badge
+                              colorScheme={sessionLocked ? 'red' : 'green'}
+                              cursor="pointer"
+                              display="inline-flex"
+                              alignItems="center"
+                              gap={1}
+                              px={2}
+                              py={1}
+                              fontSize="xs"
+                              onClick={() => handleToggleSessionStatus(session._id)}
+                              _hover={{ opacity: 0.8 }}
+                            >
+                              {sessionLocked ? <LockIcon boxSize={2} /> : <UnlockIcon boxSize={2} />}
+                              {session.session_locked ? 'Locked' : session.locked ? 'Input' : 'Unlocked'}
+                            </Badge>
+                          </Td>
+                          <Td>
+                            <Tooltip 
+                              label={
+                                <VStack align="stretch" spacing={0}>
+                                  {sessionProgress.steps.map((step, idx) => (
+                                    <Text key={idx} fontSize="xs">
+                                      {step.completed ? '✓' : '✗'} {step.label}
+                                    </Text>
+                                  ))}
+                                </VStack>
+                              } 
+                              hasArrow 
+                              placement="top"
+                            >
+                              <Box>
+                                <HStack spacing={2}>
+                                  <Progress
+                                    value={sessionProgress.percentage}
+                                    size="sm"
+                                    colorScheme={sessionProgress.percentage === 100 ? 'green' : 'blue'}
+                                    width="120px"
+                                    borderRadius="md"
+                                  />
+                                  <Text fontSize="xs" fontWeight="medium" minW="45px">
+                                    {sessionProgress.percentage}%
+                                  </Text>
+                                </HStack>
+                              </Box>
+                            </Tooltip>
+                          </Td>
+                          <Td>
+                            <HStack spacing={2}>
+                              <Tooltip label="Delete session" hasArrow>
+                                <IconButton
+                                  aria-label="Delete session"
+                                  icon={<DeleteIcon />}
+                                  size="sm"
+                                  colorScheme="red"
+                                  variant="ghost"
+                                  onClick={() => handleDeleteSession(session._id)}
+                                />
+                              </Tooltip>
+                            </HStack>
+                          </Td>
+                        </Tr>
+                      )
+                    })}
+                  </Fragment>
+                )
+              })}
+            </Tbody>
+          </Table>
+        </Box>
       )}
 
       <AlertDialog
@@ -453,11 +644,14 @@ function AdminPage(props, ref) {
         <AlertDialogOverlay>
           <AlertDialogContent>
             <AlertDialogHeader fontSize="lg" fontWeight="bold">
-              Delete Session
+              Delete {deleteType === 'study' ? 'Case Study' : 'Elicitation Session'}
             </AlertDialogHeader>
 
             <AlertDialogBody>
-              Are you sure you want to delete this session? This action cannot be undone.
+              {deleteType === 'study' 
+                ? 'Are you sure you want to delete this case study? This will delete all associated sessions and data. This action cannot be undone.'
+                : 'Are you sure you want to delete this elicitation session? This action cannot be undone.'
+              }
             </AlertDialogBody>
 
             <AlertDialogFooter>
@@ -471,132 +665,6 @@ function AdminPage(props, ref) {
           </AlertDialogContent>
         </AlertDialogOverlay>
       </AlertDialog>
-
-      <AlertDialog
-        isOpen={isStudyDeleteOpen}
-        leastDestructiveRef={studyDeleteCancelRef}
-        onClose={onStudyDeleteClose}
-      >
-        <AlertDialogOverlay>
-          <AlertDialogContent>
-            <AlertDialogHeader fontSize="lg" fontWeight="bold">
-              Delete Study Session
-            </AlertDialogHeader>
-
-            <AlertDialogBody>
-              Are you sure you want to delete this study session? This will also delete any associated input data. This action cannot be undone.
-            </AlertDialogBody>
-
-            <AlertDialogFooter>
-              <Button ref={studyDeleteCancelRef} onClick={onStudyDeleteClose}>
-                Cancel
-              </Button>
-              <Button colorScheme="red" onClick={handleDeleteStudyConfirm} ml={3}>
-                Delete
-              </Button>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialogOverlay>
-      </AlertDialog>
-
-      <Drawer isOpen={isDrawerOpen} placement="right" onClose={onDrawerClose} size="md">
-        <DrawerOverlay />
-        <DrawerContent>
-          <DrawerCloseButton />
-          <DrawerHeader>Session Details</DrawerHeader>
-          <DrawerBody>
-            {selectedSession ? (
-              <VStack align="stretch" spacing={4}>
-                <Box>
-                  <Text fontSize="sm" color="gray.500" textAlign="left">Session Code</Text>
-                  <Heading size="md" textAlign="left">{selectedSession.name}</Heading>
-                </Box>
-                <Text fontSize="sm" color="gray.500" textAlign="left">
-                  Created {formatDate(selectedSession.created_at)}
-                </Text>
-
-                <Box as="hr" borderColor="gray.200" />
-
-                <Box>
-                  <Text fontSize="sm" color="gray.500" mb={2} textAlign="left">Locks</Text>
-                  <VStack spacing={2} align="stretch">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleToggleInputLock(selectedSession._id)}
-                      isDisabled={selectedSession.session_locked}
-                      justifyContent="flex-start"
-                    >
-                      {selectedSession.session_locked
-                        ? 'Input locked by session'
-                        : (selectedSession.locked ? 'Unlock Input' : 'Lock Input')}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleToggleSessionLock(selectedSession._id)}
-                      justifyContent="flex-start"
-                    >
-                      {selectedSession.session_locked ? 'Unlock Session' : 'Lock Session'}
-                    </Button>
-                  </VStack>
-                </Box>
-
-                <Box as="hr" borderColor="gray.200" />
-
-                <Box>
-                  <Text fontSize="sm" color="gray.500" mb={2} textAlign="left">Downloads</Text>
-                  <VStack spacing={2} align="stretch">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleDownloadInput(selectedSession._id)}
-                      justifyContent="flex-start"
-                    >
-                      Input
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleDownloadOutput(selectedSession._id)}
-                      justifyContent="flex-start"
-                    >
-                      Output
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleDownloadBWT(selectedSession._id)}
-                      justifyContent="flex-start"
-                    >
-                      BWT
-                    </Button>
-                  </VStack>
-                </Box>
-
-                <Box as="hr" borderColor="gray.200" />
-
-                <Box>
-                  <Text fontSize="sm" color="gray.500" mb={2} textAlign="left">Danger Zone</Text>
-                  <Button
-                    colorScheme="red"
-                    size="sm"
-                    onClick={() => handleDeleteClick(selectedSession._id)}
-                    justifyContent="flex-start"
-                  >
-                    Delete Session
-                  </Button>
-                </Box>
-              </VStack>
-            ) : (
-              <Text>Select a session to view details.</Text>
-            )}
-          </DrawerBody>
-          <DrawerFooter>
-            <Button variant="outline" onClick={onDrawerClose}>Close</Button>
-          </DrawerFooter>
-        </DrawerContent>
-      </Drawer>
     </Box>
   )
 }

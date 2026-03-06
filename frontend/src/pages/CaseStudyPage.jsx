@@ -37,15 +37,6 @@ import axios from 'axios'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { API_URL } from '../config'
 
-const generateRandomCode = () => {
-  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789'
-  let code = ''
-  for (let i = 0; i < 8; i += 1) {
-    code += characters.charAt(Math.floor(Math.random() * characters.length))
-  }
-  return code
-}
-
 const getCriteriaSignature = (criteriaList) => {
   const normalized = (criteriaList || []).map((crit) => ({
     name: crit?.criterion_name || '',
@@ -182,7 +173,6 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
   const [sessions, setSessions] = useState([])
   const [criteria, setCriteria] = useState([])
   const [loading, setLoading] = useState(false)
-  const [newCode, setNewCode] = useState('')
   const [features, setFeatures] = useState({ qi: false, vf: false, bwt: false })
   const [savingFeatures, setSavingFeatures] = useState(false)
   const [pendingDeleteId, setPendingDeleteId] = useState(null)
@@ -209,7 +199,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
       }
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to load sessions',
         status: 'error',
         duration: 3000,
@@ -245,7 +235,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
       // Revert on error
       setFeatures(features)
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to update features',
         status: 'error',
         duration: 3000,
@@ -266,7 +256,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
   const handleAccess = async () => {
     if (!code.trim()) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: 'Please enter a study code',
         status: 'error',
         duration: 3000,
@@ -300,7 +290,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
       })
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to access study session',
         status: 'error',
         duration: 3000,
@@ -312,32 +302,21 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
   }
 
   const handleCreate = async () => {
-    const newCode = code.trim()
-    if (!newCode) {
-      toast({
-        title: 'Error',
-        description: 'Please enter a study code to create',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      })
-      return
-    }
     setLoading(true)
     try {
-      const response = await axios.post(`${API_URL}/study-session`, { code: newCode })
-      onStudyAccessed(response.data.study_session_id, newCode)
-      setCode('')
+      const response = await axios.post(`${API_URL}/study-session`, { auto_generate: true })
+      const generatedCode = response.data?.code || ''
+      onStudyAccessed(response.data.study_session_id, generatedCode)
       toast({
         title: 'Study session created',
-        description: `Study code: ${newCode}`,
+        description: `Study code: ${generatedCode}`,
         status: 'success',
         duration: 3000,
         isClosable: true,
       })
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to create study session',
         status: 'error',
         duration: 3000,
@@ -349,32 +328,20 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
   }
 
   const handleCreateSession = async () => {
-    if (!newCode.trim()) {
-      toast({
-        title: 'Error',
-        description: 'Please enter a session code',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      })
-      return
-    }
-
     setLoading(true)
     try {
-      await axios.post(`${API_URL}/study-session/${studySessionId}/elicitation-session`, { name: newCode.trim() })
-      setNewCode('')
+      const response = await axios.post(`${API_URL}/study-session/${studySessionId}/elicitation-session`, { auto_generate: true })
       toast({
         title: 'Session created',
-        description: 'Elicitation session is ready for stakeholders',
+        description: `Session code: ${response.data?.name || 'generated'}`,
         status: 'success',
-        duration: 2000,
+        duration: 3000,
         isClosable: true,
       })
       loadSessions()
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to create session',
         status: 'error',
         duration: 3000,
@@ -398,7 +365,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
       loadSessions()
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to toggle lock',
         status: 'error',
         duration: 3000,
@@ -428,7 +395,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
       loadSessions()
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to delete session',
         status: 'error',
         duration: 3000,
@@ -453,7 +420,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
       link.parentNode.removeChild(link)
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to download file',
         status: 'error',
         duration: 3000,
@@ -486,7 +453,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
             </HStack>
             <HStack mt={3} spacing={3}>
               <Button colorScheme="blue" variant="solid" onClick={handleCreate} isLoading={loading}>
-                Create Study
+                Create New
               </Button>
             </HStack>
           </FormControl>
@@ -562,29 +529,16 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
         <Box borderWidth={1} borderRadius="md" p={4} bg="gray.50">
           <VStack spacing={3} align="stretch">
             <Text fontWeight="semibold">Create elicitation session</Text>
-            <HStack>
-              <Input
-                placeholder="Session code"
-                value={newCode}
-                onChange={(e) => setNewCode(e.target.value)}
-              />
-              <Button
-                variant="outline"
-                onClick={() => setNewCode(generateRandomCode())}
-                minW="120px"
-              >
-                Generate
-              </Button>
-              <Button
-                colorScheme="blue"
-                onClick={handleCreateSession}
-                isDisabled={!canCreateSession}
-                isLoading={loading}
-                minW="140px"
-              >
-                Create
-              </Button>
-            </HStack>
+            <Text fontSize="sm" color="gray.600">Session code is generated automatically.</Text>
+            <Button
+              colorScheme="blue"
+              onClick={handleCreateSession}
+              isDisabled={!canCreateSession}
+              isLoading={loading}
+              w="fit-content"
+            >
+              Create New
+            </Button>
           </VStack>
         </Box>
 

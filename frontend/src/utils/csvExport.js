@@ -3,8 +3,10 @@
  * Row 1: Alternative, Criterion names
  * Row 2: Group, Groups for each criterion
  * Row 3: Description, Descriptions for each criterion
- * Row 4 (optional): Min, Min values for each criterion (if use_custom_min_max)
- * Row 5 (optional): Max, Max values for each criterion (if use_custom_min_max)
+ * Row 4: is_qi, TRUE/FALSE per criterion
+ * Row 5: vf_method, TRUE/FALSE per criterion (TRUE=mid-value splitting, FALSE=free-edit)
+ * Row 6: Min, Min values for each criterion (empty unless custom min/max is enabled)
+ * Row 7: Max, Max values for each criterion (empty unless custom min/max is enabled)
  * Rows N+: Alternative values (one row per alternative)
  * Last row: Unit, Units for each criterion
  */
@@ -15,7 +17,6 @@ export const generateInputCSV = (criteria) => {
 
   const rows = []
   const alternativeCount = criteria[0]?.alternatives?.length || 0
-  const hasCustomMinMax = criteria.some(c => c.use_custom_min_max)
 
   // Header: Alternative, Criterion1, Criterion2, ...
   rows.push([
@@ -35,21 +36,29 @@ export const generateInputCSV = (criteria) => {
     ...criteria.map(c => c.description || ''),
   ])
 
-  // Min (optional): Min, min1, min2, ... (only if any criterion has custom min/max)
-  if (hasCustomMinMax) {
-    rows.push([
-      'Min',
-      ...criteria.map(c => c.use_custom_min_max ? (c.min_value || '') : ''),
-    ])
-  }
+  // is_qi: is_qi, true/false per criterion
+  rows.push([
+    'is_qi',
+    ...criteria.map(c => (c.is_qualitative ? 'TRUE' : 'FALSE')),
+  ])
 
-  // Max (optional): Max, max1, max2, ... (only if any criterion has custom min/max)
-  if (hasCustomMinMax) {
-    rows.push([
-      'Max',
-      ...criteria.map(c => c.use_custom_min_max ? (c.max_value || '') : ''),
-    ])
-  }
+  // vf_method: TRUE/FALSE (TRUE = mid-value splitting)
+  rows.push([
+    'vf_method',
+    ...criteria.map(c => (c.use_mid_splitting ? 'TRUE' : 'FALSE')),
+  ])
+
+  // Min: Min, min1, min2, ... (empty unless custom min/max is enabled)
+  rows.push([
+    'Min',
+    ...criteria.map(c => (c.use_custom_min_max ? (c.min_value || '') : '')),
+  ])
+
+  // Max: Max, max1, max2, ... (empty unless custom min/max is enabled)
+  rows.push([
+    'Max',
+    ...criteria.map(c => (c.use_custom_min_max ? (c.max_value || '') : '')),
+  ])
 
   // Alternative rows: alt_name, value1, value2, ...
   for (let i = 0; i < alternativeCount; i++) {

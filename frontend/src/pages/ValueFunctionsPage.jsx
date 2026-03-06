@@ -408,7 +408,7 @@ function ValueFunctionsPage({ sessionId }) {
         setActive(null)
       } catch (error) {
         toast({
-          title: 'Error',
+          title: 'Request failed',
           description: error.response?.data?.error || 'Failed to load session',
           status: 'error',
           duration: 4000,
@@ -524,7 +524,7 @@ function ValueFunctionsPage({ sessionId }) {
     if (!active) return
     setMidFlowStep((prev) => ({
       ...prev,
-      [active]: Math.min(Math.max(nextStep, 0), 3),
+      [active]: Math.min(Math.max(nextStep, 0), 4),
     }))
   }
 
@@ -643,8 +643,12 @@ function ValueFunctionsPage({ sessionId }) {
       return
     }
     if (currentMidStep === 2) {
+      if (activeData.midSplit?.skipFirst) {
+        setCurrentMidStep(4)
+        return
+      }
       // Check if we should go to step 3
-      if (!(activeData.midSplit?.skipFirst || activeData.midSplit?.step1 !== null)) return
+      if (!(activeData.midSplit?.step1 !== null)) return
       setCurrentMidStep(3)
       return
     }
@@ -673,7 +677,7 @@ function ValueFunctionsPage({ sessionId }) {
     if (currentMidStep === 2) {
       // Skipping step 1 (0.5 midpoint)
       handleSkipStep('skipFirst', true)
-      setCurrentMidStep(3)
+      setCurrentMidStep(4)
       return
     }
     if (currentMidStep === 3) {
@@ -940,24 +944,28 @@ function ValueFunctionsPage({ sessionId }) {
                   {currentMidStep === 0 && (
                     <VStack align="stretch" spacing={3}>
                       <QuestionPrompt>
-                        Step 1: Is the value function for <strong>{active}</strong> increasing or decreasing?
+                        <HStack spacing={3} wrap="wrap" justify="space-between">
+                          <Text>
+                            Step 1: Is the value function of <strong>{active}</strong> increasing or decreasing?
+                          </Text>
+                          <HStack spacing={2}>
+                            <Button
+                              size="sm"
+                              variant={activeData.midSplit?.directionAnswered && activeData.shape === 'linear_increasing' ? 'outline' : 'ghost'}
+                              onClick={() => handleDirectionChange('linear_increasing')}
+                            >
+                              ↗ Increasing
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant={activeData.midSplit?.directionAnswered && activeData.shape === 'linear_decreasing' ? 'outline' : 'ghost'}
+                              onClick={() => handleDirectionChange('linear_decreasing')}
+                            >
+                              ↘ Decreasing
+                            </Button>
+                          </HStack>
+                        </HStack>
                       </QuestionPrompt>
-                      <HStack spacing={2}>
-                        <Button
-                          variant={activeData.shape === 'linear_increasing' ? 'solid' : 'outline'}
-                          colorScheme="blue"
-                          onClick={() => handleDirectionChange('linear_increasing')}
-                        >
-                          ↗ Increasing
-                        </Button>
-                        <Button
-                          variant={activeData.shape === 'linear_decreasing' ? 'solid' : 'outline'}
-                          colorScheme="blue"
-                          onClick={() => handleDirectionChange('linear_decreasing')}
-                        >
-                          ↘ Decreasing
-                        </Button>
-                      </HStack>
                       <HStack>
                         <Button
                           colorScheme="blue"
@@ -1223,9 +1231,9 @@ function ValueFunctionsPage({ sessionId }) {
 
               <ValueFunctionPlot
                 range={activeData.range}
-                points={activeData.points}
-                thresholds={activeData.thresholds}
-                shape={activeData.shape}
+                points={activeData.mode === MODE.MID && currentMidStep === 0 && !activeData.midSplit?.directionAnswered ? [] : activeData.points}
+                thresholds={activeData.mode === MODE.MID && currentMidStep === 0 && !activeData.midSplit?.directionAnswered ? null : activeData.thresholds}
+                shape={activeData.mode === MODE.MID && currentMidStep === 0 && !activeData.midSplit?.directionAnswered ? 'not selected' : activeData.shape}
                 confidence={activeData.confidence ?? 4}
                 draggable={!isSessionLocked && activeData.mode === MODE.FREE && (activeData.shape === 'linear_increasing' || activeData.shape === 'linear_decreasing')}
                 onDrag={activeData.mode === MODE.FREE ? handleDragPoint : undefined}

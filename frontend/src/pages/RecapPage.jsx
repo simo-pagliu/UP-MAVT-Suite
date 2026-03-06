@@ -44,8 +44,9 @@ function RecapPage({ sessionId, onNavigate }) {
     }
   }, [criteria, qualitativeIndicators, valueFunctions, bwt])
 
+  const getStatusLabel = (isComplete) => (isComplete ? 'Complete' : 'Missing required criteria')
+
   const missing = []
-  if (!completion.input) missing.push({ key: 'input', label: 'Input Definition', page: 'session-access' })
   if (!completion.qualitative) missing.push({ key: 'qualitative', label: 'Qualitative Indicators', page: 'qualitative' })
   if (!completion.valueFunctions) missing.push({ key: 'value', label: 'Value Functions', page: 'value' })
   if (!completion.pileBwt) missing.push({ key: 'pile', label: 'PILE-BWT', page: 'pile' })
@@ -89,10 +90,10 @@ function RecapPage({ sessionId, onNavigate }) {
             <VStack align="stretch" spacing={3}>
               <Text fontWeight="semibold">Completion checklist</Text>
               <List spacing={2}>
-                <ListItem>Input Definition: {completion.input ? 'Complete' : 'Missing'}</ListItem>
-                <ListItem>Qualitative Indicators: {completion.qualitative ? 'Complete' : 'Missing'}</ListItem>
-                <ListItem>Value Functions: {completion.valueFunctions ? 'Complete' : 'Missing'}</ListItem>
-                <ListItem>PILE-BWT: {completion.pileBwt ? 'Complete' : 'Missing'}</ListItem>
+                <ListItem>Input Definition: {getStatusLabel(completion.input)}</ListItem>
+                <ListItem>Qualitative Indicators: {getStatusLabel(completion.qualitative)}</ListItem>
+                <ListItem>Value Functions: {getStatusLabel(completion.valueFunctions)}</ListItem>
+                <ListItem>PILE-BWT: {getStatusLabel(completion.pileBwt)}</ListItem>
               </List>
             </VStack>
           </>

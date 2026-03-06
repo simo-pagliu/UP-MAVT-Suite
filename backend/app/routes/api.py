@@ -144,8 +144,12 @@ def update_bwt(session_id):
 def create_study_session():
     data = request.json or {}
     svc = StudySessionService(current_app.db)
-    study_session_id = svc.create(data.get('code'))
-    return jsonify({'study_session_id': study_session_id}), 201
+    code = data.get('code')
+    auto_generate = bool(data.get('auto_generate', False))
+    if not code and auto_generate:
+        code = svc.generate_unique_study_code()
+    study_session_id = svc.create(code)
+    return jsonify({'study_session_id': study_session_id, 'code': code}), 201
 
 
 @bp.route('/study-sessions', methods=['GET'])
@@ -217,13 +221,37 @@ def selective_reset_sessions(study_session_id):
 def create_elicitation_session(study_session_id):
     data = request.json or {}
     svc = StudySessionService(current_app.db)
-    session_id = svc.create_elicitation_session(study_session_id, data.get('name'))
-    return jsonify({'session_id': session_id}), 201
+    name = data.get('name')
+    auto_generate = bool(data.get('auto_generate', False))
+    if not name and auto_generate:
+        name = svc.generate_unique_session_code()
+    session_id = svc.create_elicitation_session(study_session_id, name)
+    return jsonify({'session_id': session_id, 'name': name}), 201
 
 
 @bp.route('/study-session/<study_session_id>/elicitation-sessions', methods=['GET'])
 def list_elicitation_sessions(study_session_id):
     return jsonify(StudySessionService(current_app.db).list_elicitation_sessions(study_session_id)), 200
+
+
+@bp.route('/study-session/<study_session_id>/backup/export', methods=['GET'])
+def export_study_backup(study_session_id):
+    content, filename, mime = StudySessionService(current_app.db).export_backup_zip(study_session_id)
+    return _send(content, filename, mime)
+
+
+@bp.route('/study-session/backup/import', methods=['POST'])
+def import_study_backup():
+    upload = request.files.get('file')
+    if upload is None:
+        return jsonify({'error': 'Missing file upload'}), 400
+    zip_bytes = upload.read()
+    if not zip_bytes:
+        return jsonify({'error': 'Uploaded file is empty'}), 400
+
+    on_conflict = request.args.get('on_conflict', 'abort')
+    result = StudySessionService(current_app.db).import_backup_zip(zip_bytes, on_conflict=on_conflict)
+    return jsonify(result), 201
 
 
 # --------------------------------------------------------------------------- #
@@ -377,3 +405,9 @@ def get_weight_space(study_session_id, session_id):
 @bp.route('/study-session/<study_session_id>/step-results/<int:step_number>', methods=['GET'])
 def get_step_results(study_session_id, step_number):
     return jsonify(WorkflowService(current_app.db).get_step_results(study_session_id, step_number)), 200
+
+
+@bp.route('/study-session/<study_session_id>/workflow-export/data', methods=['GET'])
+def export_workflow_data_zip(study_session_id):
+    content, filename, mime = WorkflowService(current_app.db).export_workflow_data_zip(study_session_id)
+    return _send(content, filename, mime)

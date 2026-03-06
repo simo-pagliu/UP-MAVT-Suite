@@ -29,7 +29,7 @@ import {
   AlertDialogOverlay,
   useDisclosure,
 } from '@chakra-ui/react'
-import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
+import { ChevronLeftIcon, ChevronRightIcon, LockIcon, WarningIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useMemo, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import {
@@ -68,10 +68,12 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   const [sliderTouched, setSliderTouched] = useState(false)
   const [saving, setSaving] = useState(false)
   const [bwtSignature, setBwtSignature] = useState(null)
-  const [criteriaMismatch, setCriteriaMismatch] = useState(false)
-  const [criteriaMismatchAcknowledged, setCriteriaMismatchAcknowledged] = useState(false)
   const [isSessionLocked, setIsSessionLocked] = useState(false)
   const [qualitativeIncomplete, setQualitativeIncomplete] = useState(false)
+  const criteriaMismatch = false
+  const criteriaMismatchAcknowledged = true
+  const setCriteriaMismatchAcknowledged = () => {}
+  const handleCriteriaMismatchReset = () => {}
   // Consistency checking state
   const [bestToWorstValue, setBestToWorstValue] = useState(null) // Value from BEST-to-WORST comparison
   const [consistencyConstraints, setConsistencyConstraints] = useState({}) // Track constraints for each criterion
@@ -277,7 +279,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         }
       } catch (error) {
         toast({
-          title: 'Error',
+          title: 'Request failed',
           description: 'Failed to load session data',
           status: 'error',
           isClosable: true,
@@ -295,33 +297,24 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   useEffect(() => {
     if (loading) return
     const signatureMatch = areSignaturesEquivalent(bwtSignature, criteriaSignature)
-    
-    console.log('BWT Mismatch Check:', {
-      comparisonsLength: comparisons.length,
-      bwtSignature,
-      criteriaSignature,
-      match: signatureMatch
-    })
-    
-    // If there are comparisons but no saved signature (old data), it's a mismatch
-    if (comparisons.length > 0 && !bwtSignature) {
-      console.log('Setting mismatch: comparisons exist but no signature')
-      setCriteriaMismatch(true)
+    const hasMismatch =
+      (comparisons.length > 0 && !bwtSignature) ||
+      (bwtSignature && criteriaSignature && !signatureMatch)
+
+    if (!hasMismatch) return
+
+    if (isSessionLocked) {
+      toast({
+        title: 'PILE-BWT out of date',
+        description: 'Unlock from PILE-BWT to reset outdated comparisons.',
+        status: 'warning',
+        isClosable: true,
+      })
       return
     }
-    
-    // If there's a saved signature and current signature, compare them
-    if (bwtSignature && criteriaSignature) {
-      if (!signatureMatch) {
-        console.log('Setting mismatch: signatures dont match')
-        setCriteriaMismatch(true)
-      } else {
-        console.log('Clearing mismatch: signatures match')
-        setCriteriaMismatch(false)
-        setCriteriaMismatchAcknowledged(false)
-      }
-    }
-  }, [loading, bwtSignature, criteriaSignature, comparisons.length])
+
+    resetBwtComparisons()
+  }, [loading, bwtSignature, criteriaSignature, comparisons.length, isSessionLocked, toast])
 
   const buildBwtPayload = (comps) => ({
     comparisons: comps,
@@ -330,6 +323,43 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
 
   // Track which group the current pairs belong to
   const [pairsGroupName, setPairsGroupName] = useState(null)
+
+  const resetBwtComparisons = async () => {
+    setSaving(true)
+    try {
+      await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
+        value: buildBwtPayload([]),
+      })
+      setComparisons([])
+      setPairs([])
+      setPairsGroupName(null)
+      setBestCriterion(null)
+      setWorstCriterion(null)
+      setCurrentPairIndex(0)
+      setSelectedGroupIndex(0)
+      setSelectionStep(null)
+      setStep('select-criteria')
+      setBwtSignature(criteriaSignature)
+      setBestToWorstValue(null)
+      setConsistencyConstraints({})
+      setIsConsistencyError(false)
+      toast({
+        title: 'PILE-BWT reset',
+        description: 'Outdated comparisons were reset after criteria changes.',
+        status: 'warning',
+        isClosable: true,
+      })
+    } catch (error) {
+      toast({
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to reset PILE-BWT data',
+        status: 'error',
+        isClosable: true,
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
 
   useEffect(() => {
     if (!loading && allGroups.length > 0 && selectedGroupIndex !== null) {
@@ -445,39 +475,36 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     return false
   }
 
-  const handleCriteriaMismatchReset = async () => {
-    if (!ensureSessionUnlocked()) return
+  const handleUnlockForModification = async () => {
+    const confirmed = window.confirm(
+      'Unlocking allows QI/VF updates. Intra-group PILE-BWT comparisons (intra-B and intra-W) will be reset. Continue?'
+    )
+    if (!confirmed) return
+
     setSaving(true)
     try {
+      await axios.put(`${API_URL}/session/${sessionId}/lock-session`)
+      setIsSessionLocked(false)
+
+      const filteredComparisons = comparisons.filter((c) => c.group !== 'intra-B' && c.group !== 'intra-W')
       await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
-        value: buildBwtPayload([]),
+        value: buildBwtPayload(filteredComparisons),
       })
-      setComparisons([])
+
+      setComparisons(filteredComparisons)
       setPairs([])
       setPairsGroupName(null)
-      setBestCriterion(null)
-      setWorstCriterion(null)
-      setCurrentPairIndex(0)
-      setSelectedGroupIndex(0)
-      setSelectionStep(null)
-      setStep('select-criteria')
-      setCriteriaMismatch(false)
-      setCriteriaMismatchAcknowledged(false)
-      setBwtSignature(criteriaSignature)
-      // Reset consistency tracking
-      setBestToWorstValue(null)
-      setConsistencyConstraints({})
-      setIsConsistencyError(false)
+      setStep('idle')
       toast({
-        title: 'BWT reset',
-        description: 'Please redo the elicitation process.',
-        status: 'success',
+        title: 'Unlocked',
+        description: 'QI/VF can now be edited. Intra-group comparisons were reset.',
+        status: 'warning',
         isClosable: true,
       })
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error.response?.data?.error || 'Failed to reset BWT',
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to unlock session',
         status: 'error',
         isClosable: true,
       })
@@ -548,7 +575,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       })
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: 'Failed to reset group',
         status: 'error',
         isClosable: true,
@@ -774,7 +801,31 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     })
   }
 
-  const handleSelectCriteria = () => {
+  const handleSelectCriteria = async () => {
+    if (!isSessionLocked) {
+      const confirmed = window.confirm(
+        'To proceed with PILE-BWT, QI and VF editing will be locked. You can unlock from PILE-BWT later, but some comparisons will be reset. Continue?'
+      )
+      if (!confirmed) return
+
+      setSaving(true)
+      try {
+        await axios.put(`${API_URL}/session/${sessionId}/lock-session`)
+        setIsSessionLocked(true)
+      } catch (error) {
+        toast({
+          title: 'Request failed',
+          description: error.response?.data?.error || 'Failed to apply lock before starting PILE-BWT',
+          status: 'error',
+          isClosable: true,
+        })
+        setSaving(false)
+        return
+      } finally {
+        setSaving(false)
+      }
+    }
+
     setSelectionStep('select-best')
   }
 
@@ -874,7 +925,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         }
       } catch (error) {
         toast({
-          title: 'Error',
+          title: 'Request failed',
           description: error.response?.data?.error || 'Failed to save comparison',
           status: 'error',
           isClosable: true,
@@ -906,7 +957,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
           latestComparisons = updated
         } catch (error) {
           toast({
-            title: 'Error',
+            title: 'Request failed',
             description: error.response?.data?.error || 'Failed to save comparison',
             status: 'error',
             isClosable: true,
@@ -947,7 +998,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       })
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to save BWT data',
         status: 'error',
         isClosable: true,
@@ -1498,6 +1549,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                   precision={2}
                   onChange={(valueString) => {
                     setSliderInputValue(valueString)
+                    setSliderTouched(true)
                   }}
                   size="sm"
                   w="100px"
@@ -1520,6 +1572,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                         const clamped = Math.min(adjustedRange.max, Math.max(adjustedRange.min, parsed))
                         setSliderValue(clamped)
                         setSliderInputValue(clamped.toFixed(2))
+                        setSliderTouched(true)
                       } else {
                         setSliderInputValue(Number.isFinite(sliderValue) ? sliderValue.toFixed(2) : adjustedRange.min.toFixed(2))
                       }
@@ -1603,7 +1656,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               p={3}
             >
               <HStack spacing={2} alignItems="flex-start">
-                <Box color="red.600" fontSize="lg">⚠️</Box>
+                <WarningIcon color="red.600" boxSize={5} mt={0.5} />
                 <VStack align="start" spacing={1} flex={1}>
                   <Text fontWeight="bold" color="red.700" fontSize="sm">
                     Inconsistent judgment
@@ -1862,7 +1915,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                                   latestComparisons = updated
                                 } catch (error) {
                                   toast({
-                                    title: 'Error',
+                                    title: 'Request failed',
                                     description: 'Failed to save comparison',
                                     status: 'error',
                                     isClosable: true,
@@ -1967,9 +2020,15 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       >
         {isSessionLocked && (
           <Box bg="yellow.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="yellow.400" mb={4}>
-            <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
-              🔒 Session is locked. Editing is disabled.
-            </Text>
+            <HStack spacing={2}>
+              <LockIcon color="yellow.800" />
+              <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
+                Session is locked. Editing is disabled.
+              </Text>
+              <Button size="xs" variant="outline" onClick={handleUnlockForModification} isLoading={saving}>
+                Unlock for QI/VF edits
+              </Button>
+            </HStack>
           </Box>
         )}
         {qualitativeIncomplete && (

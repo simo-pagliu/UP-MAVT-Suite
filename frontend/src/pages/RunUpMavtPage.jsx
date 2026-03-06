@@ -31,7 +31,7 @@ import {
   NumberIncrementStepper,
   NumberDecrementStepper,
 } from '@chakra-ui/react'
-import { ExternalLinkIcon } from '@chakra-ui/icons'
+import { DownloadIcon, ExternalLinkIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import PdfModal from '../components/PdfModal'
 
@@ -104,6 +104,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [step3Results, setStep3Results] = useState(null)
   const [step4Results, setStep4Results] = useState(null)
   const [step6Results, setStep6Results] = useState(null)
+  const [exportingDataZip, setExportingDataZip] = useState(false)
   // PDF Modal states
   const { isOpen: isUncertaintiesOpen, onOpen: onUncertaintiesOpen, onClose: onUncertaintiesClose } = useDisclosure()
   const { isOpen: isMcModesOpen, onOpen: onMcModesOpen, onClose: onMcModesClose } = useDisclosure()
@@ -724,6 +725,51 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
     return { data: allDataPoints, comparisons: comparisonLabels }
   }
+
+  const triggerDownloadFromBlob = (blob, filename) => {
+    const objectUrl = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(objectUrl)
+  }
+
+  const handleExportWorkflowDataZip = async () => {
+    if (!studySessionId) return
+
+    setExportingDataZip(true)
+    try {
+      const response = await axios.get(
+        `${API_URL}/study-session/${studySessionId}/workflow-export/data`,
+        { responseType: 'blob' }
+      )
+
+      const disposition = response.headers['content-disposition'] || ''
+      const filenameMatch = disposition.match(/filename="?([^";]+)"?/i)
+      const filename = filenameMatch?.[1] || 'upmavt_data.zip'
+      triggerDownloadFromBlob(response.data, filename)
+
+      toast({
+        title: 'Data ZIP exported',
+        description: 'The Run UP-MAVT data bundle was downloaded.',
+        status: 'success',
+        duration: 3500,
+      })
+    } catch (error) {
+      toast({
+        title: 'Unable to export data ZIP',
+        description: error.response?.data?.error || error.message,
+        status: 'error',
+        duration: 5000,
+      })
+    } finally {
+      setExportingDataZip(false)
+    }
+  }
+
   // ============================================================================
   // RENDER
   // ============================================================================
@@ -1552,6 +1598,25 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                       <Text color="gray.500">Run Step 6 to display the final ranking heatmap.</Text>
                     </Box>
                   )}
+
+                  <Divider my={4} />
+                  <VStack spacing={3} align="stretch">
+                    <Text color="gray.600" fontSize="sm">
+                      Download the complete workflow data ZIP after Step 6 is completed.
+                    </Text>
+                    <Button
+                      leftIcon={<DownloadIcon />}
+                      colorScheme="blue"
+                      variant="solid"
+                      onClick={handleExportWorkflowDataZip}
+                      isLoading={exportingDataZip}
+                      loadingText="Preparing Data ZIP"
+                      isDisabled={!getStepStatus(6)?.completed}
+                      alignSelf="flex-start"
+                    >
+                      Download Data ZIP
+                    </Button>
+                  </VStack>
                 </StepSection>
               </TabPanel>
             </TabPanels>

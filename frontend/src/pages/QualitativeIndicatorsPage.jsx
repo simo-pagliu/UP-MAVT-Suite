@@ -800,7 +800,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
       } catch (error) {
         console.error('Failed to fetch session:', error)
         toast({
-          title: 'Error',
+          title: 'Request failed',
           description: 'Failed to load session',
           status: 'error',
           duration: 3000,
@@ -902,7 +902,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
       setPhase('ranking')
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to save',
         status: 'error',
         duration: 3000,
@@ -947,7 +947,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
 
       setQualitativeData(updatedData)
       toast({
-        title: 'Success',
+        title: 'Completed',
         description: `Saved ${activeIndicator.criterion_name}`,
         status: 'success',
         duration: 2000,
@@ -970,7 +970,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
       }
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to save',
         status: 'error',
         duration: 3000,
@@ -1017,7 +1017,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
         loadIndicatorData(idx, qualitativeCriteria[idx].criterion_name, updatedData)
       } catch (error) {
         toast({
-          title: 'Error',
+          title: 'Request failed',
           description: error.response?.data?.error || 'Failed to save',
           status: 'error',
           duration: 3000,
