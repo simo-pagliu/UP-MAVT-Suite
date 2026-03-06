@@ -33,7 +33,7 @@ import {
   VStack,
   useToast,
 } from '@chakra-ui/react'
-import { CheckCircleIcon, WarningIcon, CloseIcon, QuestionIcon } from '@chakra-ui/icons'
+import { CheckCircleIcon, WarningIcon, CloseIcon, QuestionIcon, LockIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { parseDistribution, computeDistributionBounds } from '../utils/distributionUtils'
@@ -352,7 +352,7 @@ function ValueFunctionPlot({ range, points, thresholds, onDrag, draggable, shape
   )
 }
 
-function ValueFunctionsPage({ sessionId }) {
+function ValueFunctionsPage({ sessionId, onPageChange }) {
   const [criteria, setCriteria] = useState([])
   const [valueFunctions, setValueFunctions] = useState({})
   const [active, setActive] = useState(null)
@@ -362,6 +362,7 @@ function ValueFunctionsPage({ sessionId }) {
   const [lastSaved, setLastSaved] = useState(null)
   const [clampHint, setClampHint] = useState(null)
   const [isSessionLocked, setIsSessionLocked] = useState(false)
+  const [isBwtLockActive, setIsBwtLockActive] = useState(false)
   const toast = useToast()
 
   useEffect(() => {
@@ -369,7 +370,10 @@ function ValueFunctionsPage({ sessionId }) {
       try {
         const res = await axios.get(`${API_URL}/session/${sessionId}`)
         const session = res.data
-        setIsSessionLocked(session?.session_locked || false)
+        const practitionerLock = session?.session_locked || false
+        const bwtLock = Boolean(session?.bwt?.qi_vf_lock_active)
+        setIsSessionLocked(practitionerLock || bwtLock)
+        setIsBwtLockActive(bwtLock)
         const crits = Array.isArray(session.criteria) ? session.criteria : []
         setCriteria(crits)
 
@@ -980,11 +984,6 @@ function ValueFunctionsPage({ sessionId }) {
           <Text fontSize="sm" color="gray.600">
             Define value functions for each criterion using either mid-value splitting or free edit (set per criterion in Input Definition).
           </Text>
-          {isSessionLocked && (
-            <Text fontSize="xs" color="orange.600">
-              Session is locked. Editing is disabled.
-            </Text>
-          )}
         </VStack>
         <VStack spacing={3} align="stretch">
           {criteria.filter(c => !c.is_qualitative).map((criterion, idx) => {
@@ -1046,6 +1045,29 @@ function ValueFunctionsPage({ sessionId }) {
         maxH="100vh"
         overflowY="auto"
       >
+        {isSessionLocked && (
+          <Box bg="yellow.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="yellow.400" mb={4}>
+            <HStack spacing={2} align="flex-start">
+              <LockIcon color="yellow.800" />
+              <VStack align="start" spacing={2} flex={1}>
+                <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
+                  {isBwtLockActive
+                    ? 'Value Functions are locked while PILE-BWT is active.'
+                    : 'Value Functions are locked by the practitioner.'}
+                </Text>
+                {isBwtLockActive ? (
+                  <Button size="xs" variant="outline" onClick={() => onPageChange?.('pile')}>
+                    Go to PILE-BWT to unlock
+                  </Button>
+                ) : (
+                  <Text fontSize="xs" color="yellow.800">
+                    Ask the practitioner/admin to unlock this session.
+                  </Text>
+                )}
+              </VStack>
+            </HStack>
+          </Box>
+        )}
         {activeData ? (
             <VStack align="stretch" spacing={5}>
               <VStack align="stretch" spacing={2}>

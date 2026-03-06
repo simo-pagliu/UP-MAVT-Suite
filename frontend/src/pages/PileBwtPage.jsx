@@ -29,7 +29,7 @@ import {
   AlertDialogOverlay,
   useDisclosure,
 } from '@chakra-ui/react'
-import { ChevronLeftIcon, ChevronRightIcon, LockIcon, WarningIcon } from '@chakra-ui/icons'
+import { ChevronLeftIcon, ChevronRightIcon, LockIcon, WarningIcon, InfoIcon, CheckCircleIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useMemo, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import {
@@ -68,6 +68,9 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   const [sliderTouched, setSliderTouched] = useState(false)
   const [saving, setSaving] = useState(false)
   const [bwtSignature, setBwtSignature] = useState(null)
+  const [bwtQiSignature, setBwtQiSignature] = useState(null)
+  const [bwtVfSignature, setBwtVfSignature] = useState(null)
+  const [bwtLockActive, setBwtLockActive] = useState(false)
   const [isSessionLocked, setIsSessionLocked] = useState(false)
   const [qualitativeIncomplete, setQualitativeIncomplete] = useState(false)
   const criteriaMismatch = false
@@ -78,9 +81,10 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   const [bestToWorstValue, setBestToWorstValue] = useState(null) // Value from BEST-to-WORST comparison
   const [consistencyConstraints, setConsistencyConstraints] = useState({}) // Track constraints for each criterion
   const [isConsistencyError, setIsConsistencyError] = useState(false) // Whether current position violates consistency
-  const { isOpen, onOpen, onClose } = useDisclosure()
+  const { isOpen: isResetOpen, onOpen: onResetOpen, onClose: onResetClose } = useDisclosure()
   const cancelRef = useRef()
   const mainContentRef = useRef(null)
+  const [showUnlockConfirm, setShowUnlockConfirm] = useState(false)
   const toast = useToast()
 
   // Expose save method for navigation
@@ -102,6 +106,82 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       })),
     }))
     return JSON.stringify(normalized)
+  }
+
+  const getObjectSignature = (obj) => JSON.stringify(canonicalizeJson(obj || {}))
+
+  const parseSignature = (signature) => {
+    if (!signature) return null
+    try {
+      return JSON.parse(signature)
+    } catch {
+      return null
+    }
+  }
+
+  const getChangedCriteriaNames = (savedSignature, currentSignature) => {
+    const saved = parseSignature(savedSignature)
+    const current = parseSignature(currentSignature)
+    if (!Array.isArray(saved) || !Array.isArray(current)) return null
+
+    const toMap = (items) => {
+      const map = new Map()
+      items.forEach((item) => {
+        if (!item?.name) return
+        map.set(item.name, JSON.stringify(canonicalizeJson(item)))
+      })
+      return map
+    }
+
+    const savedMap = toMap(saved)
+    const currentMap = toMap(current)
+    const names = new Set([...savedMap.keys(), ...currentMap.keys()])
+    const changed = []
+
+    names.forEach((name) => {
+      if (!savedMap.has(name) || !currentMap.has(name) || savedMap.get(name) !== currentMap.get(name)) {
+        changed.push(name)
+      }
+    })
+
+    return changed
+  }
+
+  const getChangedObjectKeys = (savedSignature, currentSignature) => {
+    const saved = parseSignature(savedSignature)
+    const current = parseSignature(currentSignature)
+    if (!saved || !current || typeof saved !== 'object' || typeof current !== 'object') return null
+
+    const keys = new Set([...Object.keys(saved), ...Object.keys(current)])
+    const changed = []
+    keys.forEach((key) => {
+      const left = JSON.stringify(canonicalizeJson(saved[key]))
+      const right = JSON.stringify(canonicalizeJson(current[key]))
+      if (left !== right) changed.push(key)
+    })
+    return changed
+  }
+
+  const getAffectedGroupsForCriteria = (criterionNames, currentCriteria, previousCriteriaSignature) => {
+    if (!Array.isArray(criterionNames) || criterionNames.length === 0) return []
+
+    const currentGroupMap = new Map((currentCriteria || []).map((c) => [c.criterion_name, c.group || 'Ungrouped']))
+    const previousCriteria = parseSignature(previousCriteriaSignature)
+    const previousGroupMap = new Map(
+      Array.isArray(previousCriteria)
+        ? previousCriteria.map((c) => [c.name, c.group || 'Ungrouped'])
+        : []
+    )
+
+    const groupsSet = new Set()
+    criterionNames.forEach((name) => {
+      const currentGroup = currentGroupMap.get(name)
+      const previousGroup = previousGroupMap.get(name)
+      if (currentGroup) groupsSet.add(currentGroup)
+      if (previousGroup) groupsSet.add(previousGroup)
+    })
+
+    return [...groupsSet]
   }
 
   const canonicalizeJson = (value) => {
@@ -131,6 +211,8 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   }
 
   const criteriaSignature = useMemo(() => getCriteriaSignature(criteria), [criteria])
+  const qiSignature = useMemo(() => getObjectSignature(qualitativeIndicators), [qualitativeIndicators])
+  const vfSignature = useMemo(() => getObjectSignature(valueFunction), [valueFunction])
 
   const getBestWorstByGroupName = (groupName, comps = comparisons) => {
     const groupComps = comps.filter((c) => c.group === groupName && c.type === 'best')
@@ -276,6 +358,14 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
 
         if (session.bwt?.criteria_signature) {
           setBwtSignature(session.bwt.criteria_signature)
+          setBwtQiSignature(session.bwt.qi_signature || null)
+          setBwtVfSignature(session.bwt.vf_signature || null)
+          setBwtLockActive(Boolean(session.bwt.qi_vf_lock_active))
+        } else {
+          setBwtSignature(null)
+          setBwtQiSignature(null)
+          setBwtVfSignature(null)
+          setBwtLockActive(false)
         }
       } catch (error) {
         toast({
@@ -296,29 +386,74 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
 
   useEffect(() => {
     if (loading) return
-    const signatureMatch = areSignaturesEquivalent(bwtSignature, criteriaSignature)
+    if (!comparisons.length) return
+
+    const criteriaMatch = bwtSignature && criteriaSignature
+      ? areSignaturesEquivalent(bwtSignature, criteriaSignature)
+      : false
+    const qiMatch = bwtQiSignature && qiSignature
+      ? areSignaturesEquivalent(bwtQiSignature, qiSignature)
+      : false
+    const vfMatch = bwtVfSignature && vfSignature
+      ? areSignaturesEquivalent(bwtVfSignature, vfSignature)
+      : false
+
     const hasMismatch =
-      (comparisons.length > 0 && !bwtSignature) ||
-      (bwtSignature && criteriaSignature && !signatureMatch)
+      !bwtSignature ||
+      !bwtQiSignature ||
+      !bwtVfSignature ||
+      !criteriaMatch ||
+      !qiMatch ||
+      !vfMatch
 
     if (!hasMismatch) return
 
-    if (isSessionLocked) {
+    if (isSessionLocked && !bwtLockActive) {
       toast({
-        title: 'PILE-BWT out of date',
-        description: 'Unlock from PILE-BWT to reset outdated comparisons.',
+        title: 'Session locked by practitioner',
+        description: 'BWT updates are disabled until the practitioner/admin unlocks the session.',
         status: 'warning',
         isClosable: true,
       })
       return
     }
 
-    resetBwtComparisons()
-  }, [loading, bwtSignature, criteriaSignature, comparisons.length, isSessionLocked, toast])
+    const changedCriteriaFromStructure = getChangedCriteriaNames(bwtSignature, criteriaSignature) || []
+    const changedCriteriaFromQi = getChangedObjectKeys(bwtQiSignature, qiSignature) || []
+    const changedCriteriaFromVf = getChangedObjectKeys(bwtVfSignature, vfSignature) || []
+    const changedCriteriaSet = new Set([
+      ...changedCriteriaFromStructure,
+      ...changedCriteriaFromQi,
+      ...changedCriteriaFromVf,
+    ])
 
-  const buildBwtPayload = (comps) => ({
+    if (changedCriteriaSet.size === 0) {
+      resetBwtComparisons()
+      return
+    }
+
+    resetBwtComparisonsByCriteria([...changedCriteriaSet])
+  }, [
+    loading,
+    comparisons.length,
+    bwtSignature,
+    bwtQiSignature,
+    bwtVfSignature,
+    criteriaSignature,
+    qiSignature,
+    vfSignature,
+    isSessionLocked,
+    bwtLockActive,
+    criteria,
+    toast,
+  ])
+
+  const buildBwtPayload = (comps, lockActive = bwtLockActive) => ({
     comparisons: comps,
     criteria_signature: criteriaSignature,
+    qi_signature: qiSignature,
+    vf_signature: vfSignature,
+    qi_vf_lock_active: Boolean(lockActive),
   })
 
   // Track which group the current pairs belong to
@@ -340,6 +475,8 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       setSelectionStep(null)
       setStep('select-criteria')
       setBwtSignature(criteriaSignature)
+      setBwtQiSignature(qiSignature)
+      setBwtVfSignature(vfSignature)
       setBestToWorstValue(null)
       setConsistencyConstraints({})
       setIsConsistencyError(false)
@@ -353,6 +490,136 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       toast({
         title: 'Request failed',
         description: error.response?.data?.error || 'Failed to reset PILE-BWT data',
+        status: 'error',
+        isClosable: true,
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const resetBwtComparisonsByCriteria = async (criterionNames) => {
+    if (!Array.isArray(criterionNames) || criterionNames.length === 0) {
+      await resetBwtComparisons()
+      return
+    }
+
+    const criterionSet = new Set(criterionNames)
+    
+    // Filter out comparisons where either reference or adjusted criterion was changed
+    const filteredComparisons = comparisons.filter((c) => {
+      // Keep comparison only if NEITHER criterion is in the changed set
+      const involvesChangedCriterion = 
+        criterionSet.has(c.reference_criterion) || 
+        criterionSet.has(c.adjusted_criterion)
+      
+      // Also remove intra-group comparisons since they depend on base group results
+      const isIntraGroup = c.group === 'intra-B' || c.group === 'intra-W'
+      
+      return !involvesChangedCriterion && !isIntraGroup
+    })
+
+    const removedCount = comparisons.length - filteredComparisons.length
+    if (removedCount === 0) {
+      // No comparisons affected, just update signatures
+      setBwtSignature(criteriaSignature)
+      setBwtQiSignature(qiSignature)
+      setBwtVfSignature(vfSignature)
+      return
+    }
+
+    setSaving(true)
+    try {
+      await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
+        value: buildBwtPayload(filteredComparisons),
+      })
+
+      setComparisons(filteredComparisons)
+      setPairs([])
+      setPairsGroupName(null)
+      setBestCriterion(null)
+      setWorstCriterion(null)
+      setCurrentPairIndex(0)
+      setSelectionStep(null)
+      setStep('select-criteria')
+      setBwtSignature(criteriaSignature)
+      setBwtQiSignature(qiSignature)
+      setBwtVfSignature(vfSignature)
+      setBestToWorstValue(null)
+      setConsistencyConstraints({})
+      setIsConsistencyError(false)
+      
+      toast({
+        title: 'PILE-BWT partially reset',
+        description: `Removed ${removedCount} comparison(s) involving: ${criterionNames.join(', ')}`,
+        status: 'warning',
+        isClosable: true,
+      })
+    } catch (error) {
+      toast({
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to reset affected PILE-BWT comparisons',
+        status: 'error',
+        isClosable: true,
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const resetBwtComparisonsByGroups = async (groupNames) => {
+    const baseGroups = new Set((groupNames || []).filter(Boolean))
+    if (!baseGroups.size) {
+      await resetBwtComparisons()
+      return
+    }
+
+    // Start with affected base groups
+    const groupsToClear = new Set([...baseGroups])
+    
+    // Only include intra-groups if they have actual comparisons
+    const hasIntraB = comparisons.some(c => c.group === 'intra-B')
+    const hasIntraW = comparisons.some(c => c.group === 'intra-W')
+    if (hasIntraB) groupsToClear.add('intra-B')
+    if (hasIntraW) groupsToClear.add('intra-W')
+
+    const filteredComparisons = comparisons.filter((c) => !groupsToClear.has(c.group))
+
+    setSaving(true)
+    try {
+      await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
+        value: buildBwtPayload(filteredComparisons),
+      })
+
+      setComparisons(filteredComparisons)
+      setPairs([])
+      setPairsGroupName(null)
+      setBestCriterion(null)
+      setWorstCriterion(null)
+      setCurrentPairIndex(0)
+      setSelectionStep(null)
+      setStep('select-criteria')
+      setBwtSignature(criteriaSignature)
+      setBwtQiSignature(qiSignature)
+      setBwtVfSignature(vfSignature)
+      setBestToWorstValue(null)
+      setConsistencyConstraints({})
+      setIsConsistencyError(false)
+      
+      const resetGroups = [...baseGroups]
+      if (hasIntraB) resetGroups.push('intra-B')
+      if (hasIntraW) resetGroups.push('intra-W')
+      
+      toast({
+        title: 'PILE-BWT partially reset',
+        description: `Reset groups: ${resetGroups.join(', ')} after QI/VF changes.`,
+        status: 'warning',
+        isClosable: true,
+      })
+    } catch (error) {
+      toast({
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to reset affected PILE-BWT groups',
         status: 'error',
         isClosable: true,
       })
@@ -465,39 +732,43 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   }, [sliderValue, currentPairIndex, pairs, comparisons, bestToWorstValue])
 
   const ensureSessionUnlocked = () => {
-    if (!isSessionLocked) return true
-    toast({
-      title: 'Session locked',
-      description: 'This session is locked. You cannot modify BWT data.',
-      status: 'warning',
-      isClosable: true,
-    })
-    return false
+    if (isSessionLocked && !bwtLockActive) {
+      toast({
+        title: 'Session locked by practitioner',
+        description: 'BWT editing is disabled. Ask the practitioner/admin to unlock.',
+        status: 'warning',
+        isClosable: true,
+      })
+      return false
+    }
+
+    if (!bwtLockActive) {
+      toast({
+        title: 'Lock required',
+        description: 'Please lock QI/VF from the banner above before editing PILE-BWT.',
+        status: 'info',
+        isClosable: true,
+      })
+      return false
+    }
+
+    return true
   }
 
   const handleUnlockForModification = async () => {
-    const confirmed = window.confirm(
-      'Unlocking allows QI/VF updates. Intra-group PILE-BWT comparisons (intra-B and intra-W) will be reset. Continue?'
-    )
-    if (!confirmed) return
-
+    setShowUnlockConfirm(false)
     setSaving(true)
     try {
-      await axios.put(`${API_URL}/session/${sessionId}/lock-session`)
-      setIsSessionLocked(false)
-
-      const filteredComparisons = comparisons.filter((c) => c.group !== 'intra-B' && c.group !== 'intra-W')
+      // Just save BWT with lock flag off - don't touch session_locked (practitioner lock)
       await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
-        value: buildBwtPayload(filteredComparisons),
+        value: buildBwtPayload(comparisons, false),
       })
-
-      setComparisons(filteredComparisons)
-      setPairs([])
-      setPairsGroupName(null)
-      setStep('idle')
+      setBwtLockActive(false)
+      setSelectionStep(null)
+      setStep('select-criteria')
       toast({
         title: 'Unlocked',
-        description: 'QI/VF can now be edited. Intra-group comparisons were reset.',
+        description: 'QI/VF can now be edited. Existing BWT comparisons were kept.',
         status: 'warning',
         isClosable: true,
       })
@@ -802,31 +1073,54 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   }
 
   const handleSelectCriteria = async () => {
-    if (!isSessionLocked) {
-      const confirmed = window.confirm(
-        'To proceed with PILE-BWT, QI and VF editing will be locked. You can unlock from PILE-BWT later, but some comparisons will be reset. Continue?'
-      )
-      if (!confirmed) return
+    if (isSessionLocked && !bwtLockActive) {
+      toast({
+        title: 'Session locked by practitioner',
+        description: 'BWT editing is disabled. Ask the practitioner/admin to unlock.',
+        status: 'warning',
+        isClosable: true,
+      })
+      return
+    }
 
-      setSaving(true)
-      try {
-        await axios.put(`${API_URL}/session/${sessionId}/lock-session`)
-        setIsSessionLocked(true)
-      } catch (error) {
-        toast({
-          title: 'Request failed',
-          description: error.response?.data?.error || 'Failed to apply lock before starting PILE-BWT',
-          status: 'error',
-          isClosable: true,
-        })
-        setSaving(false)
-        return
-      } finally {
-        setSaving(false)
-      }
+    if (!bwtLockActive) {
+      toast({
+        title: 'Lock required',
+        description: 'Please lock QI/VF from the banner above before starting PILE-BWT.',
+        status: 'info',
+        isClosable: true,
+      })
+      return
     }
 
     setSelectionStep('select-best')
+  }
+
+  const handleLockForBwt = async () => {
+    setSaving(true)
+    try {
+      // Save BWT with lock flag - this is a USER lock that only blocks QI/VF
+      // Don't call lock-session endpoint (that's for practitioner lock)
+      await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
+        value: buildBwtPayload(comparisons, true),
+      })
+      setBwtLockActive(true)
+      toast({
+        title: 'QI/VF locked',
+        description: 'You can now start PILE-BWT elicitation.',
+        status: 'success',
+        isClosable: true,
+      })
+    } catch (error) {
+      toast({
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to lock QI/VF',
+        status: 'error',
+        isClosable: true,
+      })
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleBestSelected = () => {
@@ -1115,6 +1409,14 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       // Show selection pages for best/worst
       if (selectionStep === 'select-best' || selectionStep === 'select-worst') {
         const selectedGroup = allGroups[selectedGroupIndex]
+        if (!selectedGroup) {
+          return (
+            <VStack spacing={6} align="stretch">
+              <Text color="gray.500">No group selected or available</Text>
+            </VStack>
+          )
+        }
+        
         const isSelectingBest = selectionStep === 'select-best'
         const question = isSelectingBest
           ? 'If all these indicators were at their worst performance point, which one would you increase first?'
@@ -1349,6 +1651,14 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
 
       // Initial screen to start selection
       const selectedGroup = allGroups[selectedGroupIndex]
+      if (!selectedGroup) {
+        return (
+          <VStack spacing={6} align="stretch">
+            <Text color="gray.500">No group selected or available</Text>
+          </VStack>
+        )
+      }
+      
       return (
         <VStack spacing={6} align="stretch">
           {criteriaMismatch && (
@@ -1962,7 +2272,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             <Button
               colorScheme="red"
               size="sm"
-              onClick={onOpen}
+              onClick={onResetOpen}
               variant="outline"
               isDisabled={isSessionLocked}
               width="100%"
@@ -1975,9 +2285,9 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
 
       {/* Reset Group Confirmation Dialog */}
       <AlertDialog
-        isOpen={isOpen}
+        isOpen={isResetOpen}
         leastDestructiveRef={cancelRef}
-        onClose={onClose}
+        onClose={onResetClose}
       >
         <AlertDialogOverlay>
           <AlertDialogContent>
@@ -1990,14 +2300,14 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             </AlertDialogBody>
 
             <AlertDialogFooter>
-              <Button ref={cancelRef} onClick={onClose}>
+              <Button ref={cancelRef} onClick={onResetClose}>
                 Cancel
               </Button>
               <Button 
                 colorScheme="red" 
                 onClick={() => {
                   handleResetGroup()
-                  onClose()
+                  onResetClose()
                 }} 
                 ml={3}
                 isLoading={saving}
@@ -2018,19 +2328,64 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         maxH="100vh"
         overflowY="auto"
       >
-        {isSessionLocked && (
-          <Box bg="yellow.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="yellow.400" mb={4}>
-            <HStack spacing={2}>
-              <LockIcon color="yellow.800" />
-              <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
-                Session is locked. Editing is disabled.
-              </Text>
-              <Button size="xs" variant="outline" onClick={handleUnlockForModification} isLoading={saving}>
-                Unlock for QI/VF edits
-              </Button>
+        {/* Persistent lock status banner */}
+        {!bwtLockActive && !isSessionLocked ? (
+          <Box bg="blue.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="blue.400" mb={4}>
+            <HStack spacing={2} align="flex-start">
+              <InfoIcon color="blue.600" />
+              <VStack align="start" spacing={2} flex={1}>
+                <Text fontSize="sm" color="blue.800" fontWeight="semibold">
+                  To work on PILE-BWT, you need to lock QI and VF pages. PILE-BWT remains editable while locked.
+                </Text>
+                <Button size="xs" colorScheme="blue" onClick={handleLockForBwt} isLoading={saving}>
+                  Lock QI/VF to continue
+                </Button>
+              </VStack>
             </HStack>
           </Box>
-        )}
+        ) : bwtLockActive ? (
+          <Box bg="green.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="green.400" mb={4}>
+            <HStack spacing={2} align="flex-start">
+              <CheckCircleIcon color="green.600" />
+              <VStack align="start" spacing={2} flex={1}>
+                <Text fontSize="sm" color="green.800" fontWeight="semibold">
+                  QI and VF are locked. You can now work on PILE-BWT elicitation.
+                </Text>
+                {!showUnlockConfirm ? (
+                  <Button size="xs" variant="outline" colorScheme="green" onClick={() => setShowUnlockConfirm(true)} isLoading={saving}>
+                    Unlock for QI/VF edits
+                  </Button>
+                ) : (
+                  <HStack spacing={2}>
+                    <Text fontSize="xs" color="green.800">
+                      This will re-enable QI and VF editing. Continue?
+                    </Text>
+                    <Button size="xs" colorScheme="green" onClick={handleUnlockForModification} isLoading={saving}>
+                      Yes, unlock
+                    </Button>
+                    <Button size="xs" variant="ghost" onClick={() => setShowUnlockConfirm(false)}>
+                      Cancel
+                    </Button>
+                  </HStack>
+                )}
+              </VStack>
+            </HStack>
+          </Box>
+        ) : isSessionLocked ? (
+          <Box bg="red.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="red.400" mb={4}>
+            <HStack spacing={2} align="flex-start">
+              <WarningIcon color="red.600" />
+              <VStack align="start" spacing={1} flex={1}>
+                <Text fontSize="sm" color="red.800" fontWeight="semibold">
+                  This session is locked by the practitioner. PILE-BWT editing is disabled.
+                </Text>
+                <Text fontSize="xs" color="red.700">
+                  Ask the practitioner/admin to unlock this session.
+                </Text>
+              </VStack>
+            </HStack>
+          </Box>
+        ) : null}
         {qualitativeIncomplete && (
           <Alert
             status="warning"

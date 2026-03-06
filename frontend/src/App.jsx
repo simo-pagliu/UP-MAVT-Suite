@@ -209,10 +209,10 @@ function App() {
           {isLoggedIn && currentRole === 'stakeholder' && !showDocumentation && (
             <>
               {currentPage === 'qualitative' && sessionId && features.qi && (
-                <QualitativeIndicatorsPage sessionId={sessionId} />
+                <QualitativeIndicatorsPage sessionId={sessionId} onPageChange={handlePageChange} />
               )}
               {currentPage === 'value' && sessionId && features.vf && (
-                <ValueFunctionsPage sessionId={sessionId} />
+                <ValueFunctionsPage sessionId={sessionId} onPageChange={handlePageChange} />
               )}
               {currentPage === 'pile' && sessionId && features.bwt && (
                 <PileBwtPage sessionId={sessionId} onPageChange={handlePageChange} />

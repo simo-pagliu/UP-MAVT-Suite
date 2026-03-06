@@ -25,9 +25,9 @@ import {
   FormControl,
   FormLabel,
 } from '@chakra-ui/react'
-import { ArrowBackIcon, ArrowForwardIcon, CheckCircleIcon, QuestionIcon } from '@chakra-ui/icons'
+import { ArrowBackIcon, ArrowForwardIcon, CheckCircleIcon, QuestionIcon, LockIcon } from '@chakra-ui/icons'
 import axios from 'axios'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { API_URL } from '../config'
 import QuestionPrompt from '../components/QuestionPrompt'
 
@@ -678,13 +678,14 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
   )
 }
 
-function QualitativeIndicatorsPage({ sessionId }) {
+function QualitativeIndicatorsPage({ sessionId, onPageChange }) {
   const [criteria, setCriteria] = useState([])
   const [qualitativeData, setQualitativeData] = useState({})
   const [activeIndicatorIdx, setActiveIndicatorIdx] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [isSessionLocked, setIsSessionLocked] = useState(false)
+  const [isBwtLockActive, setIsBwtLockActive] = useState(false)
   const [phase, setPhase] = useState('ranking') // 'ranking' or 'adjustment'
   const [currentRanking, setCurrentRanking] = useState(null)
   const [savedValues, setSavedValues] = useState(null)
@@ -794,7 +795,10 @@ function QualitativeIndicatorsPage({ sessionId }) {
         setLoading(true)
         const response = await axios.get(`${API_URL}/session/${sessionId}`)
         const session = response.data
-        setIsSessionLocked(session?.session_locked || false)
+        const practitionerLock = session?.session_locked || false
+        const bwtLock = Boolean(session?.bwt?.qi_vf_lock_active)
+        setIsSessionLocked(practitionerLock || bwtLock)
+        setIsBwtLockActive(bwtLock)
         setCriteria(session?.criteria || [])
         setQualitativeData(session?.qualitative_indicators || {})
       } catch (error) {
@@ -917,6 +921,10 @@ function QualitativeIndicatorsPage({ sessionId }) {
   const handlePhase2CompleteFromTop = (data) => {
     handlePhase2Complete(data)
   }
+
+  const handleTierRankingChange = useCallback((ranking) => {
+    setCurrentRanking(ranking)
+  }, [])
 
   const handlePhase2Complete = async (data) => {
     if (isSessionLocked) {
@@ -1118,9 +1126,25 @@ function QualitativeIndicatorsPage({ sessionId }) {
       >
           {isSessionLocked && (
             <Box bg="yellow.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="yellow.400" mb={4}>
-              <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
-                🔒 Session is locked. Changes are disabled.
-              </Text>
+              <HStack spacing={2} align="flex-start">
+                <LockIcon color="yellow.800" />
+                <VStack align="start" spacing={2} flex={1}>
+                  <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
+                    {isBwtLockActive
+                      ? 'Qualitative Indicators are locked while PILE-BWT is active.'
+                      : 'Qualitative Indicators are locked by the practitioner.'}
+                  </Text>
+                  {isBwtLockActive ? (
+                    <Button size="xs" variant="outline" onClick={() => onPageChange?.('pile')}>
+                      Go to PILE-BWT to unlock
+                    </Button>
+                  ) : (
+                    <Text fontSize="xs" color="yellow.800">
+                      Ask the practitioner/admin to unlock this session.
+                    </Text>
+                  )}
+                </VStack>
+              </HStack>
             </Box>
           )}
 
@@ -1155,10 +1179,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
                     onComplete={handlePhase1Complete}
                     isDisabled={isSessionLocked}
                     initialRanking={currentRanking}
-                    onRankingChange={(ranking) => {
-                      // Update current ranking as user drags alternatives
-                      setCurrentRanking(ranking)
-                    }}
+                    onRankingChange={handleTierRankingChange}
                   />
                 ) : (
                   <SliderPhase
