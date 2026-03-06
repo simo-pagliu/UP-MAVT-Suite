@@ -29,6 +29,7 @@ import { ArrowBackIcon, ArrowForwardIcon, CheckCircleIcon, QuestionIcon } from '
 import axios from 'axios'
 import { useEffect, useState, useRef } from 'react'
 import { API_URL } from '../config'
+import QuestionPrompt from '../components/QuestionPrompt'
 
 const clamp = (v, min, max) => {
   const num = Number.isFinite(v) ? v : min
@@ -174,7 +175,7 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
     <VStack spacing={6} align="stretch">
       <Box>
         <Heading size="md" mb={3}>Step 1: Rank the Alternatives</Heading>
-        <Text fontSize="sm" color="gray.600">Drag alternatives to organize them by preference. Alternatives in the same tier have equal rank. Drop above the first tier or below the last tier to create new ranks.</Text>
+        <QuestionPrompt mb={0}>Drag alternatives to organize them by preference. Alternatives in the same tier have equal rank. Drop above the first tier or below the last tier to create new ranks.</QuestionPrompt>
       </Box>
 
       <VStack spacing={2} align="stretch">
@@ -572,7 +573,7 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
     <VStack spacing={6} align="stretch">
       <Box>
         <Heading size="md">Step 2: Adjust Value Function</Heading>
-        <Text fontSize="sm" color="gray.600">Use sliders to adjust utility values for each rank. Use the toggle to switch between increasing and decreasing functions.</Text>
+        <QuestionPrompt mb={0}>Use sliders to adjust utility values for each rank. Use the toggle to switch between increasing and decreasing functions.</QuestionPrompt>
       </Box>
 
       <HStack spacing={4} wrap="wrap">
@@ -1143,77 +1144,8 @@ function QualitativeIndicatorsPage({ sessionId }) {
 
               <VStack spacing={6} align="stretch">
                 <Box>
-                  <HStack justify="space-between">
-                    <Box>
-                      <Heading size="lg">{activeIndicator.criterion_name}</Heading>
-                      <Text fontSize="sm" color="gray.600" mt={1}>{activeIndicator.description}</Text>
-                    </Box>
-                    <HStack spacing={2}>
-                      {phase === 'ranking' ? (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            leftIcon={<ArrowBackIcon />}
-                            onClick={() => {
-                              if (activeIndicatorIdx > 0) {
-                                const newIdx = activeIndicatorIdx - 1
-                                setActiveIndicatorIdx(newIdx)
-                                loadIndicatorData(newIdx, qualitativeCriteria[newIdx].criterion_name)
-                              }
-                            }}
-                            isDisabled={activeIndicatorIdx === 0}
-                          >
-                            Previous
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            rightIcon={<ArrowForwardIcon />}
-                            onClick={() => {
-                              if (!currentRanking) return
-                              // Ranking complete: go to adjustment for the current indicator
-                              const savedData = qualitativeData[activeIndicator.criterion_name]
-                              if (savedData && hasRankingOrderChanged(savedData.ranking, currentRanking)) {
-                                setSavedValues(null)
-                                setSavedIsIncreasing(null)
-                              }
-                              setPhase('adjustment')
-                            }}
-                            isDisabled={!currentRanking}
-                          >
-                            Next
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            leftIcon={<ArrowBackIcon />}
-                            onClick={handlePhase2Back}
-                          >
-                            Back
-                          </Button>
-                          <Button
-                            size="sm"
-                            colorScheme="blue"
-                            rightIcon={<CheckCircleIcon />}
-                            onClick={() => {
-                              handlePhase2Complete({
-                                ranking: currentRanking,
-                                values: currentAdjustedValues,
-                                isIncreasing: currentIsIncreasing,
-                              })
-                            }}
-                            isLoading={saving}
-                          >
-                            Confirm
-                          </Button>
-                        </>
-                      )}
-                    </HStack>
-                  </HStack>
+                  <Heading size="lg">{activeIndicator.criterion_name}</Heading>
+                  <Text fontSize="sm" color="gray.600" mt={1}>{activeIndicator.description}</Text>
                 </Box>
 
                 {phase === 'ranking' ? (
@@ -1250,6 +1182,71 @@ function QualitativeIndicatorsPage({ sessionId }) {
                     }}
                   />
                 )}
+
+                <HStack spacing={2} justify="flex-end">
+                  {phase === 'ranking' ? (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        leftIcon={<ArrowBackIcon />}
+                        onClick={() => {
+                          if (activeIndicatorIdx > 0) {
+                            const newIdx = activeIndicatorIdx - 1
+                            setActiveIndicatorIdx(newIdx)
+                            loadIndicatorData(newIdx, qualitativeCriteria[newIdx].criterion_name)
+                          }
+                        }}
+                        isDisabled={activeIndicatorIdx === 0}
+                      >
+                        Previous
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        rightIcon={<ArrowForwardIcon />}
+                        onClick={() => {
+                          if (!currentRanking) return
+                          const savedData = qualitativeData[activeIndicator.criterion_name]
+                          if (savedData && hasRankingOrderChanged(savedData.ranking, currentRanking)) {
+                            setSavedValues(null)
+                            setSavedIsIncreasing(null)
+                          }
+                          setPhase('adjustment')
+                        }}
+                        isDisabled={!currentRanking}
+                      >
+                        Next
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        leftIcon={<ArrowBackIcon />}
+                        onClick={handlePhase2Back}
+                      >
+                        Back
+                      </Button>
+                      <Button
+                        size="sm"
+                        colorScheme="blue"
+                        rightIcon={<CheckCircleIcon />}
+                        onClick={() => {
+                          handlePhase2Complete({
+                            ranking: currentRanking,
+                            values: currentAdjustedValues,
+                            isIncreasing: currentIsIncreasing,
+                          })
+                        }}
+                        isLoading={saving}
+                      >
+                        Confirm
+                      </Button>
+                    </>
+                  )}
+                </HStack>
               </VStack>
             </>
           )}

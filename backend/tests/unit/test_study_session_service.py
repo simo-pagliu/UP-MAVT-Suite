@@ -56,6 +56,11 @@ class TestCreate:
         with pytest.raises(ConflictError, match='already exists'):
             svc.create('STUDY-001')
 
+    def test_create_sets_default_vf_method(self, svc):
+        sid = svc.create('VF-METHOD-STUDY')
+        study = svc.get_by_id(sid)
+        assert study['vf_method'] == 'mid-splitting'
+
 
 # ---------------------------------------------------------------------------
 # get_by_id / get_by_code
@@ -105,6 +110,10 @@ class TestUpdateFeatures:
         # Passing None for features should not crash; features dict stays unchanged.
         result = svc.update_features(study_id, None)
         assert 'features' in result
+
+    def test_update_features_updates_vf_method(self, svc, study_id):
+        result = svc.update_features(study_id, {'qi': True}, 'free-edit')
+        assert result['vf_method'] == 'free-edit'
 
 
 # ---------------------------------------------------------------------------

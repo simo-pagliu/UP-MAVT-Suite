@@ -14,10 +14,10 @@ function Navigation({
   onDocumentation,
 }) {
   const baseStakeholderPages = [
+    { id: 'recap', label: 'Overview', requiresSession: true },
     { id: 'qualitative', label: 'Qualitative Indicators', requiresSession: true, featureKey: 'qi' },
     { id: 'value', label: 'Value Functions', requiresSession: true, featureKey: 'vf' },
     { id: 'pile', label: 'PILE-BWT', requiresSession: true, featureKey: 'bwt' },
-    { id: 'recap', label: 'Recap', requiresSession: true },
   ]
 
   // Filter pages based on enabled features
@@ -25,12 +25,12 @@ function Navigation({
     if (page.featureKey) {
       return features[page.featureKey]
     }
-    return true // Recap always shown
+    return true // Overview always shown
   })
 
   const practitionerPages = [
-    { id: 'case-study', label: 'Manage Case Studies' },
     { id: 'input-definition', label: 'Input Definition', requiresStudy: true },
+    { id: 'case-study', label: 'Manage Case Studies' },
     { id: 'run-up-mavt', label: 'Run UP-MAVT', requiresStudy: true },
   ]
 

@@ -123,6 +123,14 @@ class TestUpdateStudySession:
         assert resp.status_code == 200
         assert resp.json['code'] == 'STUDY-001'
 
+    def test_update_vf_method_ok(self, client):
+        sid = create_study(client)
+        resp = client.patch(f'/api/study-session/{sid}', json={
+            'vf_method': 'free-edit'
+        })
+        assert resp.status_code == 200
+        assert resp.json['vf_method'] == 'free-edit'
+
 
 # ---------------------------------------------------------------------------
 # DELETE /api/study-session/<id>

@@ -80,7 +80,7 @@ describe('Navigation – admin role', () => {
 // Navigation items – stakeholder role
 // ---------------------------------------------------------------------------
 describe('Navigation – stakeholder role', () => {
-  it('shows only enabled feature pages (+ Recap)', () => {
+  it('shows only enabled feature pages (+ Overview)', () => {
     renderNavigation({
       isLoggedIn: true,
       currentRole: 'stakeholder',
@@ -90,7 +90,7 @@ describe('Navigation – stakeholder role', () => {
     expect(screen.getByRole('button', { name: /qualitative indicators/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /value functions/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /pile-bwt/i })).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /recap/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /overview/i })).toBeInTheDocument()
   })
 
   it('shows all pages when all features enabled', () => {
@@ -103,7 +103,7 @@ describe('Navigation – stakeholder role', () => {
     expect(screen.getByRole('button', { name: /qualitative indicators/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /value functions/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /pile-bwt/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /recap/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /overview/i })).toBeInTheDocument()
   })
 
   it('disables page buttons when sessionId is not set', () => {
@@ -126,7 +126,7 @@ describe('Navigation – stakeholder role', () => {
       features: { qi: true, vf: false, bwt: false },
       onPageChange,
     })
-    await userEvent.click(screen.getByRole('button', { name: /recap/i }))
+    await userEvent.click(screen.getByRole('button', { name: /overview/i }))
     expect(onPageChange).toHaveBeenCalledWith('recap')
   })
 })
@@ -135,15 +135,22 @@ describe('Navigation – stakeholder role', () => {
 // Navigation items – practitioner role
 // ---------------------------------------------------------------------------
 describe('Navigation – practitioner role', () => {
-  it('shows practitioner-specific pages', () => {
+  it('shows practitioner-specific pages in the required order', () => {
     renderNavigation({
       isLoggedIn: true,
       currentRole: 'practitioner',
       studySessionId: 'study-1',
     })
-    expect(screen.getByRole('button', { name: /manage case studies/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /input definition/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /run up-mavt/i })).toBeInTheDocument()
+    const buttons = screen.getAllByRole('button')
+    const labels = buttons.map((btn) => btn.textContent)
+    const inputIdx = labels.indexOf('Input Definition')
+    const manageIdx = labels.indexOf('Manage Case Studies')
+    const runIdx = labels.indexOf('Run UP-MAVT')
+    expect(inputIdx).toBeGreaterThan(-1)
+    expect(manageIdx).toBeGreaterThan(-1)
+    expect(runIdx).toBeGreaterThan(-1)
+    expect(inputIdx).toBeLessThan(manageIdx)
+    expect(manageIdx).toBeLessThan(runIdx)
   })
 
   it('disables Input Definition and Run UP-MAVT when there is no study session', () => {

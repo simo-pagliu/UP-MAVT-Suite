@@ -103,6 +103,7 @@ function InputPage({ studySessionId }, ref) {
       group: c.group || '',
       description: c.description || '',
       is_qualitative: c.is_qualitative || false,
+      use_mid_splitting: c.use_mid_splitting !== undefined ? c.use_mid_splitting : true,
       use_custom_min_max: c.use_custom_min_max || false,
       min_value: c.min_value || '',
       max_value: c.max_value || '',
@@ -176,6 +177,83 @@ function InputPage({ studySessionId }, ref) {
     setIsEditing(false)
     setIsLocked(true)
     setHasModifiedInput(false)
+  }
+
+  const detectCriteriaChanges = (oldCriteria, newCriteria) => {
+    // Returns { affectedCriteria: [...criterion_names], affectedGroups: [...group_names] }
+    const affectedCriteria = []
+    const affectedGroups = new Set()
+    
+    // Create maps by name
+    const oldMap = new Map(oldCriteria.map(c => [c.criterion_name, c]))
+    const newMap = new Map(newCriteria.map(c => [c.criterion_name, c]))
+    
+    // Check for removed criteria
+    for (const oldCrit of oldCriteria) {
+      if (!newMap.has(oldCrit.criterion_name)) {
+        affectedCriteria.push(oldCrit.criterion_name)
+        if (oldCrit.group) affectedGroups.add(oldCrit.group)
+      }
+    }
+    
+    // Check for added or changed criteria
+    for (const newCrit of newCriteria) {
+      const oldCrit = oldMap.get(newCrit.criterion_name)
+      
+      if (!oldCrit) {
+        // New criterion - no need to reset anything
+        continue
+      }
+      
+      // Check for "dangerous" changes that affect data
+      let hasDataChange = false
+      
+      // Check if group changed
+      if (oldCrit.group !== newCrit.group) {
+        hasDataChange = true
+        if (oldCrit.group) affectedGroups.add(oldCrit.group)
+        if (newCrit.group) affectedGroups.add(newCrit.group)
+      }
+      
+      // Check if qualitative flag changed
+      if (oldCrit.is_qualitative !== newCrit.is_qualitative) {
+        hasDataChange = true
+      }
+      
+      // Check if min/max changed
+      if (oldCrit.min_value !== newCrit.min_value || oldCrit.max_value !== newCrit.max_value) {
+        hasDataChange = true
+      }
+      
+      if (oldCrit.use_custom_min_max !== newCrit.use_custom_min_max) {
+        hasDataChange = true
+      }
+      
+      // Check if alternatives changed (count, names, or values)
+      const oldAlts = oldCrit.alternatives || []
+      const newAlts = newCrit.alternatives || []
+      
+      if (oldAlts.length !== newAlts.length) {
+        hasDataChange = true
+      } else {
+        for (let i = 0; i < oldAlts.length; i++) {
+          if (oldAlts[i].name !== newAlts[i].name || oldAlts[i].value !== newAlts[i].value) {
+            hasDataChange = true
+            break
+          }
+        }
+      }
+      
+      if (hasDataChange) {
+        affectedCriteria.push(newCrit.criterion_name)
+        if (newCrit.group) affectedGroups.add(newCrit.group)
+      }
+    }
+    
+    return {
+      affectedCriteria,
+      affectedGroups: Array.from(affectedGroups)
+    }
   }
 
   const handleFileUpload = (event) => {
@@ -328,6 +406,7 @@ function InputPage({ studySessionId }, ref) {
           description: descriptions[idx] || '',
           unit: units[idx],
           is_qualitative: false,
+          use_mid_splitting: true,
           use_custom_min_max: hasCustomMinMax,
           min_value: minValues[idx] || '',
           max_value: maxValues[idx] || '',
@@ -483,6 +562,7 @@ function InputPage({ studySessionId }, ref) {
       group: '',
       description: '',
       is_qualitative: false,
+      use_mid_splitting: true,
       unit: '',
       alternatives: Array(alternativeCount).fill(null).map((_, idx) => ({
         name: criteria[0].alternatives[idx].name,
@@ -576,9 +656,18 @@ function InputPage({ studySessionId }, ref) {
     setLoading(true)
     try {
       if (isExistingStudySession && studySessionId) {
-        // If there are existing sessions and input was modified, reset them
+        // If there are existing sessions and input was modified, selectively reset affected data
         if (hasExistingSessions && hasModifiedInput) {
-          await axios.post(`${API_URL}/study-session/${studySessionId}/reset-sessions`)
+          const changes = detectCriteriaChanges(originalCriteria, criteria)
+          
+          if (changes.affectedCriteria.length > 0 || changes.affectedGroups.length > 0) {
+            // Selective reset: only reset affected criteria and groups
+            await axios.post(`${API_URL}/study-session/${studySessionId}/selective-reset`, {
+              criteria: changes.affectedCriteria,
+              groups: changes.affectedGroups
+            })
+          }
+          // If no affected criteria/groups, don't reset anything
         }
         
         await axios.put(`${API_URL}/study-session/${studySessionId}/input`, { criteria })
@@ -792,6 +881,14 @@ function InputPage({ studySessionId }, ref) {
                             size="sm"
                           >
                             <Text fontSize="xs">Custom Min/Max</Text>
+                          </Checkbox>
+                          <Checkbox
+                            isChecked={criterion.use_mid_splitting}
+                            onChange={(e) => handleCellChange(idx, 'use_mid_splitting', e.target.checked)}
+                            isDisabled={isLocked || criterion.is_qualitative}
+                            size="sm"
+                          >
+                            <Text fontSize="xs">Mid-value splitting</Text>
                           </Checkbox>
                           {criterion.use_custom_min_max && (
                             <>

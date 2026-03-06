@@ -167,8 +167,12 @@ def get_study_session(study_session_id):
 def update_study_session(study_session_id):
     data = request.json or {}
     svc = StudySessionService(current_app.db)
-    if 'features' in data:
-        result = svc.update_features(study_session_id, data.get('features', {}))
+    if 'features' in data or 'vf_method' in data:
+        result = svc.update_features(
+            study_session_id,
+            data.get('features', {}),
+            data.get('vf_method'),
+        )
         return jsonify(result), 200
     return jsonify(svc.get_by_id(study_session_id)), 200
 
@@ -196,6 +200,17 @@ def get_study_input(study_session_id):
 def reset_elicitation_sessions(study_session_id):
     deleted = StudySessionService(current_app.db).reset_elicitation_sessions(study_session_id)
     return jsonify({'status': 'reset', 'deleted_count': deleted}), 200
+
+
+@bp.route('/study-session/<study_session_id>/selective-reset', methods=['POST'])
+def selective_reset_sessions(study_session_id):
+    data = request.json or {}
+    affected_criteria = data.get('criteria', [])
+    affected_groups = data.get('groups', [])
+    result = StudySessionService(current_app.db).selective_reset_sessions(
+        study_session_id, affected_criteria, affected_groups
+    )
+    return jsonify(result), 200
 
 
 @bp.route('/study-session/<study_session_id>/elicitation-session', methods=['POST'])

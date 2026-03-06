@@ -38,6 +38,7 @@ import axios from 'axios'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { parseDistribution, computeDistributionBounds } from '../utils/distributionUtils'
 import { API_URL } from '../config'
+import QuestionPrompt from '../components/QuestionPrompt'
 
 const SHAPES = [
   { value: 'linear_increasing', label: 'Piecewise linear increasing', helper: 'Starts at 0 and rises to 1.' },
@@ -55,8 +56,6 @@ const clamp = (v, min, max) => {
 }
 
 const sortByX = (pts) => [...pts].sort((a, b) => a.x - b.x)
-
-const formatPointsForCsv = (points) => points.map((p) => `${p.x}:${p.y}`).join(';')
 
 const deriveRange = (criterion) => {
   const alternatives = criterion.alternatives || []
@@ -325,6 +324,7 @@ function ValueFunctionsPage({ sessionId }) {
   const [criteria, setCriteria] = useState([])
   const [valueFunctions, setValueFunctions] = useState({})
   const [active, setActive] = useState(null)
+  const [midFlowStep, setMidFlowStep] = useState({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [lastSaved, setLastSaved] = useState(null)
@@ -370,11 +370,15 @@ function ValueFunctionsPage({ sessionId }) {
             skipFirst: persisted.midSplit?.skipFirst ?? false,
             skipSecond: persisted.midSplit?.skipSecond ?? false,
             skipThird: persisted.midSplit?.skipThird ?? false,
+            directionAnswered: persisted.midSplit?.directionAnswered ?? false,
           }
+
+          // Determine mode from criterion setting
+          const mode = criterion.use_mid_splitting !== false ? MODE.MID : MODE.FREE
 
           let points = persisted.points
           if (!Array.isArray(points) || points.length === 0) {
-            if (persisted.mode === MODE.MID) {
+            if (mode === MODE.MID) {
               points = buildMidSplitPoints(range, shape, midSplit, thresholds)
             } else {
               points = defaultPointsForShape(shape, range, gaussian)
@@ -383,7 +387,7 @@ function ValueFunctionsPage({ sessionId }) {
 
           // Apply threshold anchors for linear shapes so extrema follow low/high
           if (shape === 'linear_increasing' || shape === 'linear_decreasing') {
-            points = persisted.mode === MODE.MID
+            points = mode === MODE.MID
               ? buildMidSplitPoints(range, shape, midSplit, thresholds)
               : buildThresholdAnchors(shape, thresholds, range)
           }
@@ -391,7 +395,7 @@ function ValueFunctionsPage({ sessionId }) {
           vf[name] = {
             shape,
             thresholds,
-            mode: shape.startsWith('gaussian') ? MODE.FREE : (persisted.mode || MODE.MID),
+            mode,
             midSplit,
             gaussian,
             points: clampPointsToRange(points, range),
@@ -494,16 +498,48 @@ function ValueFunctionsPage({ sessionId }) {
   }
 
   const activeData = active ? valueFunctions[active] : null
+  const currentMidStep = active ? (midFlowStep[active] ?? 0) : 0
 
-  const handleShapeChange = (shape) => {
+  useEffect(() => {
+    if (!active || !activeData || activeData.mode !== MODE.MID) return
+    if (midFlowStep[active] !== undefined) return
+    const ms = activeData.midSplit || {}
+    let initialStep = 0
+    if (ms.directionAnswered) {
+      initialStep = 1 // Go to confidence/thresholds step
+      if (ms.skipFirst || ms.step1 !== null) {
+        initialStep = 2 // Go to step 1 (0.5 midpoint)
+      }
+      if (ms.skipSecond || ms.step2 !== null || ms.skipFirst) {
+        initialStep = 3 // Go to step 3 (quarter points)
+      }
+      if (ms.skipThird || ms.step3 !== null || ms.skipFirst) {
+        initialStep = 4 // Complete
+      }
+    }
+    setMidFlowStep((prev) => ({ ...prev, [active]: initialStep }))
+  }, [active, activeData, midFlowStep])
+
+  const setCurrentMidStep = (nextStep) => {
+    if (!active) return
+    setMidFlowStep((prev) => ({
+      ...prev,
+      [active]: Math.min(Math.max(nextStep, 0), 3),
+    }))
+  }
+
+  const handleDirectionChange = (shape) => {
     if (!activeData) return
     markDirty((prev) => {
       const updated = { ...prev }
       const entry = { ...updated[active] }
       entry.shape = shape
-      entry.points = entry.mode === MODE.MID
-        ? buildMidSplitPoints(entry.range, shape, entry.midSplit, entry.thresholds)
-        : buildThresholdAnchors(shape, entry.thresholds, entry.range)
+      entry.midSplit = {
+        ...entry.midSplit,
+        directionAnswered: true,
+      }
+      entry.mode = MODE.MID
+      entry.points = buildMidSplitPoints(entry.range, shape, entry.midSplit, entry.thresholds)
       updated[active] = entry
       return updated
     })
@@ -548,19 +584,19 @@ function ValueFunctionsPage({ sessionId }) {
   const handleMidSplitChange = (stepKey, valueNum, shouldClamp = true) => {
     if (!activeData) return
     const { range, shape, thresholds, midSplit } = activeData
-    let finalValue = valueNum ?? range.min
+      let finalValue = valueNum ?? thresholds.low
     
     if (shouldClamp) {
-      // Enforce indifference point constraints
+        // Enforce indifference point constraints based on threshold-relative logic
       if (stepKey === 'step1') {
-        // Step 1 must be between low and high thresholds
+          // Step 1 (0.5 point): must be between low and high thresholds
         finalValue = clamp(finalValue, thresholds.low, thresholds.high)
       } else if (stepKey === 'step2') {
-        // Step 2 must be between low threshold and step1
+          // Step 2 (0.25 point): must be between low threshold and step1
         const maxVal = midSplit.step1 ?? thresholds.high
         finalValue = clamp(finalValue, thresholds.low, maxVal)
       } else if (stepKey === 'step3') {
-        // Step 3 must be between step1 and high threshold
+          // Step 3 (0.75 point): must be between step1 and high threshold
         const minVal = midSplit.step1 ?? thresholds.low
         finalValue = clamp(finalValue, minVal, thresholds.high)
       }
@@ -592,6 +628,61 @@ function ValueFunctionsPage({ sessionId }) {
       updated[active] = { ...updated[active], midSplit: ms, mode: MODE.MID, points }
       return updated
     })
+  }
+
+  const handleMidNext = () => {
+    if (!activeData) return
+    if (currentMidStep === 0) {
+      if (!activeData.midSplit?.directionAnswered) return
+      setCurrentMidStep(1) // Go to confidence/thresholds
+      return
+    }
+    if (currentMidStep === 1) {
+      // From confidence/thresholds, go to step 1 (0.5 midpoint)
+      setCurrentMidStep(2)
+      return
+    }
+    if (currentMidStep === 2) {
+      // Check if we should go to step 3
+      if (!(activeData.midSplit?.skipFirst || activeData.midSplit?.step1 !== null)) return
+      setCurrentMidStep(3)
+      return
+    }
+    if (currentMidStep === 3) {
+      // Done with all steps
+      if (!(activeData.midSplit?.skipThird || activeData.midSplit?.step3 !== null || activeData.midSplit?.skipFirst)) return
+      setCurrentMidStep(4)
+    }
+  }
+
+  const handleMidDone = () => {
+    if (!activeData) return
+    if (activeData.midSplit?.skipThird || activeData.midSplit?.step3 !== null || activeData.midSplit?.skipFirst) {
+      setCurrentMidStep(4)
+      toast({
+        title: 'Criterion completed',
+        status: 'success',
+        duration: 1200,
+        isClosable: true,
+      })
+    }
+  }
+
+  const handleSkipCurrentStep = () => {
+    if (!activeData) return
+    if (currentMidStep === 2) {
+      // Skipping step 1 (0.5 midpoint)
+      handleSkipStep('skipFirst', true)
+      setCurrentMidStep(3)
+      return
+    }
+    if (currentMidStep === 3) {
+      // Skipping step 3 (quarter points)
+      handleSkipStep('skipSecond', true)
+      handleSkipStep('skipThird', true)
+      setCurrentMidStep(4)
+      return
+    }
   }
 
   const handleGaussianChange = (key, valueNum) => {
@@ -692,10 +783,43 @@ function ValueFunctionsPage({ sessionId }) {
     const filled = nonQualCriteria.filter((c) => {
       const name = c.criterion_name || `Criterion ${criteria.indexOf(c) + 1}`
       const entry = valueFunctions[name]
-      return entry && Array.isArray(entry.points) && entry.points.length >= 2
+      if (!entry) return false
+      if (entry.mode === MODE.FREE) {
+        return Array.isArray(entry.points) && entry.points.length >= 2
+      }
+      return entry.midSplit?.directionAnswered === true && (entry.midSplit?.skipFirst === true || entry.midSplit?.step1 !== null)
     }).length
     return Math.round((filled / nonQualCriteria.length) * 100)
   }, [criteria, valueFunctions])
+
+  const nonQualCriteria = useMemo(
+    () => criteria.filter((criterion) => !criterion.is_qualitative),
+    [criteria],
+  )
+
+  const activeCriterionIndex = useMemo(() => {
+    if (!active) return -1
+    return nonQualCriteria.findIndex((criterion, idx) => {
+      const name = criterion.criterion_name || `Criterion ${idx + 1}`
+      return name === active
+    })
+  }, [active, nonQualCriteria])
+
+  useEffect(() => {
+    if (active || nonQualCriteria.length === 0) return
+    const first = nonQualCriteria[0]
+    const firstName = first.criterion_name || 'Criterion 1'
+    setActive(firstName)
+  }, [active, nonQualCriteria])
+
+  const handleNavigateCriterion = (direction) => {
+    if (activeCriterionIndex < 0) return
+    const nextIndex = activeCriterionIndex + direction
+    if (nextIndex < 0 || nextIndex >= nonQualCriteria.length) return
+    const target = nonQualCriteria[nextIndex]
+    const targetName = target.criterion_name || `Criterion ${nextIndex + 1}`
+    setActive(targetName)
+  }
 
   if (loading) {
     return (
@@ -730,7 +854,7 @@ function ValueFunctionsPage({ sessionId }) {
         <VStack spacing={4} align="stretch" mb={6}>
           <Heading size="md">Value Functions</Heading>
           <Text fontSize="sm" color="gray.600">
-            Define value function for criterion levels through mid-value splitting method or free design.
+            Define value functions for each criterion using either mid-value splitting or free edit (set per criterion in Input Definition).
           </Text>
           {isSessionLocked && (
             <Text fontSize="xs" color="orange.600">
@@ -744,15 +868,12 @@ function ValueFunctionsPage({ sessionId }) {
             const entry = valueFunctions[name]
             const isActive = active === name
             
-            // Mark as done based on mode:
-            // - Mid-splitting: user skipped or filled indifference points
-            // - Free edit: user actively chose this mode (can't skip in free edit)
             const done = entry && (
-              (entry.mode === 'mid-splitting' && (
-                entry.midSplit?.skipFirst === true || 
-                entry.midSplit?.step1 !== null
+              (entry.mode === MODE.MID && (
+                entry.midSplit?.directionAnswered === true &&
+                (entry.midSplit?.skipFirst === true || entry.midSplit?.step1 !== null)
               )) ||
-              (entry.mode === 'free-edit')
+              (entry.mode === MODE.FREE)
             )
             
             return (
@@ -799,174 +920,152 @@ function ValueFunctionsPage({ sessionId }) {
       >
         {activeData ? (
             <VStack align="stretch" spacing={5}>
-              <VStack align="stretch" spacing={3}>
-                <Heading size="md">{active}</Heading>
-                <Box bg="gray.50" p={3} borderRadius="md" border="1px solid" borderColor="gray.200">
-                  <Text fontSize="sm" fontWeight="semibold" mb={2}>
-                    RANGE: [{activeData.range.min} – {activeData.range.max}]
-                  </Text>
-                  {(() => {
-                    const activeCriterion = criteria.find((c) => (c.criterion_name || `Criterion ${criteria.indexOf(c) + 1}`) === active)
-                    if (activeCriterion) {
-                      return (
-                        <>
-                          {activeCriterion.unit && (
-                            <Text fontSize="sm" color="gray.700">
-                              <strong>Unit:</strong> {activeCriterion.unit}
-                            </Text>
-                          )}
-                          {activeCriterion.description && (
-                            <Text fontSize="sm" color="gray.700">
-                              <strong>Description:</strong> {activeCriterion.description}
-                            </Text>
-                          )}
-                        </>
-                      )
-                    }
-                    return null
-                  })()}
-                </Box>
+              <VStack align="stretch" spacing={2}>
+                {(() => {
+                  const activeCriterion = criteria.find((c) => (c.criterion_name || `Criterion ${criteria.indexOf(c) + 1}`) === active)
+                  const unit = activeCriterion?.unit ? ` [${activeCriterion.unit}]` : ''
+                  return (
+                    <>
+                      <Heading size="md">{active}{unit}</Heading>
+                      {activeCriterion?.description && (
+                        <Text fontSize="sm" color="gray.700">{activeCriterion.description}</Text>
+                      )}
+                    </>
+                  )
+                })()}
               </VStack>
-
-              <Box>
-                <FormLabel fontWeight="bold" mb={3}>Editing Method</FormLabel>
-                <Flex justify="space-between" align="flex-end" gap={4}>
-                  <HStack spacing={2}>
-                    <Button
-                      variant={activeData.mode === MODE.MID ? 'solid' : 'outline'}
-                      colorScheme="blue"
-                      isDisabled={activeData.shape.startsWith('gaussian')}
-                      onClick={() => {
-                        markDirty((prev) => ({
-                          ...prev,
-                          [active]: { ...prev[active], mode: MODE.MID },
-                        }))
-                      }}
-                    >
-                      Mid-splitting
-                    </Button>
-                    <Button
-                      variant={activeData.mode === MODE.FREE ? 'solid' : 'outline'}
-                      colorScheme="blue"
-                      onClick={() => {
-                        markDirty((prev) => ({
-                          ...prev,
-                          [active]: { ...prev[active], mode: MODE.FREE },
-                      }))
-                      }}
-                    >
-                      Free Edit
-                    </Button>
-                  </HStack>
-                  
-                  <HStack spacing={2} align="flex-end">
-                    <VStack spacing={0} align="flex-start">
-                      <HStack spacing={1} mb={1}>
-                        <Text fontSize="sm" fontWeight="medium">Confidence</Text>
-                        <Tooltip
-                          label={
-                            <Box>
-                              <Text fontWeight="bold" mb={1}>Confidence Levels:</Text>
-                              <Text>0 - Not confident at all (±10%)</Text>
-                              <Text>1 - Low confidence (±7.5%)</Text>
-                              <Text>2 - Medium confidence (±5%)</Text>
-                              <Text>3 - High confidence (±2.5%)</Text>
-                              <Text>4 - Fully confident (no uncertainty)</Text>
-                            </Box>
-                          }
-                          placement="left"
-                          hasArrow
-                        >
-                          <QuestionIcon color="gray.500" boxSize={3} cursor="help" />
-                        </Tooltip>
-                      </HStack>
-                      <Select
-                        value={activeData.confidence ?? 4}
-                        onChange={(e) => handleConfidenceChange(e.target.value)}
-                        size="md"
-                        minW="220px"
-                      >
-                        <option value="0">0 - Not confident (±10%)</option>
-                        <option value="1">1 - Low (±7.5%)</option>
-                        <option value="2">2 - Medium (±5%)</option>
-                        <option value="3">3 - High (±2.5%)</option>
-                        <option value="4">4 - Fully confident</option>
-                      </Select>
-                    </VStack>
-                  </HStack>
-                </Flex>
-              </Box>
-
-              <Box>
-                <FormLabel fontWeight="bold">Shape</FormLabel>
-                <RadioGroup value={activeData.shape} onChange={handleShapeChange}>
-                  <Stack direction="column" spacing={2}>
-                    {SHAPES.map((opt) => (
-                      <Tooltip key={opt.value} label={opt.helper} placement="right">
-                        <Radio value={opt.value}>{opt.label}</Radio>
-                      </Tooltip>
-                    ))}
-                  </Stack>
-                </RadioGroup>
-              </Box>
-
-              <SimpleGrid columns={[1, 2]} spacing={4}>
-                <FormControl>
-                  <FormLabel>Low threshold</FormLabel>
-                  <Tooltip
-                    isOpen={clampHint?.field === 'low'}
-                    label={`Auto-clamped to ${clampHint?.value}`}
-                    placement="top"
-                  >
-                    <Input
-                      key={`low-${activeData.thresholds.low}`}
-                      type="number"
-                      defaultValue={activeData.thresholds.low}
-                      onBlur={(e) => {
-                        const num = parseFloat(e.target.value)
-                        if (Number.isFinite(num)) handleThresholdChange('low', num)
-                      }}
-                    />
-                  </Tooltip>
-                </FormControl>
-                <FormControl>
-                  <FormLabel>High threshold</FormLabel>
-                  <Tooltip
-                    isOpen={clampHint?.field === 'high'}
-                    label={`Auto-clamped to ${clampHint?.value}`}
-                    placement="top"
-                  >
-                    <Input
-                      key={`high-${activeData.thresholds.high}`}
-                      type="number"
-                      defaultValue={activeData.thresholds.high}
-                      onBlur={(e) => {
-                        const num = parseFloat(e.target.value)
-                        if (Number.isFinite(num)) handleThresholdChange('high', num)
-                      }}
-                    />
-                  </Tooltip>
-                </FormControl>
-              </SimpleGrid>
 
               {activeData.mode === MODE.MID ? (
                 <VStack align="stretch" spacing={4}>
-                  <Box>
-                    <Flex align="center" justify="space-between" mb={3}>
-                      <FormLabel m={0} fontWeight="bold">Indifference point 0.5</FormLabel>
-                      <HStack>
-                        <Text fontSize="sm" color="gray.600">Skip</Text>
-                        <Checkbox
-                          isChecked={activeData.midSplit.skipFirst}
-                          onChange={(e) => handleSkipStep('skipFirst', e.target.checked)}
-                        />
+                  {currentMidStep === 0 && (
+                    <VStack align="stretch" spacing={3}>
+                      <QuestionPrompt>
+                        Step 1: Is the value function for <strong>{active}</strong> increasing or decreasing?
+                      </QuestionPrompt>
+                      <HStack spacing={2}>
+                        <Button
+                          variant={activeData.shape === 'linear_increasing' ? 'solid' : 'outline'}
+                          colorScheme="blue"
+                          onClick={() => handleDirectionChange('linear_increasing')}
+                        >
+                          ↗ Increasing
+                        </Button>
+                        <Button
+                          variant={activeData.shape === 'linear_decreasing' ? 'solid' : 'outline'}
+                          colorScheme="blue"
+                          onClick={() => handleDirectionChange('linear_decreasing')}
+                        >
+                          ↘ Decreasing
+                        </Button>
                       </HStack>
-                    </Flex>
-                    {!activeData.midSplit.skipFirst && (
-                      <VStack align="stretch" spacing={2}>
-                        <Text fontSize="sm" color="gray.700">
-                          At which point X increasing <strong>{active}</strong> from <strong>{activeData.range.min}</strong> to <strong>X</strong> has the same importance as increasing it from <strong>X</strong> to <strong>{activeData.range.max}</strong>?
-                        </Text>
+                      <HStack>
+                        <Button
+                          colorScheme="blue"
+                          onClick={handleMidNext}
+                          isDisabled={!activeData.midSplit?.directionAnswered}
+                        >
+                          Next
+                        </Button>
+                      </HStack>
+                    </VStack>
+                  )}
+
+                  {currentMidStep === 1 && (
+                    <VStack align="stretch" spacing={3}>
+                      <QuestionPrompt>
+                        Step 2: Set the confidence and thresholds for <strong>{active}</strong>.
+                      </QuestionPrompt>
+                      <HStack spacing={4} align="flex-end" wrap="wrap">
+                        <Box>
+                          <HStack spacing={1} mb={2}>
+                            <FormLabel fontSize="sm" m={0} fontWeight="medium">Confidence</FormLabel>
+                            <Tooltip
+                              label={
+                                <Box>
+                                  <Text fontWeight="bold" mb={1}>Confidence Levels:</Text>
+                                  <Text>0 - Not confident at all (±10%)</Text>
+                                  <Text>1 - Low confidence (±7.5%)</Text>
+                                  <Text>2 - Medium confidence (±5%)</Text>
+                                  <Text>3 - High confidence (±2.5%)</Text>
+                                  <Text>4 - Fully confident (no uncertainty)</Text>
+                                </Box>
+                              }
+                              placement="top"
+                              hasArrow
+                            >
+                              <QuestionIcon color="gray.500" boxSize={3} cursor="help" />
+                            </Tooltip>
+                          </HStack>
+                          <Select
+                            value={activeData.confidence ?? 4}
+                            onChange={(e) => handleConfidenceChange(e.target.value)}
+                            size="sm"
+                            minW="180px"
+                          >
+                            <option value="0">0 - Not confident (±10%)</option>
+                            <option value="1">1 - Low (±7.5%)</option>
+                            <option value="2">2 - Medium (±5%)</option>
+                            <option value="3">3 - High (±2.5%)</option>
+                            <option value="4">4 - Fully confident</option>
+                          </Select>
+                        </Box>
+                        <FormControl maxW="150px">
+                          <FormLabel fontSize="sm" m={0} fontWeight="medium">Low threshold</FormLabel>
+                          <Tooltip
+                            isOpen={clampHint?.field === 'low'}
+                            label={`Auto-clamped to ${clampHint?.value}`}
+                            placement="top"
+                          >
+                            <Input
+                              key={`low-${activeData.thresholds.low}`}
+                              type="number"
+                              size="sm"
+                              defaultValue={activeData.thresholds.low}
+                              onBlur={(e) => {
+                                const num = parseFloat(e.target.value)
+                                if (Number.isFinite(num)) handleThresholdChange('low', num)
+                              }}
+                            />
+                          </Tooltip>
+                        </FormControl>
+                        <FormControl maxW="150px">
+                          <FormLabel fontSize="sm" m={0} fontWeight="medium">High threshold</FormLabel>
+                          <Tooltip
+                            isOpen={clampHint?.field === 'high'}
+                            label={`Auto-clamped to ${clampHint?.value}`}
+                            placement="top"
+                          >
+                            <Input
+                              key={`high-${activeData.thresholds.high}`}
+                              type="number"
+                              size="sm"
+                              defaultValue={activeData.thresholds.high}
+                              onBlur={(e) => {
+                                const num = parseFloat(e.target.value)
+                                if (Number.isFinite(num)) handleThresholdChange('high', num)
+                              }}
+                            />
+                          </Tooltip>
+                        </FormControl>
+                      </HStack>
+                      <HStack>
+                        <Button variant="outline" onClick={() => setCurrentMidStep(0)}>Back</Button>
+                        <Button
+                          colorScheme="blue"
+                          onClick={handleMidNext}
+                        >
+                          Next
+                        </Button>
+                      </HStack>
+                    </VStack>
+                  )}
+
+                  {currentMidStep === 2 && (
+                    <VStack align="stretch" spacing={3}>
+                      <QuestionPrompt>
+                        Step 3: At which point X is equally important to improve <strong>{active}</strong> from <strong>{activeData.thresholds.low}</strong> to <strong>X</strong> as from <strong>X</strong> to <strong>{activeData.thresholds.high}</strong>?
+                      </QuestionPrompt>
+                      {!activeData.midSplit.skipFirst && (
                         <Input
                           key={`mid-step1-${activeData.midSplit.step1 ?? 'blank'}`}
                           type="number"
@@ -977,108 +1076,148 @@ function ValueFunctionsPage({ sessionId }) {
                             if (Number.isFinite(num)) handleMidSplitChange('step1', num, true)
                           }}
                         />
-                      </VStack>
-                    )}
-                  </Box>
-
-                  {!activeData.midSplit.skipFirst && (
-                    <>
-                      <Divider />
-                      <Box>
-                        <Flex align="center" justify="space-between" mb={3}>
-                          <FormLabel m={0} fontWeight="bold">Indifference point 0.25</FormLabel>
-                          <HStack>
-                            <Text fontSize="sm" color="gray.600">Skip</Text>
-                            <Checkbox
-                              isChecked={activeData.midSplit.skipSecond}
-                              onChange={(e) => handleSkipStep('skipSecond', e.target.checked)}
-                            />
-                          </HStack>
-                        </Flex>
-                        {!activeData.midSplit.skipSecond && (
-                          <VStack align="stretch" spacing={2}>
-                            <Text fontSize="sm" color="gray.700">
-                              At which point X increasing <strong>{active}</strong> from <strong>{activeData.range.min}</strong> to <strong>X</strong> has the same importance as increasing it from <strong>X</strong> to <strong>{activeData.midSplit.step1 ?? activeData.range.max}</strong>?
-                            </Text>
-                            <Input
-                              key={`mid-step2-${activeData.midSplit.step2 ?? 'blank'}`}
-                              type="number"
-                              defaultValue={activeData.midSplit.step2 ?? ''}
-                              placeholder="Enter X"
-                              onBlur={(e) => {
-                                const num = parseFloat(e.target.value)
-                                if (Number.isFinite(num)) handleMidSplitChange('step2', num, true)
-                              }}
-                            />
-                          </VStack>
-                        )}
-                      </Box>
-
-                      <Divider />
-                      <Box>
-                        <Flex align="center" justify="space-between" mb={3}>
-                          <FormLabel m={0} fontWeight="bold">Indifference point 0.75</FormLabel>
-                          <HStack>
-                            <Text fontSize="sm" color="gray.600">Skip</Text>
-                            <Checkbox
-                              isChecked={activeData.midSplit.skipThird}
-                              onChange={(e) => handleSkipStep('skipThird', e.target.checked)}
-                            />
-                          </HStack>
-                        </Flex>
-                        {!activeData.midSplit.skipThird && (
-                          <VStack align="stretch" spacing={2}>
-                            <Text fontSize="sm" color="gray.700">
-                              At which point X increasing <strong>{active}</strong> from <strong>X</strong> to <strong>{activeData.range.max}</strong> has the same importance as increasing it from <strong>{activeData.range.min}</strong> to <strong>X</strong>?
-                            </Text>
-                            <Input
-                              key={`mid-step3-${activeData.midSplit.step3 ?? 'blank'}`}
-                              type="number"
-                              defaultValue={activeData.midSplit.step3 ?? ''}
-                              placeholder="Enter X"
-                              onBlur={(e) => {
-                                const num = parseFloat(e.target.value)
-                                if (Number.isFinite(num)) handleMidSplitChange('step3', num, true)
-                              }}
-                            />
-                          </VStack>
-                        )}
-                      </Box>
-                    </>
+                      )}
+                      <HStack>
+                        <Button variant="outline" onClick={handleSkipCurrentStep}>Skip</Button>
+                        <Button variant="outline" onClick={() => setCurrentMidStep(1)}>Back</Button>
+                        <Button
+                          colorScheme="blue"
+                          onClick={handleMidNext}
+                          isDisabled={!(activeData.midSplit.skipFirst || activeData.midSplit.step1 !== null)}
+                        >
+                          Next
+                        </Button>
+                      </HStack>
+                    </VStack>
                   )}
-                  <Text fontSize="sm" color="gray.600">Skipping indifference point 0.5 keeps the function linear. Points 0.25 and 0.75 add curve refinement.</Text>
+
+                  {currentMidStep === 3 && (
+                    <VStack align="stretch" spacing={3}>
+                      <QuestionPrompt>
+                        Step 4: At which point X is equally important to improve <strong>{active}</strong> from <strong>{activeData.midSplit.step1 ?? activeData.thresholds.low}</strong> to <strong>X</strong> as from <strong>X</strong> to <strong>{activeData.thresholds.high}</strong>?
+                      </QuestionPrompt>
+                      {!activeData.midSplit.skipThird && !activeData.midSplit.skipFirst && (
+                        <Input
+                          key={`mid-step3-${activeData.midSplit.step3 ?? 'blank'}`}
+                          type="number"
+                          defaultValue={activeData.midSplit.step3 ?? ''}
+                          placeholder="Enter X"
+                          onBlur={(e) => {
+                            const num = parseFloat(e.target.value)
+                            if (Number.isFinite(num)) handleMidSplitChange('step3', num, true)
+                          }}
+                        />
+                      )}
+                      <HStack>
+                        <Button variant="outline" onClick={handleSkipCurrentStep}>Skip</Button>
+                        <Button variant="outline" onClick={() => setCurrentMidStep(2)}>Back</Button>
+                        <Button colorScheme="blue" onClick={handleMidDone}>Done</Button>
+                      </HStack>
+                    </VStack>
+                  )}
                 </VStack>
               ) : (
                 <VStack align="stretch" spacing={3}>
-                  <HStack justify="space-between">
-                    <Button size="sm" onClick={handleAddPoint}>Add point</Button>
-                    <Text fontSize="sm" color="gray.500">Max 10 points. Endpoints stay in range.</Text>
-                  </HStack>
-                  {activeData.points.map((p, idx) => (
-                    <HStack key={`${idx}-${p.x}`} spacing={3} align="center">
-                      <Text fontSize="sm" color="gray.600">Point {idx + 1}</Text>
-                      <NumberInput
-                        value={p.x}
-                        min={activeData.range.min}
-                        max={activeData.range.max}
-                        onChange={(val, num) => handlePointChange(idx, 'x', num)}
+                  <VStack align="stretch" spacing={2}>
+                    <QuestionPrompt mb={0}>
+                      Does the value function for <strong>{active}</strong> increase or decrease as we move from {activeData.range.min} to {activeData.range.max}?
+                    </QuestionPrompt>
+                    <HStack spacing={2}>
+                      <Button
+                        size="sm"
+                        variant={activeData.shape === 'linear_increasing' ? 'solid' : 'outline'}
+                        colorScheme="blue"
+                        onClick={() => {
+                          markDirty((prev) => ({
+                            ...prev,
+                            [active]: { ...prev[active], shape: 'linear_increasing', mode: MODE.FREE },
+                          }))
+                        }}
                       >
-                        <NumberInputField placeholder="X" />
-                      </NumberInput>
-                      <NumberInput
-                        value={p.y}
-                        min={0}
-                        max={1}
-                        step={0.05}
-                        onChange={(val, num) => handlePointChange(idx, 'y', num)}
+                        ↗ Increasing
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant={activeData.shape === 'linear_decreasing' ? 'solid' : 'outline'}
+                        colorScheme="blue"
+                        onClick={() => {
+                          markDirty((prev) => ({
+                            ...prev,
+                            [active]: { ...prev[active], shape: 'linear_decreasing', mode: MODE.FREE },
+                          }))
+                        }}
                       >
-                        <NumberInputField placeholder="Y" />
-                      </NumberInput>
-                      {idx !== 0 && idx !== activeData.points.length - 1 && (
-                        <Button size="xs" colorScheme="red" variant="ghost" onClick={() => handleRemovePoint(idx)}>Remove</Button>
-                      )}
+                        ↘ Decreasing
+                      </Button>
                     </HStack>
-                  ))}
+                  </VStack>
+
+                  <QuestionPrompt mb={2}>
+                    Add points and drag them directly on the graph to shape the value function.
+                  </QuestionPrompt>
+                  
+                  <HStack spacing={4} wrap="wrap" align="center">
+                    <Button size="sm" onClick={handleAddPoint}>Add point</Button>
+                    <FormControl maxW="150px">
+                      <FormLabel fontSize="sm" m={0} fontWeight="medium">Confidence</FormLabel>
+                      <Select
+                        value={activeData.confidence ?? 4}
+                        onChange={(e) => handleConfidenceChange(e.target.value)}
+                        size="sm"
+                      >
+                        <option value="0">0 - Not confident</option>
+                        <option value="1">1 - Low</option>
+                        <option value="2">2 - Medium</option>
+                        <option value="3">3 - High</option>
+                        <option value="4">4 - Fully confident</option>
+                      </Select>
+                    </FormControl>
+                    <FormControl maxW="140px">
+                      <FormLabel fontSize="sm" m={0} fontWeight="medium">Low threshold</FormLabel>
+                      <Input
+                        key={`low-${activeData.thresholds.low}`}
+                        type="number"
+                        size="sm"
+                        defaultValue={activeData.thresholds.low}
+                        onBlur={(e) => {
+                          const num = parseFloat(e.target.value)
+                          if (Number.isFinite(num)) handleThresholdChange('low', num)
+                        }}
+                      />
+                    </FormControl>
+                    <FormControl maxW="140px">
+                      <FormLabel fontSize="sm" m={0} fontWeight="medium">High threshold</FormLabel>
+                      <Input
+                        key={`high-${activeData.thresholds.high}`}
+                        type="number"
+                        size="sm"
+                        defaultValue={activeData.thresholds.high}
+                        onBlur={(e) => {
+                          const num = parseFloat(e.target.value)
+                          if (Number.isFinite(num)) handleThresholdChange('high', num)
+                        }}
+                      />
+                    </FormControl>
+                  </HStack>
+
+                  <HStack justify="flex-end" spacing={2}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleNavigateCriterion(-1)}
+                      isDisabled={activeCriterionIndex <= 0}
+                    >
+                      Previous criterion
+                    </Button>
+                    <Button
+                      size="sm"
+                      colorScheme="blue"
+                      onClick={() => handleNavigateCriterion(1)}
+                      isDisabled={activeCriterionIndex < 0 || activeCriterionIndex >= nonQualCriteria.length - 1}
+                    >
+                      Next criterion
+                    </Button>
+                  </HStack>
                 </VStack>
               )}
 
@@ -1091,25 +1230,6 @@ function ValueFunctionsPage({ sessionId }) {
                 draggable={!isSessionLocked && activeData.mode === MODE.FREE && (activeData.shape === 'linear_increasing' || activeData.shape === 'linear_decreasing')}
                 onDrag={activeData.mode === MODE.FREE ? handleDragPoint : undefined}
               />
-
-              <Box>
-                <Heading size="sm" mb={2}>Stored points</Heading>
-                <Box
-                  bg="gray.50"
-                  p={3}
-                  borderRadius="md"
-                  border="1px solid"
-                  borderColor="gray.200"
-                  maxH="120px"
-                  overflowY="auto"
-                  overflowX="auto"
-                  whiteSpace="nowrap"
-                >
-                  <Text fontFamily="mono" fontSize="sm" display="inline">
-                    {formatPointsForCsv(activeData.points)}
-                  </Text>
-                </Box>
-              </Box>
             </VStack>
           ) : (
             <VStack spacing={4} align="center" justify="center" minH="60vh">

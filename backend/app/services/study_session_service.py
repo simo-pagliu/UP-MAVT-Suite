@@ -29,6 +29,12 @@ class StudySessionService:
         self._session_svc = SessionService(db)
 
     @staticmethod
+    def _normalize_vf_method(vf_method):
+        if vf_method in ('mid-splitting', 'free-edit'):
+            return vf_method
+        return None
+
+    @staticmethod
     def _serialize_computed_weights(study):
         """Return the ``computed_weights`` sub-document with string-keyed solutions.
 
@@ -110,6 +116,7 @@ class StudySessionService:
             'code': code,
             'input_id': None,
             'features': {'qi': False, 'vf': False, 'bwt': False},
+            'vf_method': 'mid-splitting',
             'created_at': datetime.now(timezone.utc),
         }
         inserted_id = self._studies.insert(doc)
@@ -158,7 +165,7 @@ class StudySessionService:
         studies = self._studies.find_all()
         return [self._serialize_study(s, include_sessions=True) for s in studies]
 
-    def update_features(self, study_session_id, features):
+    def update_features(self, study_session_id, features, vf_method=None):
         """Update the feature flags of a study session.
 
         Only the ``qi``, ``vf``, and ``bwt`` flags are accepted; all values
@@ -168,6 +175,7 @@ class StudySessionService:
             study_session_id: The study session's ``_id``.
             features (dict | None): A dict with any combination of ``'qi'``,
                 ``'vf'``, ``'bwt'`` keys and boolean-coercible values.
+            vf_method (str | None): Optional value-function method.
 
         Returns:
             dict: The updated study session document (partially serialised).
@@ -185,6 +193,9 @@ class StudySessionService:
                 'vf': bool(features.get('vf', False)),
                 'bwt': bool(features.get('bwt', False)),
             }
+        normalized_method = self._normalize_vf_method(vf_method)
+        if normalized_method:
+            update_doc['vf_method'] = normalized_method
         if update_doc:
             self._studies.update(study_session_id, update_doc)
         updated = self._studies.find_by_id(study_session_id)
@@ -284,6 +295,34 @@ class StudySessionService:
             raise NotFoundError('Study session not found')
         deleted = self._sessions.delete_many_by_study_session_id(study_session_id)
         return deleted
+
+    def selective_reset_sessions(self, study_session_id, affected_criteria, affected_groups):
+        """Selectively reset data for specific criteria and groups across all sessions.
+        
+        This removes:
+        - VF data for affected criteria
+        - BWT groups containing affected criteria
+        - QI data for removed criteria
+        
+        Args:
+            study_session_id: The study session's ``_id``.
+            affected_criteria (list[str]): Criterion names whose data should be reset.
+            affected_groups (list[str]): Group names whose BWT data should be reset.
+            
+        Returns:
+            dict: Summary of reset operations including updated_sessions count.
+            
+        Raises:
+            NotFoundError: When the study session does not exist.
+        """
+        study = self._studies.find_by_id(study_session_id)
+        if not study:
+            raise NotFoundError('Study session not found')
+        
+        result = self._sessions.selective_reset_data(
+            study_session_id, affected_criteria, affected_groups
+        )
+        return result
 
     def create_elicitation_session(self, study_session_id, name):
         """Create a new elicitation session linked to a study session.

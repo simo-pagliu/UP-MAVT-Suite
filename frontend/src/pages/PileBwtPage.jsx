@@ -47,6 +47,7 @@ import {
 } from 'recharts'
 import { parseDistribution, computeDistributionBounds } from '../utils/distributionUtils'
 import { API_URL } from '../config'
+import QuestionPrompt from '../components/QuestionPrompt'
 
 function PileBwtPage({ sessionId, onPageChange }, ref) {
   const [criteria, setCriteria] = useState([])
@@ -1111,11 +1112,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               </Badge>
             </Box>
 
-            <Box bg="blue.50" p={4} borderRadius="md" borderLeft="4px" borderLeftColor="blue.400">
-              <Text fontSize="md" color="blue.900" fontWeight="medium">
-                {question}
-              </Text>
-            </Box>
+            <QuestionPrompt>{question}</QuestionPrompt>
 
             <HStack align="stretch" spacing={4} flex={1}>
               {/* Left: Bar Chart with Min/Max Labels */}
@@ -1339,11 +1336,10 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               Group {selectedGroupIndex + 1} of {allGroups.length}: {selectedGroup.name}
             </Badge>
           </Box>
-          <Text fontSize="md" color="gray.700">
+          <QuestionPrompt>
             Let's start by identifying the best and worst performing criteria in this group. 
             You'll be asked to identify which criterion you'd improve first and which you'd improve last.
-          </Text>
-          <Divider />
+          </QuestionPrompt>
 
           <Box pt={4} display="flex" gap={4} justifyContent="flex-end">
             <Button 
@@ -1446,19 +1442,201 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             </Badge>
           </Box>
 
-          <Box border="1px" borderColor="gray.200" borderRadius="md" p={4} bg="gray.50">
-            <Text fontSize="sm" color="gray.700" mb={2}>
-              On the left, you see the baseline: all criteria are at their worst, except for {' '}
-              <strong>{pair.reference.criterion_name}</strong>, which is at its best.
-              <br />
-              On the right, the compensated scenario: how much must {' '}
-              <strong>{pair.adjusted.criterion_name}</strong> improve to compensate the total loss of {' '}
-              <strong>{pair.reference.criterion_name}</strong>?
-            </Text>
-            <Text fontSize="sm" color="gray.600">
-              Adjust the slider to affect the compensated scenario.
-            </Text>
+          <VStack spacing={1} align="stretch">
+            <QuestionPrompt mb={0}>
+              On the left, all criteria are at their worst except <strong>{pair.reference.criterion_name}</strong>, which is at its best.
+            </QuestionPrompt>
+            <QuestionPrompt mb={0}>
+              On the right, decide how much <strong>{pair.adjusted.criterion_name}</strong> must improve to compensate the loss of <strong>{pair.reference.criterion_name}</strong>.
+            </QuestionPrompt>
+          </VStack>
+
+          <Box border="1px" borderColor="gray.200" borderRadius="md" p={4} bg="white">
+            <Slider
+              min={adjustedRange.min}
+              max={adjustedRange.max}
+              step={(adjustedRange.max - adjustedRange.min) / 100}
+              value={sliderValue}
+              onChange={(value) => {
+                setSliderValue(value)
+                setSliderTouched(true)
+              }}
+            >
+              <SliderTrack bg="gray.200" h="8px" borderRadius="md" border="1px solid" borderColor="gray.300">
+                {/* Red zone indicator for inconsistent region */}
+                {isConsistencyError && (
+                  <Box
+                    position="absolute"
+                    left="0"
+                    top="0"
+                    bottom="0"
+                    bg="rgba(220, 38, 38, 0.3)"
+                    borderRadius="md"
+                    pointerEvents="none"
+                    style={{
+                      width: `${
+                        ((Math.min(sliderValue, checkConsistency(currentPairIndex, sliderValue, comparisons).thresholdDataValue || adjustedRange.min) - adjustedRange.min) / (adjustedRange.max - adjustedRange.min)) * 100
+                      }%`,
+                    }}
+                  />
+                )}
+                <SliderFilledTrack bg={isConsistencyError ? 'red.500' : 'blue.500'} />
+              </SliderTrack>
+              <SliderThumb w="20px" h="20px" bg="blue.500" borderRadius="full" border="2px solid white" boxShadow="0 2px 4px rgba(0,0,0,0.2)" />
+            </Slider>
+            <HStack spacing={2} mt={3} fontSize="sm" color="gray.600" justify="space-between">
+              <Text>{adjustedRange.min.toFixed(2)}</Text>
+              <HStack spacing={3}>
+                <FormLabel mb={0} fontWeight="semibold">
+                  "{pair.adjusted.criterion_name}" [{pair.adjusted.unit}]: <strong>{sliderInputValue}</strong>
+                </FormLabel>
+                <NumberInput
+                  value={sliderInputValue}
+                  min={adjustedRange.min}
+                  max={adjustedRange.max}
+                  step={(adjustedRange.max - adjustedRange.min) / 100}
+                  precision={2}
+                  onChange={(valueString) => {
+                    setSliderInputValue(valueString)
+                  }}
+                  size="sm"
+                  w="100px"
+                  variant="unstyled"
+                >
+                  <NumberInputField
+                    textAlign="center"
+                    fontWeight="bold"
+                    fontSize="md"
+                    px={2}
+                    py={1}
+                    border="1px solid"
+                    borderColor="gray.300"
+                    borderRadius="md"
+                    bg="white"
+                    _focus={{ borderColor: 'blue.400', boxShadow: '0 0 0 1px #63b3ed' }}
+                    onBlur={() => {
+                      const parsed = Number(sliderInputValue)
+                      if (Number.isFinite(parsed)) {
+                        const clamped = Math.min(adjustedRange.max, Math.max(adjustedRange.min, parsed))
+                        setSliderValue(clamped)
+                        setSliderInputValue(clamped.toFixed(2))
+                      } else {
+                        setSliderInputValue(Number.isFinite(sliderValue) ? sliderValue.toFixed(2) : adjustedRange.min.toFixed(2))
+                      }
+                    }}
+                  />
+                </NumberInput>
+              </HStack>
+              <Text>{adjustedRange.max.toFixed(2)}</Text>
+            </HStack>
           </Box>
+
+          <HStack spacing={4} justify="flex-end" pt={2}>
+            <Button
+              leftIcon={<ChevronLeftIcon />}
+              isDisabled={currentPairIndex === 0}
+              onClick={handlePrevPair}
+              size="md"
+            >
+              Back
+            </Button>
+            <Button 
+              colorScheme="blue" 
+              rightIcon={<ChevronRightIcon />} 
+              onClick={async () => {
+                if (currentPairIndex === pairs.length - 1) {
+                  // Capture the value from the first (BEST-to-WORST) comparison if not already captured
+                  if (currentPairIndex === 0 && pairs[0]?.type === 'best' && bestToWorstValue === null) {
+                    const vfValue = interpolateVF(pairs[0].adjusted.criterion_name, sliderValue)
+                    setBestToWorstValue(vfValue)
+                  }
+
+                  // Don't save if there's a consistency error
+                  if (!isConsistencyError) {
+                    const updatedComparisons = upsertComparisonForPair(currentPairIndex, sliderValue)
+                    await handleSaveAll(updatedComparisons)
+                  }
+                  
+                  if (selectedGroupIndex < allGroups.length - 1) {
+                    // Move to next group
+                    setSelectedGroupIndex(selectedGroupIndex + 1)
+                    setBestCriterion(null)
+                    setWorstCriterion(null)
+                    setPairs([])
+                    setPairsGroupName(null)
+                    setStep('select-criteria')
+                    // Reset consistency tracking for new group
+                    setBestToWorstValue(null)
+                    setConsistencyConstraints({})
+                    setIsConsistencyError(false)
+                    if (mainContentRef.current) {
+                      mainContentRef.current.scrollTop = 0
+                    }
+                  } else {
+                    // Last group - go to recap
+                    if (onPageChange) {
+                      onPageChange('recap')
+                    }
+                  }
+                } else {
+                  // Not on last pair - just go to next
+                  await handleNextPair()
+                }
+              }} 
+              isDisabled={!sliderTouched || isConsistencyError}
+              isLoading={saving}
+              size="md"
+            >
+              {currentPairIndex === pairs.length - 1 
+                ? (selectedGroupIndex === allGroups.length - 1 ? 'Complete & Go to Recap' : 'Next Group') 
+                : 'Next'}
+            </Button>
+          </HStack>
+
+          {/* Error tooltip for consistency violation */}
+          {isConsistencyError && (
+            <Box
+              bg="red.50"
+              border="2px"
+              borderColor="red.400"
+              borderRadius="md"
+              p={3}
+            >
+              <HStack spacing={2} alignItems="flex-start">
+                <Box color="red.600" fontSize="lg">⚠️</Box>
+                <VStack align="start" spacing={1} flex={1}>
+                  <Text fontWeight="bold" color="red.700" fontSize="sm">
+                    Inconsistent judgment
+                  </Text>
+                  {(() => {
+                    const pair = pairs[currentPairIndex]
+                    const { threshold, thresholdDataValue } = checkConsistency(currentPairIndex, sliderValue, comparisons)
+                    const isIncreasing = isVFIncreasing(pair.adjusted.criterion_name)
+                    const adjective = isIncreasing ? 'at least' : 'at most'
+                    
+                    if (pair?.type === 'best') {
+                      return (
+                        <Text color="red.600" fontSize="sm">
+                          Must adjust <strong>{pair.adjusted.criterion_name}</strong> to {adjective} {' '}
+                          <strong>{thresholdDataValue?.toFixed(2)}</strong> {pair.adjusted.unit}{' '}
+                          to be consistent with <strong>{bestCriterion.criterion_name}</strong>-<strong>{worstCriterion.criterion_name}</strong> comparison
+                        </Text>
+                      )
+                    } else {
+                      // OTHERS-to-WORST
+                      return (
+                        <Text color="red.600" fontSize="sm">
+                          Must adjust <strong>{pair.adjusted.criterion_name}</strong> to {adjective} {' '}
+                          <strong>{thresholdDataValue?.toFixed(2)}</strong> {pair.adjusted.unit}{' '}
+                          to maintain consistency with previous comparisons
+                        </Text>
+                      )
+                    }
+                  })()}
+                </VStack>
+              </HStack>
+            </Box>
+          )}
 
           <HStack spacing={4} align="stretch">
             <Box border="1px" borderColor="gray.200" borderRadius="md" p={3} flex={1} bg="white">
@@ -1530,199 +1708,6 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               </ResponsiveContainer>
             </Box>
           </HStack>
-
-          <Box>
-            <HStack justify="space-between" align="center" spacing={3} mb={2}>
-              <HStack spacing={3}>
-                <FormLabel mb={0} fontWeight="bold" fontSize="md">
-                  Adjust "{pair.adjusted.criterion_name}" [{pair.adjusted.unit}]:
-                </FormLabel>
-                <NumberInput
-                  value={sliderInputValue}
-                  min={adjustedRange.min}
-                  max={adjustedRange.max}
-                  step={(adjustedRange.max - adjustedRange.min) / 100}
-                  precision={2}
-                  onChange={(valueString) => {
-                    setSliderInputValue(valueString)
-                  }}
-                  size="md"
-                  maxW="160px"
-                  variant="unstyled"
-                >
-                  <NumberInputField
-                    textAlign="left"
-                    fontWeight="bold"
-                    fontSize="md"
-                    lineHeight="1.2"
-                    px={2}
-                    py={1}
-                    height="auto"
-                    mt="1px"
-                    border="1px solid"
-                    borderColor="gray.300"
-                    borderRadius="md"
-                    bg="white"
-                    _focus={{ borderColor: 'blue.400', boxShadow: '0 0 0 1px #63b3ed' }}
-                    onBlur={() => {
-                      const parsed = Number(sliderInputValue)
-                      if (Number.isFinite(parsed)) {
-                        const clamped = Math.min(adjustedRange.max, Math.max(adjustedRange.min, parsed))
-                        setSliderValue(clamped)
-                        setSliderInputValue(clamped.toFixed(2))
-                      } else {
-                        setSliderInputValue(Number.isFinite(sliderValue) ? sliderValue.toFixed(2) : adjustedRange.min.toFixed(2))
-                      }
-                    }}
-                  />
-                </NumberInput>
-              </HStack>
-              <HStack spacing={4}>
-                <Button
-                  leftIcon={<ChevronLeftIcon />}
-                  isDisabled={currentPairIndex === 0}
-                  onClick={handlePrevPair}
-                  size="md"
-                >
-                  Previous
-                </Button>
-                <Button 
-                  colorScheme="blue" 
-                  rightIcon={<ChevronRightIcon />} 
-                  onClick={async () => {
-                    if (currentPairIndex === pairs.length - 1) {
-                      // Capture the value from the first (BEST-to-WORST) comparison if not already captured
-                      if (currentPairIndex === 0 && pairs[0]?.type === 'best' && bestToWorstValue === null) {
-                        const vfValue = interpolateVF(pairs[0].adjusted.criterion_name, sliderValue)
-                        setBestToWorstValue(vfValue)
-                      }
-
-                      // Don't save if there's a consistency error
-                      if (!isConsistencyError) {
-                        const updatedComparisons = upsertComparisonForPair(currentPairIndex, sliderValue)
-                        await handleSaveAll(updatedComparisons)
-                      }
-                      
-                      if (selectedGroupIndex < allGroups.length - 1) {
-                        // Move to next group
-                        setSelectedGroupIndex(selectedGroupIndex + 1)
-                        setBestCriterion(null)
-                        setWorstCriterion(null)
-                        setPairs([])
-                        setPairsGroupName(null)
-                        setStep('select-criteria')
-                        // Reset consistency tracking for new group
-                        setBestToWorstValue(null)
-                        setConsistencyConstraints({})
-                        setIsConsistencyError(false)
-                        if (mainContentRef.current) {
-                          mainContentRef.current.scrollTop = 0
-                        }
-                      } else {
-                        // Last group - go to recap
-                        if (onPageChange) {
-                          onPageChange('recap')
-                        }
-                      }
-                    } else {
-                      // Not on last pair - just go to next
-                      await handleNextPair()
-                    }
-                  }} 
-                  isDisabled={!sliderTouched || isConsistencyError}
-                  isLoading={saving}
-                  size="md"
-                >
-                  {currentPairIndex === pairs.length - 1 
-                    ? (selectedGroupIndex === allGroups.length - 1 ? 'Complete & Go to Recap' : 'Next Group') 
-                    : 'Next'}
-                </Button>
-              </HStack>
-            </HStack>
-            <Slider
-              min={adjustedRange.min}
-              max={adjustedRange.max}
-              step={(adjustedRange.max - adjustedRange.min) / 100}
-              value={sliderValue}
-              onChange={(value) => {
-                setSliderValue(value)
-                setSliderTouched(true)
-              }}
-            >
-              <SliderTrack bg="gray.200">
-                {/* Red zone indicator for inconsistent region */}
-                {isConsistencyError && (
-                  <Box
-                    position="absolute"
-                    left="0"
-                    top="0"
-                    bottom="0"
-                    bg="rgba(220, 38, 38, 0.3)"
-                    borderRadius="full"
-                    pointerEvents="none"
-                    style={{
-                      width: `${
-                        ((Math.min(sliderValue, checkConsistency(currentPairIndex, sliderValue, comparisons).thresholdDataValue || adjustedRange.min) - adjustedRange.min) / (adjustedRange.max - adjustedRange.min)) * 100
-                      }%`,
-                    }}
-                  />
-                )}
-                <SliderFilledTrack bg={isConsistencyError ? 'red.500' : 'blue.500'} />
-              </SliderTrack>
-              <SliderThumb />
-            </Slider>
-            <HStack spacing={2} mt={2} fontSize="sm" color="gray.600">
-              <Text>{adjustedRange.min.toFixed(2)}</Text>
-              <Box flex={1} />
-              <Text>{adjustedRange.max.toFixed(2)}</Text>
-            </HStack>
-            
-            {/* Error tooltip for consistency violation */}
-            {isConsistencyError && (
-              <Box
-                bg="red.50"
-                border="2px"
-                borderColor="red.400"
-                borderRadius="md"
-                p={3}
-                mt={2}
-              >
-                <HStack spacing={2} alignItems="flex-start">
-                  <Box color="red.600" fontSize="lg">⚠️</Box>
-                  <VStack align="start" spacing={1} flex={1}>
-                    <Text fontWeight="bold" color="red.700" fontSize="sm">
-                      Inconsistent judgment
-                    </Text>
-                    {(() => {
-                      const pair = pairs[currentPairIndex]
-                      const { threshold, thresholdDataValue } = checkConsistency(currentPairIndex, sliderValue, comparisons)
-                      const isIncreasing = isVFIncreasing(pair.adjusted.criterion_name)
-                      const adjective = isIncreasing ? 'at least' : 'at most'
-                      
-                      if (pair?.type === 'best') {
-                        return (
-                          <Text color="red.600" fontSize="sm">
-                            Must adjust <strong>{pair.adjusted.criterion_name}</strong> to {adjective} {' '}
-                            <strong>{thresholdDataValue?.toFixed(2)}</strong> {pair.adjusted.unit}{' '}
-                            to be consistent with <strong>{bestCriterion.criterion_name}</strong>-<strong>{worstCriterion.criterion_name}</strong> comparison
-                          </Text>
-                        )
-                      } else {
-                        // OTHERS-to-WORST
-                        return (
-                          <Text color="red.600" fontSize="sm">
-                            Must adjust <strong>{pair.adjusted.criterion_name}</strong> to {adjective} {' '}
-                            <strong>{thresholdDataValue?.toFixed(2)}</strong> {pair.adjusted.unit}{' '}
-                            to maintain consistency with previous comparisons
-                          </Text>
-                        )
-                      }
-                    })()}
-                  </VStack>
-                </HStack>
-              </Box>
-            )}
-          </Box>
 
           <Box border="1px" borderColor="gray.200" borderRadius="md" p={4}>
             <Heading size="sm" mb={2} textAlign="center">Value Function: {pair.adjusted.criterion_name}</Heading>

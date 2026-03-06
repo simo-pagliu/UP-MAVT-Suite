@@ -23,7 +23,7 @@ function App() {
   
   // Page navigation
   const [stakeholderPage, setStakeholderPage] = useState('qualitative')
-  const [practitionerPage, setPractitionerPage] = useState('case-study')
+  const [practitionerPage, setPractitionerPage] = useState('input-definition')
   const [showDocumentation, setShowDocumentation] = useState(false)
 
   // Stakeholder session credentials (for loading specific sessions)
@@ -84,7 +84,7 @@ function App() {
       // For practitioner, the id is the study session id
       setStudySessionId(id)
       setStudyCode(code)
-      setPractitionerPage('case-study')
+      setPractitionerPage('input-definition')
     }
     // For admin role, no additional setup needed
   }
@@ -100,7 +100,7 @@ function App() {
     setStudySessionId(null)
     setStudyCode('')
     setStakeholderPage('qualitative')
-    setPractitionerPage('case-study')
+    setPractitionerPage('input-definition')
     setShowDocumentation(false)
     setFeatures({ qi: false, vf: false, bwt: false })
   }

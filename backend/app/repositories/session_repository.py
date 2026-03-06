@@ -141,3 +141,68 @@ class SessionRepository(BaseRepository):
         if not oid:
             return 0
         return self._col.delete_many({'study_session_id': oid}).deleted_count
+
+    def selective_reset_data(self, study_session_id, affected_criteria, affected_groups):
+        """Selectively remove specific criteria and groups from session data.
+        
+        This removes:
+        - VF data for affected criteria
+        - BWT comparisons for affected groups
+        - QI data for removed criteria only
+        
+        Args:
+            study_session_id: The parent study session's ``_id``.
+            affected_criteria (list[str]): Criterion names to reset VF/QI data for.
+            affected_groups (list[str]): Group names to reset BWT data for.
+            
+        Returns:
+            dict: Summary of reset operations.
+        """
+        oid = self._to_oid(study_session_id)
+        if not oid:
+            return {'updated_sessions': 0}
+        
+        sessions = self.find_by_study_session_id(study_session_id)
+        updated_count = 0
+        
+        for session in sessions:
+            session_id = session['_id']
+            update_fields = {}
+            
+            # Reset VF data for affected criteria
+            if affected_criteria:
+                vf = session.get('value_functions') or {}
+                vf_criteria = vf.get('criteria') or {}
+                
+                # Remove affected criteria
+                for crit_name in affected_criteria:
+                    if crit_name in vf_criteria:
+                        del vf_criteria[crit_name]
+                
+                update_fields['value_functions'] = {'criteria': vf_criteria}
+            
+            # Reset BWT data for affected groups
+            if affected_groups:
+                bwt = session.get('bwt') or {}
+                comparisons = bwt.get('comparisons') or []
+                criteria_signature = bwt.get('criteria_signature', '')
+                
+                # Remove comparisons involving affected groups
+                # Also remove intra-best and intra-worst comparisons when any group is affected
+                filtered_comparisons = [
+                    comp for comp in comparisons 
+                    if comp.get('group') not in affected_groups
+                    and comp.get('type') not in ['intra-best', 'intra-worst']
+                ]
+                
+                update_fields['bwt'] = {
+                    'comparisons': filtered_comparisons,
+                    'criteria_signature': criteria_signature
+                }
+            
+            # Apply updates if any
+            if update_fields:
+                self.update(session_id, update_fields)
+                updated_count += 1
+        
+        return {'updated_sessions': updated_count}

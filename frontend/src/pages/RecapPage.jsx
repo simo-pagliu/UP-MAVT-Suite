@@ -55,7 +55,7 @@ function RecapPage({ sessionId, onNavigate }) {
   return (
     <Box bg="white" p={6} borderRadius="lg" boxShadow="sm">
       <VStack spacing={6} align="stretch">
-        <Heading as="h1" size="lg">Recap</Heading>
+        <Heading as="h1" size="lg">Overview</Heading>
 
         {loading && <Text color="gray.600">Checking completion...</Text>}
 
