@@ -16,10 +16,12 @@ services:
     container_name: elicitation-backend
     ports:
       - "5000:5000"
+    env_file:
+      - .env
     environment:
       MONGO_URI: mongodb://mongo:27017/elicitation
       FLASK_ENV: development
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     depends_on:
       - mongo
     volumes:

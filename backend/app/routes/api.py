@@ -29,7 +29,9 @@ def admin_login():
     password = data.get('password')
     if not password:
         return jsonify({'success': False, 'error': 'Password is required'}), 400
-    admin_password = os.getenv('ADMIN_PASSWORD', 'admin123')
+    admin_password = os.getenv('ADMIN_PASSWORD')
+    if not admin_password:
+        return jsonify({'success': False, 'error': 'ADMIN_PASSWORD is not configured on the server'}), 500
     if hmac.compare_digest(str(password), str(admin_password)):
         return jsonify({'success': True}), 200
     return jsonify({'success': False, 'error': 'Invalid password'}), 401

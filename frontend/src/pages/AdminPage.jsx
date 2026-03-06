@@ -57,12 +57,8 @@ function AdminPage(props, ref) {
 
   // Check if already authenticated on mount
   useEffect(() => {
-    const authStatus = sessionStorage.getItem('adminAuthenticated')
-    if (authStatus === 'true') {
-      setIsAuthenticated(true)
-    } else {
-      setLoading(false)
-    }
+    setIsAuthenticated(false)
+    setLoading(false)
   }, [])
 
   const handleLogin = async (e) => {
@@ -74,7 +70,6 @@ function AdminPage(props, ref) {
       
       if (response.data.success) {
         setIsAuthenticated(true)
-        sessionStorage.setItem('adminAuthenticated', 'true')
         setPassword('')
       } else {
         toast({
@@ -100,7 +95,6 @@ function AdminPage(props, ref) {
 
   const handleLogout = () => {
     setIsAuthenticated(false)
-    sessionStorage.removeItem('adminAuthenticated')
     setPassword('')
   }
 
@@ -110,15 +104,6 @@ function AdminPage(props, ref) {
       const response = await axios.get(`${API_URL}/study-sessions`)
       const data = response.data
       setStudySessions(data)
-      if (selectedSession) {
-        // Find the selected session in the new data
-        let found = null
-        for (const study of data) {
-          found = study.sessions?.find((s) => s._id === selectedSession._id)
-          if (found) break
-        }
-        setSelectedSession(found || null)
-      }
     } catch (error) {
       toast({
         title: 'Request failed',
@@ -187,15 +172,16 @@ function AdminPage(props, ref) {
   }
 
   const calculateProgress = (study) => {
-    if (!study.sessions || study.sessions.length === 0) {
-      return { percentage: 0, details: 'No sessions created', detailedSteps: [] }
+    const sessions = Array.isArray(study?.sessions) ? study.sessions : []
+    if (sessions.length === 0) {
+      return { percentage: 0, sessionDetails: [] }
     }
 
     let totalSteps = 0
     let completedSteps = 0
     const sessionDetails = []
 
-    study.sessions.forEach(session => {
+    sessions.forEach(session => {
       const steps = [
         { key: 'qualitative_indicators', label: 'Qualitative' },
         { key: 'value_functions', label: 'Value Functions' },
@@ -214,7 +200,7 @@ function AdminPage(props, ref) {
       })
 
       sessionDetails.push({
-        name: session.name,
+        name: session?.name || 'Session',
         steps: sessionSteps
       })
     })
@@ -449,7 +435,7 @@ function AdminPage(props, ref) {
             </Thead>
             <Tbody>
               {studySessions.map((study) => {
-                const progress = calculateProgress(study)
+                const progress = calculateProgress(study) || { percentage: 0, sessionDetails: [] }
                 const isLocked = getStudyLockStatus(study)
                 const isExpanded = expandedStudies.has(study._id)
 
@@ -489,10 +475,10 @@ function AdminPage(props, ref) {
                         <Tooltip 
                           label={
                             <VStack align="stretch" spacing={1}>
-                              {progress.sessionDetails.map((session, idx) => (
+                              {(Array.isArray(progress?.sessionDetails) ? progress.sessionDetails : []).map((session, idx) => (
                                 <Box key={idx}>
                                   <Text fontWeight="bold" fontSize="xs">{session.name}:</Text>
-                                  {session.steps.map((step, stepIdx) => (
+                                  {(Array.isArray(session?.steps) ? session.steps : []).map((step, stepIdx) => (
                                     <Text key={stepIdx} fontSize="xs" pl={2}>
                                       {step.completed ? '✓' : '✗'} {step.label}
                                     </Text>
