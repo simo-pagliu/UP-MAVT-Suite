@@ -9,6 +9,12 @@ A web application for elicitation data collection. The application provides a mu
 
 ### Running the Application
 
+Create a deployment environment file first:
+
+```bash
+cp .env.example .env
+```
+
 ```bash
 docker-compose up --build
 ```
@@ -20,10 +26,11 @@ The application will be available at:
 
 ### Environment Variables
 
-Set the admin password via the `ADMIN_PASSWORD` environment variable (defaults to `admin123`):
+Set the admin password via the `ADMIN_PASSWORD` environment variable in `.env`.
+The provided default in `.env.example` is `admin123` (change it for production).
 
 ```bash
-ADMIN_PASSWORD=your_secure_password docker-compose up --build
+ADMIN_PASSWORD=your_secure_password
 ```
 
 ## Project Structure

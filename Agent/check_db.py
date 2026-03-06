@@ -5,7 +5,7 @@ from pymongo import MongoClient
 
 # Connect to MongoDB
 client = MongoClient('mongodb://localhost:27017/')
-db = client['elicitation_tools']
+db = client['elicitation']
 
 # List all collections
 print("Collections in 'elicitation_tools' database:")
