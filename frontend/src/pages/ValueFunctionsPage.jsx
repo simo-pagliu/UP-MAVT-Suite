@@ -540,15 +540,21 @@ function ValueFunctionsPage({ sessionId }) {
     const ms = activeData.midSplit || {}
     let initialStep = 0
     if (ms.directionAnswered) {
-      initialStep = 1 // Go to confidence/thresholds step
-      if (ms.skipFirst || ms.step1 !== null) {
-        initialStep = 2 // Go to step 1 (0.5 midpoint)
-      }
-      if (ms.skipSecond || ms.step2 !== null || ms.skipFirst) {
-        initialStep = 3 // Go to step 3 (quarter points)
-      }
-      if (ms.skipThird || ms.step3 !== null || ms.skipFirst) {
-        initialStep = 4 // Complete
+      initialStep = 1
+      if (ms.skipFirst) {
+        initialStep = 5
+      } else if (ms.step1 !== null) {
+        const secondDone = ms.skipSecond || ms.step2 !== null
+        const thirdDone = ms.skipThird || ms.step3 !== null
+        if (!secondDone) {
+          initialStep = 3
+        } else if (!thirdDone) {
+          initialStep = 4
+        } else {
+          initialStep = 5
+        }
+      } else {
+        initialStep = 2
       }
     }
     setMidFlowStep((prev) => ({ ...prev, [active]: initialStep }))
@@ -558,7 +564,7 @@ function ValueFunctionsPage({ sessionId }) {
     if (!active) return
     setMidFlowStep((prev) => ({
       ...prev,
-      [active]: Math.min(Math.max(nextStep, 0), 4),
+      [active]: Math.min(Math.max(nextStep, 0), 5),
     }))
   }
 
@@ -661,6 +667,12 @@ function ValueFunctionsPage({ sessionId }) {
         ms.step2 = null
         ms.step3 = null
       }
+      if (stepKey === 'skipSecond' && value) {
+        ms.step2 = null
+      }
+      if (stepKey === 'skipThird' && value) {
+        ms.step3 = null
+      }
       const points = buildMidSplitPoints(range, shape, ms, activeData.thresholds)
       updated[active] = { ...updated[active], midSplit: ms, mode: MODE.MID, points }
       return updated
@@ -681,25 +693,51 @@ function ValueFunctionsPage({ sessionId }) {
     }
     if (currentMidStep === 2) {
       if (activeData.midSplit?.skipFirst) {
-        setCurrentMidStep(4)
+        setCurrentMidStep(5)
         return
       }
-      // Check if we should go to step 3
       if (!(activeData.midSplit?.step1 !== null)) return
       setCurrentMidStep(3)
       return
     }
     if (currentMidStep === 3) {
-      // Done with all steps
-      if (!(activeData.midSplit?.skipThird || activeData.midSplit?.step3 !== null || activeData.midSplit?.skipFirst)) return
+      if (activeData.midSplit?.skipSecond) {
+        setCurrentMidStep(4)
+        return
+      }
+      if (!(activeData.midSplit?.step2 !== null)) return
       setCurrentMidStep(4)
+      return
+    }
+    if (currentMidStep === 4) {
+      if (activeData.midSplit?.skipThird || activeData.midSplit?.step3 !== null) {
+        setCurrentMidStep(5)
+        toast({
+          title: 'Criterion completed',
+          status: 'success',
+          duration: 1200,
+          isClosable: true,
+        })
+      }
     }
   }
 
   const handleMidDone = () => {
     if (!activeData) return
-    if (activeData.midSplit?.skipThird || activeData.midSplit?.step3 !== null || activeData.midSplit?.skipFirst) {
-      setCurrentMidStep(4)
+    if (activeData.midSplit?.skipFirst) {
+      setCurrentMidStep(5)
+      toast({
+        title: 'Criterion completed',
+        status: 'success',
+        duration: 1200,
+        isClosable: true,
+      })
+      return
+    }
+    const secondDone = activeData.midSplit?.skipSecond || activeData.midSplit?.step2 !== null
+    const thirdDone = activeData.midSplit?.skipThird || activeData.midSplit?.step3 !== null
+    if (secondDone && thirdDone) {
+      setCurrentMidStep(5)
       toast({
         title: 'Criterion completed',
         status: 'success',
@@ -712,16 +750,18 @@ function ValueFunctionsPage({ sessionId }) {
   const handleSkipCurrentStep = () => {
     if (!activeData) return
     if (currentMidStep === 2) {
-      // Skipping step 1 (0.5 midpoint)
       handleSkipStep('skipFirst', true)
-      setCurrentMidStep(4)
+      setCurrentMidStep(5)
       return
     }
     if (currentMidStep === 3) {
-      // Skipping step 3 (quarter points)
       handleSkipStep('skipSecond', true)
-      handleSkipStep('skipThird', true)
       setCurrentMidStep(4)
+      return
+    }
+    if (currentMidStep === 4) {
+      handleSkipStep('skipThird', true)
+      setCurrentMidStep(5)
       return
     }
   }
@@ -854,7 +894,10 @@ function ValueFunctionsPage({ sessionId }) {
       if (entry.mode === MODE.FREE) {
           return entry.freeEditConfigured === true
       }
-      return entry.midSplit?.directionAnswered === true && (entry.midSplit?.skipFirst === true || entry.midSplit?.step1 !== null)
+      if (entry.midSplit?.directionAnswered !== true) return false
+      if (entry.midSplit?.skipFirst === true) return true
+        const otherDone = entry.midSplit?.skipThird === true || entry.midSplit?.step3 !== null
+        return entry.midSplit?.step1 !== null && otherDone
     }).length
     return Math.round((filled / nonQualCriteria.length) * 100)
   }, [criteria, valueFunctions])
@@ -951,8 +994,12 @@ function ValueFunctionsPage({ sessionId }) {
             
             const done = entry && (
               (entry.mode === MODE.MID && (
-                entry.midSplit?.directionAnswered === true &&
-                (entry.midSplit?.skipFirst === true || entry.midSplit?.step1 !== null)
+                entry.midSplit?.directionAnswered === true && (
+                  entry.midSplit?.skipFirst === true || (
+                    entry.midSplit?.step1 !== null &&
+                    (entry.midSplit?.skipThird === true || entry.midSplit?.step3 !== null)
+                  )
+                )
               )) ||
               (entry.mode === MODE.FREE && entry.freeEditConfigured === true)
             )
@@ -1018,188 +1065,263 @@ function ValueFunctionsPage({ sessionId }) {
 
               {activeData.mode === MODE.MID ? (
                 <VStack align="stretch" spacing={4}>
-                  {currentMidStep === 0 && (
-                    <VStack align="stretch" spacing={3}>
-                      <QuestionPrompt>
-                        <HStack spacing={3} wrap="wrap" justify="space-between">
-                          <Text>
-                            Step 1: Is the value function of <strong>{active}</strong> increasing or decreasing?
-                          </Text>
-                          <HStack spacing={2}>
-                            <Button
-                              size="sm"
-                              variant={activeData.midSplit?.directionAnswered && activeData.shape === 'linear_increasing' ? 'outline' : 'ghost'}
-                              onClick={() => handleDirectionChange('linear_increasing')}
-                            >
-                              ↗ Increasing
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant={activeData.midSplit?.directionAnswered && activeData.shape === 'linear_decreasing' ? 'outline' : 'ghost'}
-                              onClick={() => handleDirectionChange('linear_decreasing')}
-                            >
-                              ↘ Decreasing
-                            </Button>
+                  <>
+                    {currentMidStep === 0 && (
+                      <VStack align="stretch" spacing={3}>
+                        <QuestionPrompt>
+                          <HStack spacing={3} wrap="wrap" justify="space-between">
+                            <Text>
+                              Step 1: Is the value function of <strong>{active}</strong> increasing or decreasing?
+                            </Text>
+                            <HStack spacing={2}>
+                              <Button
+                                size="sm"
+                                variant={activeData.midSplit?.directionAnswered && activeData.shape === 'linear_increasing' ? 'outline' : 'ghost'}
+                                onClick={() => handleDirectionChange('linear_increasing')}
+                              >
+                                ↗ Increasing
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant={activeData.midSplit?.directionAnswered && activeData.shape === 'linear_decreasing' ? 'outline' : 'ghost'}
+                                onClick={() => handleDirectionChange('linear_decreasing')}
+                              >
+                                ↘ Decreasing
+                              </Button>
+                            </HStack>
                           </HStack>
+                        </QuestionPrompt>
+                        <HStack>
+                          <Button
+                            colorScheme="blue"
+                            onClick={handleMidNext}
+                            isDisabled={!activeData.midSplit?.directionAnswered}
+                          >
+                            Next
+                          </Button>
                         </HStack>
-                      </QuestionPrompt>
-                      <HStack>
-                        <Button
-                          colorScheme="blue"
-                          onClick={handleMidNext}
-                          isDisabled={!activeData.midSplit?.directionAnswered}
-                        >
-                          Next
-                        </Button>
-                      </HStack>
-                    </VStack>
-                  )}
+                      </VStack>
+                    )}
 
-                  {currentMidStep === 1 && (
-                    <VStack align="stretch" spacing={3}>
-                      <QuestionPrompt>
-                        Step 2: Set the confidence and thresholds for <strong>{active}</strong>.
-                      </QuestionPrompt>
-                      <HStack spacing={4} align="flex-end" wrap="wrap">
-                        <Box>
-                          <HStack spacing={1} mb={2}>
-                            <FormLabel fontSize="sm" m={0} fontWeight="medium">Confidence</FormLabel>
-                            <Tooltip
-                              label={
-                                <Box>
-                                  <Text fontWeight="bold" mb={1}>Confidence Levels:</Text>
-                                  <Text>0 - Not confident at all (±10%)</Text>
-                                  <Text>1 - Low confidence (±7.5%)</Text>
-                                  <Text>2 - Medium confidence (±5%)</Text>
-                                  <Text>3 - High confidence (±2.5%)</Text>
-                                  <Text>4 - Fully confident (no uncertainty)</Text>
-                                </Box>
-                              }
-                              placement="top"
-                              hasArrow
+                    {currentMidStep === 1 && (
+                      <VStack align="stretch" spacing={3}>
+                        <QuestionPrompt>
+                          Step 2: Set the confidence and thresholds for <strong>{active}</strong>.
+                        </QuestionPrompt>
+                        <HStack spacing={4} align="flex-end" wrap="wrap">
+                          <Box>
+                            <HStack spacing={1} mb={2}>
+                              <FormLabel fontSize="sm" m={0} fontWeight="medium">Confidence</FormLabel>
+                              <Tooltip
+                                label={
+                                  <Box>
+                                    <Text fontWeight="bold" mb={1}>Confidence Levels:</Text>
+                                    <Text>0 - Not confident at all (±10%)</Text>
+                                    <Text>1 - Low confidence (±7.5%)</Text>
+                                    <Text>2 - Medium confidence (±5%)</Text>
+                                    <Text>3 - High confidence (±2.5%)</Text>
+                                    <Text>4 - Fully confident (no uncertainty)</Text>
+                                  </Box>
+                                }
+                                placement="top"
+                                hasArrow
+                              >
+                                <QuestionIcon color="gray.500" boxSize={3} cursor="help" />
+                              </Tooltip>
+                            </HStack>
+                            <Select
+                              value={activeData.confidence ?? 4}
+                              onChange={(e) => handleConfidenceChange(e.target.value)}
+                              size="sm"
+                              minW="180px"
                             >
-                              <QuestionIcon color="gray.500" boxSize={3} cursor="help" />
+                              <option value="0">0 - Not confident (±10%)</option>
+                              <option value="1">1 - Low (±7.5%)</option>
+                              <option value="2">2 - Medium (±5%)</option>
+                              <option value="3">3 - High (±2.5%)</option>
+                              <option value="4">4 - Fully confident</option>
+                            </Select>
+                          </Box>
+                          <FormControl maxW="150px">
+                            <FormLabel fontSize="sm" m={0} fontWeight="medium">Low threshold</FormLabel>
+                            <Tooltip
+                              isOpen={clampHint?.field === 'low'}
+                              label={`Auto-clamped to ${clampHint?.value}`}
+                              placement="top"
+                            >
+                              <Input
+                                key={`low-${activeData.thresholds.low}`}
+                                type="number"
+                                size="sm"
+                                defaultValue={activeData.thresholds.low}
+                                onBlur={(e) => {
+                                  const num = parseFloat(e.target.value)
+                                  if (Number.isFinite(num)) handleThresholdChange('low', num)
+                                }}
+                              />
                             </Tooltip>
-                          </HStack>
-                          <Select
-                            value={activeData.confidence ?? 4}
-                            onChange={(e) => handleConfidenceChange(e.target.value)}
-                            size="sm"
-                            minW="180px"
+                          </FormControl>
+                          <FormControl maxW="150px">
+                            <FormLabel fontSize="sm" m={0} fontWeight="medium">High threshold</FormLabel>
+                            <Tooltip
+                              isOpen={clampHint?.field === 'high'}
+                              label={`Auto-clamped to ${clampHint?.value}`}
+                              placement="top"
+                            >
+                              <Input
+                                key={`high-${activeData.thresholds.high}`}
+                                type="number"
+                                size="sm"
+                                defaultValue={activeData.thresholds.high}
+                                onBlur={(e) => {
+                                  const num = parseFloat(e.target.value)
+                                  if (Number.isFinite(num)) handleThresholdChange('high', num)
+                                }}
+                              />
+                            </Tooltip>
+                          </FormControl>
+                        </HStack>
+                        <HStack>
+                          <Button variant="outline" onClick={() => setCurrentMidStep(0)}>Back</Button>
+                          <Button
+                            colorScheme="blue"
+                            onClick={handleMidNext}
                           >
-                            <option value="0">0 - Not confident (±10%)</option>
-                            <option value="1">1 - Low (±7.5%)</option>
-                            <option value="2">2 - Medium (±5%)</option>
-                            <option value="3">3 - High (±2.5%)</option>
-                            <option value="4">4 - Fully confident</option>
-                          </Select>
-                        </Box>
-                        <FormControl maxW="150px">
-                          <FormLabel fontSize="sm" m={0} fontWeight="medium">Low threshold</FormLabel>
-                          <Tooltip
-                            isOpen={clampHint?.field === 'low'}
-                            label={`Auto-clamped to ${clampHint?.value}`}
-                            placement="top"
+                            Next
+                          </Button>
+                        </HStack>
+                      </VStack>
+                    )}
+
+                    {currentMidStep === 2 && (
+                      <VStack align="stretch" spacing={3}>
+                        <QuestionPrompt>
+                          Step 3: At which point X is equally important to improve <strong>{active}</strong> from <strong>{activeData.thresholds.low}</strong> to <strong>X</strong> as from <strong>X</strong> to <strong>{activeData.thresholds.high}</strong>?
+                        </QuestionPrompt>
+                        {!activeData.midSplit.skipFirst && (
+                          <Input
+                            key={`mid-step1-${activeData.midSplit.step1 ?? 'blank'}`}
+                            type="number"
+                            defaultValue={activeData.midSplit.step1 ?? ''}
+                            placeholder="Enter X"
+                            onBlur={(e) => {
+                              const num = parseFloat(e.target.value)
+                              if (Number.isFinite(num)) handleMidSplitChange('step1', num, true)
+                            }}
+                          />
+                        )}
+                        <HStack>
+                          <Button variant="outline" onClick={handleSkipCurrentStep}>Skip</Button>
+                          <Button variant="outline" onClick={() => setCurrentMidStep(1)}>Back</Button>
+                          <Button
+                            colorScheme="blue"
+                            onClick={handleMidNext}
+                            isDisabled={!(activeData.midSplit.skipFirst || activeData.midSplit.step1 !== null)}
                           >
+                            Next
+                          </Button>
+                        </HStack>
+                      </VStack>
+                    )}
+
+                    {currentMidStep === 3 && (
+                      <VStack align="stretch" spacing={3}>
+                        <QuestionPrompt>
+                          <Text>
+                            Step 4: At which point X is equally important to improve <strong>{active}</strong> from <strong>{activeData.thresholds.low}</strong> to <strong>X</strong> as from <strong>X</strong> to <strong>{activeData.midSplit.step1 ?? activeData.thresholds.high}</strong>?
+                          </Text>
+                        </QuestionPrompt>
+                        {!activeData.midSplit.skipFirst && (
+                          <Box>
+                            <Text fontSize="sm" color="gray.700" mb={1}>
+                              Enter the second indifference point.
+                            </Text>
                             <Input
-                              key={`low-${activeData.thresholds.low}`}
+                              key={`mid-step2-${activeData.midSplit.step2 ?? 'blank'}`}
                               type="number"
-                              size="sm"
-                              defaultValue={activeData.thresholds.low}
+                              defaultValue={activeData.midSplit.step2 ?? ''}
+                              placeholder="Enter X"
                               onBlur={(e) => {
                                 const num = parseFloat(e.target.value)
-                                if (Number.isFinite(num)) handleThresholdChange('low', num)
+                                if (Number.isFinite(num)) handleMidSplitChange('step2', num, true)
                               }}
                             />
-                          </Tooltip>
-                        </FormControl>
-                        <FormControl maxW="150px">
-                          <FormLabel fontSize="sm" m={0} fontWeight="medium">High threshold</FormLabel>
-                          <Tooltip
-                            isOpen={clampHint?.field === 'high'}
-                            label={`Auto-clamped to ${clampHint?.value}`}
-                            placement="top"
+                          </Box>
+                        )}
+                        <HStack>
+                          <Button variant="outline" onClick={handleSkipCurrentStep}>Skip</Button>
+                          <Button variant="outline" onClick={() => setCurrentMidStep(2)}>Back</Button>
+                          <Button
+                            colorScheme="blue"
+                            onClick={handleMidNext}
+                            isDisabled={!activeData.midSplit.skipFirst && !(activeData.midSplit.skipSecond || activeData.midSplit.step2 !== null)}
                           >
+                            Next
+                          </Button>
+                        </HStack>
+                      </VStack>
+                    )}
+
+                    {currentMidStep === 4 && (
+                      <VStack align="stretch" spacing={3}>
+                        <QuestionPrompt>
+                          <Text>
+                            Step 5: At which point X is equally important to improve <strong>{active}</strong> from <strong>{activeData.midSplit.step1 ?? activeData.thresholds.low}</strong> to <strong>X</strong> as from <strong>X</strong> to <strong>{activeData.thresholds.high}</strong>?
+                          </Text>
+                        </QuestionPrompt>
+                        {!activeData.midSplit.skipFirst && (
+                          <Box>
+                            <Text fontSize="sm" color="gray.700" mb={1}>
+                              Enter the other indifference point.
+                            </Text>
                             <Input
-                              key={`high-${activeData.thresholds.high}`}
+                              key={`mid-step3-${activeData.midSplit.step3 ?? 'blank'}`}
                               type="number"
-                              size="sm"
-                              defaultValue={activeData.thresholds.high}
+                              defaultValue={activeData.midSplit.step3 ?? ''}
+                              placeholder="Enter X"
                               onBlur={(e) => {
                                 const num = parseFloat(e.target.value)
-                                if (Number.isFinite(num)) handleThresholdChange('high', num)
+                                if (Number.isFinite(num)) handleMidSplitChange('step3', num, true)
                               }}
                             />
-                          </Tooltip>
-                        </FormControl>
-                      </HStack>
-                      <HStack>
-                        <Button variant="outline" onClick={() => setCurrentMidStep(0)}>Back</Button>
-                        <Button
-                          colorScheme="blue"
-                          onClick={handleMidNext}
-                        >
-                          Next
-                        </Button>
-                      </HStack>
-                    </VStack>
-                  )}
+                          </Box>
+                        )}
+                        <HStack>
+                          <Button variant="outline" onClick={handleSkipCurrentStep}>Skip</Button>
+                          <Button variant="outline" onClick={() => setCurrentMidStep(3)}>Back</Button>
+                          <Button
+                            colorScheme="blue"
+                            onClick={handleMidDone}
+                            isDisabled={!activeData.midSplit.skipFirst && !(activeData.midSplit.skipThird || activeData.midSplit.step3 !== null)}
+                          >
+                            Done
+                          </Button>
+                        </HStack>
+                      </VStack>
+                    )}
 
-                  {currentMidStep === 2 && (
-                    <VStack align="stretch" spacing={3}>
-                      <QuestionPrompt>
-                        Step 3: At which point X is equally important to improve <strong>{active}</strong> from <strong>{activeData.thresholds.low}</strong> to <strong>X</strong> as from <strong>X</strong> to <strong>{activeData.thresholds.high}</strong>?
-                      </QuestionPrompt>
-                      {!activeData.midSplit.skipFirst && (
-                        <Input
-                          key={`mid-step1-${activeData.midSplit.step1 ?? 'blank'}`}
-                          type="number"
-                          defaultValue={activeData.midSplit.step1 ?? ''}
-                          placeholder="Enter X"
-                          onBlur={(e) => {
-                            const num = parseFloat(e.target.value)
-                            if (Number.isFinite(num)) handleMidSplitChange('step1', num, true)
-                          }}
-                        />
-                      )}
-                      <HStack>
-                        <Button variant="outline" onClick={handleSkipCurrentStep}>Skip</Button>
-                        <Button variant="outline" onClick={() => setCurrentMidStep(1)}>Back</Button>
-                        <Button
-                          colorScheme="blue"
-                          onClick={handleMidNext}
-                          isDisabled={!(activeData.midSplit.skipFirst || activeData.midSplit.step1 !== null)}
-                        >
-                          Next
-                        </Button>
-                      </HStack>
-                    </VStack>
-                  )}
+                    {currentMidStep === 5 && (
+                      <VStack align="stretch" spacing={3}>
+                        <QuestionPrompt>
+                          <Text>
+                            Great, you finished this elicitation step for <strong>{active}</strong>. You can go back to modify values or continue to the next criterion.
+                          </Text>
+                        </QuestionPrompt>
+                        <HStack>
+                          <Button variant="outline" onClick={() => setCurrentMidStep(4)}>Back</Button>
+                          <Button
+                            colorScheme="blue"
+                            onClick={handleNextCriterion}
+                            isDisabled={activeCriterionIndex < 0 || activeCriterionIndex >= nonQualCriteria.length - 1}
+                          >
+                            Next criterion
+                          </Button>
+                        </HStack>
+                      </VStack>
+                    )}
 
-                  {currentMidStep === 3 && (
-                    <VStack align="stretch" spacing={3}>
-                      <QuestionPrompt>
-                        Step 4: At which point X is equally important to improve <strong>{active}</strong> from <strong>{activeData.midSplit.step1 ?? activeData.thresholds.low}</strong> to <strong>X</strong> as from <strong>X</strong> to <strong>{activeData.thresholds.high}</strong>?
-                      </QuestionPrompt>
-                      {!activeData.midSplit.skipThird && !activeData.midSplit.skipFirst && (
-                        <Input
-                          key={`mid-step3-${activeData.midSplit.step3 ?? 'blank'}`}
-                          type="number"
-                          defaultValue={activeData.midSplit.step3 ?? ''}
-                          placeholder="Enter X"
-                          onBlur={(e) => {
-                            const num = parseFloat(e.target.value)
-                            if (Number.isFinite(num)) handleMidSplitChange('step3', num, true)
-                          }}
-                        />
-                      )}
-                      <HStack>
-                        <Button variant="outline" onClick={handleSkipCurrentStep}>Skip</Button>
-                        <Button variant="outline" onClick={() => setCurrentMidStep(2)}>Back</Button>
-                        <Button colorScheme="blue" onClick={handleMidDone}>Done</Button>
-                      </HStack>
-                    </VStack>
-                  )}
+                  </>
+
                 </VStack>
               ) : (
                 <VStack align="stretch" spacing={3}>
@@ -1304,7 +1426,7 @@ function ValueFunctionsPage({ sessionId }) {
                       onClick={() => handleNavigateCriterion(-1)}
                       isDisabled={activeCriterionIndex <= 0}
                     >
-                      Previous criterion
+                      Back
                     </Button>
                     <Button
                       size="sm"
@@ -1312,7 +1434,7 @@ function ValueFunctionsPage({ sessionId }) {
                       onClick={handleNextCriterion}
                       isDisabled={activeCriterionIndex < 0 || activeCriterionIndex >= nonQualCriteria.length - 1}
                     >
-                      Next criterion
+                      Next
                     </Button>
                   </HStack>
                 </VStack>
