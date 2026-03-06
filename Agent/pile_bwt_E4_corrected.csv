@@ -1,0 +1,29 @@
+REFERENCE_CRITERION,ADJUSTED_CRITERION,DATA_VALUE,TYPE,GROUP
+Load following Capabilities,Thermal Efficiency,32.894,best,Technical
+Discharge Burnup,Thermal Efficiency,34.559,best,Technical
+Net Power Output,Thermal Efficiency,35.687,best,Technical
+Load following Capabilities,Discharge Burnup,50.25,worst,Technical
+Load following Capabilities,Net Power Output,659.1,worst,Technical
+Operative + Fuel Costs,Capital Investment Budgeted,11008.0,best,Economic
+Construction Complexity,Capital Investment Budgeted,7000.0,best,Economic
+Design Complexity,Capital Investment Budgeted,10066.0,best,Economic
+Operative + Fuel Costs,Construction Complexity,0.57,worst,Economic
+Operative + Fuel Costs,Design Complexity,0.8,worst,Economic
+Supplier Availbility,Design Maturity,0.63,best,Feasibility
+Licensing Status,Design Maturity,0.8,best,Feasibility
+Supplier Availbility,Licensing Status,0.88,worst,Feasibility
+Nuclear Waste,Electricity Market Benefit,25.345,best,Social
+GHGe Benefit,Electricity Market Benefit,45.75,best,Social
+Percived Safety,Electricity Market Benefit,30.187,best,Social
+Nuclear Waste,GHGe Benefit,1.285,worst,Social
+Nuclear Waste,Percived Safety,0.44,worst,Social
+Thermal Efficiency,Capital Investment Budgeted,13049.0,best,intra-B
+Design Maturity,Capital Investment Budgeted,8025.0,best,intra-B
+Electricity Market Benefit,Capital Investment Budgeted,5670.0,best,intra-B
+Thermal Efficiency,Design Maturity,0.29,worst,intra-B
+Thermal Efficiency,Electricity Market Benefit,31.224,worst,intra-B
+Load following Capabilities,Supplier Availbility,0.31,best,intra-W
+Operative + Fuel Costs,Supplier Availbility,0.81,best,intra-W
+Nuclear Waste,Supplier Availbility,0.45,best,intra-W
+Load following Capabilities,Operative + Fuel Costs,23.432,worst,intra-W
+Load following Capabilities,Nuclear Waste,16.319,worst,intra-W
