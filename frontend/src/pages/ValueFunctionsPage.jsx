@@ -192,6 +192,7 @@ const buildThresholdAnchors = (shape, thresholds, range) => {
 function ValueFunctionPlot({ range, points, thresholds, onDrag, draggable, shape, confidence = 4 }) {
   const svgRef = useRef(null)
   const clipIdRef = useRef(`plot-clip-${Math.random().toString(36).substr(2, 9)}`)
+  const dragOffsetRef = useRef({ x: 0, y: 0 })
   const [dragIndex, setDragIndex] = useState(null)
 
   const width = 620
@@ -211,9 +212,18 @@ function ValueFunctionPlot({ range, points, thresholds, onDrag, draggable, shape
 
   const toSvgX = (x) => ((x - range.min) / (range.max - range.min || 1)) * (width - 40) + 20
   const toSvgY = (y) => height - 20 - y * (height - 40)
-  const fromSvg = (clientX, clientY, rect) => {
-    const xRatio = clamp((clientX - rect.left - 20) / (width - 40), 0, 1)
-    const yRatio = clamp((height - 20 - (clientY - rect.top)) / (height - 40), 0, 1)
+  const toSvgCoords = (clientX, clientY, rect) => {
+    const safeWidth = rect.width || 1
+    const safeHeight = rect.height || 1
+    return {
+      x: ((clientX - rect.left) / safeWidth) * width,
+      y: ((clientY - rect.top) / safeHeight) * height,
+    }
+  }
+
+  const fromSvg = (svgX, svgY) => {
+    const xRatio = clamp((svgX - 20) / (width - 40), 0, 1)
+    const yRatio = clamp((height - 20 - svgY) / (height - 40), 0, 1)
     const x = range.min + xRatio * (range.max - range.min)
     const y = yRatio
     return { x, y }
@@ -221,6 +231,20 @@ function ValueFunctionPlot({ range, points, thresholds, onDrag, draggable, shape
 
   const handlePointerDown = (idx) => (event) => {
     if (!draggable) return
+    const rect = svgRef.current?.getBoundingClientRect()
+    if (!rect || !points[idx]) return
+
+    const pointerSvg = toSvgCoords(event.clientX, event.clientY, rect)
+    const pointSvg = {
+      x: toSvgX(points[idx].x),
+      y: toSvgY(points[idx].y),
+    }
+
+    dragOffsetRef.current = {
+      x: pointerSvg.x - pointSvg.x,
+      y: pointerSvg.y - pointSvg.y,
+    }
+
     setDragIndex(idx)
     event.preventDefault()
   }
@@ -229,11 +253,19 @@ function ValueFunctionPlot({ range, points, thresholds, onDrag, draggable, shape
     if (dragIndex === null || !draggable || !onDrag) return
     const rect = svgRef.current?.getBoundingClientRect()
     if (!rect) return
-    const { x, y } = fromSvg(event.clientX, event.clientY, rect)
+    const pointerSvg = toSvgCoords(event.clientX, event.clientY, rect)
+    const anchoredSvg = {
+      x: pointerSvg.x - dragOffsetRef.current.x,
+      y: pointerSvg.y - dragOffsetRef.current.y,
+    }
+    const { x, y } = fromSvg(anchoredSvg.x, anchoredSvg.y)
     onDrag(dragIndex, { x, y })
   }
 
-  const handlePointerUp = () => setDragIndex(null)
+  const handlePointerUp = () => {
+    setDragIndex(null)
+    dragOffsetRef.current = { x: 0, y: 0 }
+  }
 
   useEffect(() => {
     if (!draggable) return
@@ -375,6 +407,7 @@ function ValueFunctionsPage({ sessionId }) {
 
           // Determine mode from criterion setting
           const mode = criterion.use_mid_splitting !== false ? MODE.MID : MODE.FREE
+          const freeEditConfigured = persisted.freeEditConfigured ?? false
 
           let points = persisted.points
           if (!Array.isArray(points) || points.length === 0) {
@@ -397,6 +430,7 @@ function ValueFunctionsPage({ sessionId }) {
             thresholds,
             mode,
             midSplit,
+            freeEditConfigured,
             gaussian,
             points: clampPointsToRange(points, range),
             range,
@@ -568,6 +602,9 @@ function ValueFunctionsPage({ sessionId }) {
       }
 
       nextEntry.thresholds = nextThresholds
+      if (nextEntry.mode === MODE.FREE) {
+        nextEntry.freeEditConfigured = true
+      }
 
       // Rebuild points for linear shapes
       if (nextEntry.shape === 'linear_increasing' || nextEntry.shape === 'linear_decreasing') {
@@ -714,7 +751,12 @@ function ValueFunctionsPage({ sessionId }) {
       const monotonic = shape === 'linear_increasing' || shape === 'linear_decreasing'
       const corrected = monotonic ? enforceMonotonic(nextPoints, shape === 'linear_increasing') : nextPoints
       const clamped = clampPointsToRange(corrected, range)
-      updated[active] = { ...updated[active], points: lockLinearEndpoints(clamped, shape, range), mode: MODE.FREE }
+      updated[active] = {
+        ...updated[active],
+        points: lockLinearEndpoints(clamped, shape, range),
+        mode: MODE.FREE,
+        freeEditConfigured: true,
+      }
       return updated
     })
   }
@@ -729,7 +771,12 @@ function ValueFunctionsPage({ sessionId }) {
       const clamped = clampPointsToRange(next, range)
       const monotonic = shape === 'linear_increasing' || shape === 'linear_decreasing'
       const adjusted = monotonic ? enforceMonotonic(clamped, shape === 'linear_increasing') : clamped
-      updated[active] = { ...updated[active], points: lockLinearEndpoints(adjusted, shape, range), mode: MODE.FREE }
+      updated[active] = {
+        ...updated[active],
+        points: lockLinearEndpoints(adjusted, shape, range),
+        mode: MODE.FREE,
+        freeEditConfigured: true,
+      }
       return updated
     })
   }
@@ -741,16 +788,27 @@ function ValueFunctionsPage({ sessionId }) {
       const updated = { ...prev }
       const entry = { ...updated[active] }
       const pts = [...entry.points]
-      pts[idx] = coords
-      const clamped = clampPointsToRange(pts, range)
+      const epsilon = Math.max((range.max - range.min) * 0.0001, 1e-9)
+      let nextX = clamp(coords.x, range.min, range.max)
+      const nextY = clamp(coords.y, 0, 1)
+
+      if (idx > 0) {
+        nextX = Math.max(nextX, pts[idx - 1].x + epsilon)
+      }
+      if (idx < pts.length - 1) {
+        nextX = Math.min(nextX, pts[idx + 1].x - epsilon)
+      }
+
+      pts[idx] = { x: nextX, y: nextY }
       const monotonic = shape === 'linear_increasing' || shape === 'linear_decreasing'
       if (idx === 0 || idx === pts.length - 1) return updated
       entry.points = lockLinearEndpoints(
-        monotonic ? enforceMonotonic(clamped, shape === 'linear_increasing') : clamped,
+        monotonic ? enforceMonotonic(pts, shape === 'linear_increasing') : pts,
         shape,
         range,
       )
       entry.mode = MODE.FREE
+      entry.freeEditConfigured = true
       updated[active] = entry
       return updated
     })
@@ -765,6 +823,7 @@ function ValueFunctionsPage({ sessionId }) {
         ...updated[active],
         points: updated[active].points.filter((_, i) => i !== idx),
         mode: MODE.FREE,
+        freeEditConfigured: true,
       }
       return updated
     })
@@ -776,7 +835,11 @@ function ValueFunctionsPage({ sessionId }) {
     if (confidence < 0 || confidence > 4) return
     markDirty((prev) => ({
       ...prev,
-      [active]: { ...prev[active], confidence },
+      [active]: {
+        ...prev[active],
+        confidence,
+        freeEditConfigured: prev[active].mode === MODE.FREE ? true : prev[active].freeEditConfigured,
+      },
     }))
   }
 
@@ -789,7 +852,7 @@ function ValueFunctionsPage({ sessionId }) {
       const entry = valueFunctions[name]
       if (!entry) return false
       if (entry.mode === MODE.FREE) {
-        return Array.isArray(entry.points) && entry.points.length >= 2
+          return entry.freeEditConfigured === true
       }
       return entry.midSplit?.directionAnswered === true && (entry.midSplit?.skipFirst === true || entry.midSplit?.step1 !== null)
     }).length
@@ -823,6 +886,20 @@ function ValueFunctionsPage({ sessionId }) {
     const target = nonQualCriteria[nextIndex]
     const targetName = target.criterion_name || `Criterion ${nextIndex + 1}`
     setActive(targetName)
+  }
+
+  const handleNextCriterion = () => {
+    if (!active || !activeData) return
+    if (activeData.mode === MODE.FREE && activeData.freeEditConfigured !== true) {
+      markDirty((prev) => ({
+        ...prev,
+        [active]: {
+          ...prev[active],
+          freeEditConfigured: true,
+        },
+      }))
+    }
+    handleNavigateCriterion(1)
   }
 
   if (loading) {
@@ -877,7 +954,7 @@ function ValueFunctionsPage({ sessionId }) {
                 entry.midSplit?.directionAnswered === true &&
                 (entry.midSplit?.skipFirst === true || entry.midSplit?.step1 !== null)
               )) ||
-              (entry.mode === MODE.FREE)
+              (entry.mode === MODE.FREE && entry.freeEditConfigured === true)
             )
             
             return (
@@ -1138,7 +1215,13 @@ function ValueFunctionsPage({ sessionId }) {
                         onClick={() => {
                           markDirty((prev) => ({
                             ...prev,
-                            [active]: { ...prev[active], shape: 'linear_increasing', mode: MODE.FREE },
+                            [active]: {
+                              ...prev[active],
+                              shape: 'linear_increasing',
+                              mode: MODE.FREE,
+                              points: buildThresholdAnchors('linear_increasing', prev[active].thresholds, prev[active].range),
+                              freeEditConfigured: true,
+                            },
                           }))
                         }}
                       >
@@ -1151,7 +1234,13 @@ function ValueFunctionsPage({ sessionId }) {
                         onClick={() => {
                           markDirty((prev) => ({
                             ...prev,
-                            [active]: { ...prev[active], shape: 'linear_decreasing', mode: MODE.FREE },
+                            [active]: {
+                              ...prev[active],
+                              shape: 'linear_decreasing',
+                              mode: MODE.FREE,
+                              points: buildThresholdAnchors('linear_decreasing', prev[active].thresholds, prev[active].range),
+                              freeEditConfigured: true,
+                            },
                           }))
                         }}
                       >
@@ -1220,7 +1309,7 @@ function ValueFunctionsPage({ sessionId }) {
                     <Button
                       size="sm"
                       colorScheme="blue"
-                      onClick={() => handleNavigateCriterion(1)}
+                      onClick={handleNextCriterion}
                       isDisabled={activeCriterionIndex < 0 || activeCriterionIndex >= nonQualCriteria.length - 1}
                     >
                       Next criterion
