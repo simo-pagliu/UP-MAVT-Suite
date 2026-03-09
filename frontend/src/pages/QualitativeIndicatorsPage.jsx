@@ -25,7 +25,7 @@ import {
   FormControl,
   FormLabel,
 } from '@chakra-ui/react'
-import { ArrowBackIcon, ArrowForwardIcon, CheckCircleIcon, QuestionIcon, LockIcon } from '@chakra-ui/icons'
+import { ArrowBackIcon, ArrowForwardIcon, CheckCircleIcon, QuestionIcon, LockIcon, AddIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { API_URL } from '../config'
@@ -43,6 +43,8 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
   const [tiers, setTiers] = useState([])
   const [draggedItem, setDraggedItem] = useState(null)
   const [dragSource, setDragSource] = useState(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const [hoverZone, setHoverZone] = useState(null) // 'top', 'bottom', or tier index
 
   useEffect(() => {
     // Initialize with previous ranking if available, otherwise each alternative in its own tier
@@ -82,6 +84,12 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
   const handleDragStart = (tierIdx, itemIdx) => {
     setDraggedItem(alternatives[alternatives.findIndex(a => a === tiers[tierIdx][itemIdx].name)])
     setDragSource({ tierIdx, itemIdx })
+    setIsDragging(true)
+  }
+
+  const handleDragEnd = () => {
+    setIsDragging(false)
+    setHoverZone(null)
   }
 
   const handleDragOver = (e) => {
@@ -119,6 +127,7 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
 
     setDraggedItem(null)
     setDragSource(null)
+    setHoverZone(null)
   }
 
   const handleDropNewTop = () => {
@@ -140,6 +149,7 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
 
     setDraggedItem(null)
     setDragSource(null)
+    setHoverZone(null)
   }
 
   const handleDropNewBottom = () => {
@@ -159,6 +169,53 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
 
     setDraggedItem(null)
     setDragSource(null)
+    setHoverZone(null)
+  }
+
+  const handleDropBetween = (afterTierIdx) => {
+    if (!draggedItem || !dragSource) return
+
+    setTiers((prev) => {
+      const newTiers = prev.map(t => [...t])
+      
+      // Remove from source
+      const sourceTierIdx = dragSource.tierIdx
+      newTiers[sourceTierIdx].splice(dragSource.itemIdx, 1)
+      
+      // Remove empty tiers and track how positions shift
+      const filteredTiers = []
+      let removedBeforeInsertPoint = 0
+      let removedBeforeSource = 0
+      
+      newTiers.forEach((tier, idx) => {
+        if (tier.length > 0) {
+          filteredTiers.push(tier)
+        } else {
+          if (idx <= afterTierIdx) removedBeforeInsertPoint++
+          if (idx < sourceTierIdx) removedBeforeSource++
+        }
+      })
+      
+      // Adjust insert position based on removed tiers
+      let insertIdx = afterTierIdx + 1 - removedBeforeInsertPoint
+      
+      // If source was before insert point and got removed, adjust further
+      if (sourceTierIdx <= afterTierIdx && newTiers[sourceTierIdx].length === 0) {
+        insertIdx--
+      }
+      
+      // Insert new tier at the calculated position
+      filteredTiers.splice(insertIdx, 0, [{ name: draggedItem, rank: insertIdx }])
+      
+      // Re-index all tiers
+      return filteredTiers.map((tier, idx) => 
+        tier.map(item => ({ ...item, rank: idx }))
+      )
+    })
+
+    setDraggedItem(null)
+    setDragSource(null)
+    setHoverZone(null)
   }
 
   const handleNextPhase = () => {
@@ -175,69 +232,138 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
     <VStack spacing={6} align="stretch">
       <Box>
         <Heading size="md" mb={3}>Step 1: Rank the Alternatives</Heading>
-        <QuestionPrompt mb={0}>Drag alternatives to organize them by preference. Alternatives in the same tier have equal rank. Drop above the first tier or below the last tier to create new ranks.</QuestionPrompt>
+        <QuestionPrompt mb={0}>Drag alternatives to organize them by preference. Alternatives in the same tier have equal rank. Drop on + to add a new tier.</QuestionPrompt>
       </Box>
 
-      <VStack spacing={2} align="stretch">
-        {/* Drop zone for new tier at top */}
-        <Box 
-          minH="40px" 
-          border="2px dashed" 
-          borderColor="blue.200" 
-          borderRadius="md" 
-          p={2} 
-          onDragOver={handleDragOver} 
-          onDrop={handleDropNewTop}
-          bg="blue.50"
-          display="flex"
-          alignItems="center"
-          justifyContent="center"
-        >
-          <Text fontSize="xs" color="blue.600" fontWeight="medium">Drop here to create best rank</Text>
+      <VStack spacing={6} align="stretch">
+        {/* Top + button */}
+        <Box h="20px" display="flex" alignItems="center" pl="8px" mb={-4}>
+          <Box
+            w="24px"
+            h="24px"
+            borderRadius="full"
+            border="2px solid"
+            borderColor={isDragging ? (hoverZone === 'top' ? "blue.500" : "blue.300") : "blue.200"}
+            bg={isDragging ? (hoverZone === 'top' ? "blue.200" : "blue.50") : "white"}
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            opacity={isDragging ? 1 : 0.4}
+            transition="all 0.2s"
+            transform={hoverZone === 'top' ? "scale(1.1)" : "scale(1)"}
+            cursor={isDragging ? "copy" : "default"}
+            onDragOver={handleDragOver}
+            onDrop={handleDropNewTop}
+            onMouseEnter={() => setHoverZone('top')}
+            onMouseLeave={() => setHoverZone(null)}
+          >
+            <AddIcon boxSize="10px" color="blue.500" />
+          </Box>
         </Box>
 
         {tiers.map((tier, tierIdx) => (
-          <Box key={tierIdx} minH="60px" border="2px dashed" borderColor="gray.300" borderRadius="md" p={3} onDragOver={handleDragOver} onDrop={() => handleDrop(tierIdx)}>
-            <HStack spacing={2} wrap="wrap">
-              {tier.length === 0 ? (
-                <Text fontSize="sm" color="gray.400">Drop here for rank {tierIdx}</Text>
-              ) : (
-                tier.map((item, itemIdx) => (
+          <Box key={tierIdx}>
+            <HStack spacing={2} align="stretch">
+              {/* Left spacing column with circle between tiers */}
+              <Box w="40px" position="relative" display="flex" alignItems="center" justifyContent="center" flexShrink={0}>
+                {tierIdx < tiers.length - 1 && (
                   <Box
-                    key={`${tierIdx}-${itemIdx}`}
-                    bg="blue.50"
-                    border="1px solid"
-                    borderColor="blue.200"
-                    px={3}
-                    py={2}
-                    borderRadius="md"
-                    draggable
-                    onDragStart={() => handleDragStart(tierIdx, itemIdx)}
-                    cursor="move"
+                    position="absolute"
+                    bottom="-24px"
+                    left="8px"
+                    w="24px"
+                    h="24px"
+                    borderRadius="full"
+                    border="2px solid"
+                    borderColor={isDragging ? (hoverZone === tierIdx ? "blue.500" : "blue.300") : "blue.200"}
+                    bg={isDragging ? (hoverZone === tierIdx ? "blue.200" : "blue.50") : "white"}
+                    display="flex"
+                    alignItems="center"
+                    justifyContent="center"
+                    opacity={isDragging ? 1 : 0.4}
+                    transition="all 0.2s"
+                    transform={hoverZone === tierIdx ? "scale(1.1)" : "scale(1)"}
+                    cursor={isDragging ? "copy" : "default"}
+                    onDragOver={handleDragOver}
+                    onDrop={() => handleDropBetween(tierIdx)}
+                    onMouseEnter={() => setHoverZone(tierIdx)}
+                    onMouseLeave={() => setHoverZone(null)}
                   >
-                    <Text fontSize="sm" fontWeight="medium">{item.name}</Text>
+                    <AddIcon boxSize="10px" color="blue.500" />
                   </Box>
-                ))
-              )}
+                )}
+              </Box>
+              
+              {/* Tier box */}
+              <Box 
+                flex="1"
+                minH="60px" 
+                border="2px dashed" 
+                borderColor="gray.300" 
+                borderRadius="md" 
+                p={3} 
+                onDragOver={handleDragOver} 
+                onDrop={() => handleDrop(tierIdx)}
+                bg="white"
+                _hover={{ bg: "gray.50", borderColor: "gray.400" }}
+                transition="all 0.2s"
+              >
+                <HStack spacing={2} wrap="wrap">
+                  {tier.length === 0 ? (
+                    <Text fontSize="sm" color="gray.400">Drop here for rank {tierIdx}</Text>
+                  ) : (
+                    tier.map((item, itemIdx) => (
+                      <Box
+                        key={`${tierIdx}-${itemIdx}`}
+                        bg="blue.50"
+                        border="1px solid"
+                        borderColor="blue.200"
+                        px={3}
+                        py={2}
+                        borderRadius="md"
+                        draggable
+                        onDragStart={() => handleDragStart(tierIdx, itemIdx)}
+                        onDragEnd={handleDragEnd}
+                        cursor="move"
+                        _hover={{ bg: "blue.100", transform: "translateY(-1px)", shadow: "sm" }}
+                        transition="all 0.2s"
+                      >
+                        <Text fontSize="sm" fontWeight="medium">{item.name}</Text>
+                      </Box>
+                    ))
+                  )}
+                </HStack>
+              </Box>
             </HStack>
+            
+            {/* Spacing between tiers */}
+            {tierIdx < tiers.length - 1 && <Box h="1px" />}
           </Box>
         ))}
 
-        {/* Drop zone for new tier at bottom */}
-        <Box 
-          minH="40px" 
-          border="2px dashed" 
-          borderColor="blue.200" 
-          borderRadius="md" 
-          p={2} 
-          onDragOver={handleDragOver} 
-          onDrop={handleDropNewBottom}
-          bg="blue.50"
-          display="flex"
-          alignItems="center"
-          justifyContent="center"
-        >
-          <Text fontSize="xs" color="blue.600" fontWeight="medium">Drop here to create worst rank</Text>
+        {/* Bottom + button */}
+        <Box h="20px" display="flex" alignItems="center" pl="8px" mt={-4}>
+          <Box
+            w="24px"
+            h="24px"
+            borderRadius="full"
+            border="2px solid"
+            borderColor={isDragging ? (hoverZone === 'bottom' ? "blue.500" : "blue.300") : "blue.200"}
+            bg={isDragging ? (hoverZone === 'bottom' ? "blue.200" : "blue.50") : "white"}
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            opacity={isDragging ? 1 : 0.4}
+            transition="all 0.2s"
+            transform={hoverZone === 'bottom' ? "scale(1.1)" : "scale(1)"}
+            cursor={isDragging ? "copy" : "default"}
+            onDragOver={handleDragOver}
+            onDrop={handleDropNewBottom}
+            onMouseEnter={() => setHoverZone('bottom')}
+            onMouseLeave={() => setHoverZone(null)}
+          >
+            <AddIcon boxSize="10px" color="blue.500" />
+          </Box>
         </Box>
       </VStack>
     </VStack>
