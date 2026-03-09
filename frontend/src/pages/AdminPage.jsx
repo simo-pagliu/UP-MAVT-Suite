@@ -185,8 +185,7 @@ function AdminPage(props, ref) {
       const steps = [
         { key: 'qualitative_indicators', label: 'Qualitative' },
         { key: 'value_functions', label: 'Value Functions' },
-        { key: 'bwt', label: 'BWT' },
-        { key: 'pile_bwt', label: 'PILE-BWT' },
+        { key: 'bwt', label: 'PILE-BWT' },
       ]
 
       const sessionSteps = []
@@ -226,8 +225,7 @@ function AdminPage(props, ref) {
     const steps = [
       { key: 'qualitative_indicators', label: 'Qualitative' },
       { key: 'value_functions', label: 'Value Functions' },
-      { key: 'bwt', label: 'BWT' },
-      { key: 'pile_bwt', label: 'PILE-BWT' },
+      { key: 'bwt', label: 'PILE-BWT' },
     ]
 
     const sessionSteps = []
