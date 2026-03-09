@@ -597,6 +597,12 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
                           PILE-BWT
                         </MenuItem>
                         <MenuItem
+                          onClick={() => handleDownload(`/session/${session._id}/pile/export-debug`, `pile_bwt_debug_a_values_${session.name}.csv`)}
+                          isDisabled={!session.progress.hasBwt || !session.progress.hasValueFunctions}
+                        >
+                          DEBUG - a values
+                        </MenuItem>
+                        <MenuItem
                           onClick={() => handleDownload(`/study-session/${studySessionId}/weight-solutions/${session._id}/export`, `weight_solutions_${session.name}.csv`)}
                           isDisabled={!session.progress.hasWeights}
                         >

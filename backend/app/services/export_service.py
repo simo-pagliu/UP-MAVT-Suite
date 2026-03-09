@@ -4,6 +4,7 @@ import csv
 import io
 import json
 import zipfile
+from scipy.interpolate import interp1d
 
 from app.repositories import SessionRepository, InputRepository
 from app.services.session_service import SessionService
@@ -404,6 +405,117 @@ class ExportService:
             writer.writerow([bwt_data])
         return output.getvalue()
 
+    @classmethod
+    def build_pile_bwt_debug_csv(cls, bwt_data, value_functions_data, criteria_list):
+        """Build a PILE-BWT comparison CSV with debug 'a_value' column.
+
+        The 'a_value' column contains 1/vf(DATA_VALUE) where vf is the value
+        function of the ADJUSTED_CRITERION. For qualitative criteria, vf(x) = x
+        so a_value = 1/data_value.
+
+        Args:
+            bwt_data: The session's BWT data object.
+            value_functions_data: Dict with 'criteria' key mapping criterion names
+                to dicts with 'points' arrays (e.g., [{'x': 0, 'y': 0}, ...]).
+            criteria_list: List of criteria dicts with 'criterion_name' and
+                'is_qualitative' keys.
+
+        Returns:
+            str: The CSV text (UTF-8).
+        """
+        # Identify qualitative and quantitative criteria
+        qualitative_criteria = {}
+        quantitative_criteria = {}
+        for criterion in criteria_list or []:
+            if not isinstance(criterion, dict):
+                continue
+            name = criterion.get('criterion_name')
+            if not name:
+                continue
+            if criterion.get('is_qualitative'):
+                qualitative_criteria[name] = True
+            else:
+                quantitative_criteria[name] = True
+        
+        # Build value function callables for QUANTITATIVE criteria
+        vf_dict = {}
+        criteria_map = value_functions_data.get('criteria', {}) if isinstance(value_functions_data, dict) else {}
+        
+        for name in quantitative_criteria:
+            cfg = criteria_map.get(name, {})
+            if not isinstance(cfg, dict):
+                continue
+            
+            points = cfg.get('points', [])
+            if not points or len(points) < 2:
+                continue
+            
+            try:
+                x_vals = [float(p['x']) for p in points if 'x' in p and 'y' in p]
+                y_vals = [float(p['y']) for p in points if 'x' in p and 'y' in p]
+                
+                if len(x_vals) >= 2:
+                    min_y, max_y = min(y_vals), max(y_vals)
+                    vf_dict[name] = interp1d(
+                        x_vals,
+                        y_vals,
+                        kind='linear',
+                        fill_value=(min_y, max_y),
+                        bounds_error=False,
+                    )
+            except (TypeError, ValueError, Exception):
+                continue
+        
+        # Build CSV with a_value column
+        output = io.StringIO()
+        writer = csv.writer(output)
+        if isinstance(bwt_data, dict) and isinstance(bwt_data.get('comparisons'), list):
+            writer.writerow(['REFERENCE_CRITERION', 'ADJUSTED_CRITERION', 'DATA_VALUE', 'TYPE', 'GROUP', 'a_value'])
+            for comp in bwt_data.get('comparisons', []):
+                if not isinstance(comp, dict):
+                    continue
+                
+                data_value = comp.get('data_value', '')
+                adjusted_crit = comp.get('adjusted_criterion', '')
+                a_value = ''
+                
+                # Calculate a_value = 1/vf(DATA_VALUE)
+                if data_value != '' and data_value is not None and adjusted_crit:
+                    try:
+                        dv = float(data_value)
+                        
+                        if adjusted_crit in qualitative_criteria:
+                            # For qualitative: vf(x) = x, so a_value = 1/x
+                            if dv > 0:
+                                a_value = round(1.0 / dv, 6)
+                        elif adjusted_crit in vf_dict:
+                            # For quantitative: use the interpolated VF
+                            vf = vf_dict[adjusted_crit]
+                            vf_result = float(vf(dv))
+                            if vf_result > 0:
+                                a_value = round(1.0 / vf_result, 6)
+                    except (TypeError, ValueError, Exception):
+                        a_value = ''
+                
+                if data_value != '' and data_value is not None:
+                    try:
+                        data_value = round(float(data_value), 3)
+                    except (TypeError, ValueError):
+                        pass
+                
+                writer.writerow([
+                    comp.get('reference_criterion', ''),
+                    adjusted_crit,
+                    data_value,
+                    comp.get('type', ''),
+                    comp.get('group', ''),
+                    a_value,
+                ])
+        else:
+            writer.writerow(['VALUE', 'a_value'])
+            writer.writerow([bwt_data, ''])
+        return output.getvalue()
+
     # ------------------------------------------------------------------ #
     # Public export methods
     # ------------------------------------------------------------------ #
@@ -673,6 +785,36 @@ class ExportService:
         payload = {'session_id': str(session['_id']), 'name': session.get('name'), 'pile_bwt': bwt_data}
         content = json.dumps(payload, ensure_ascii=False, indent=2).encode()
         return content, f'pile_bwt_{session.get("name", session_id)}.json', 'application/json'
+
+    def export_pile_debug_csv(self, session_id):
+        """Export a session's PILE-BWT data as a CSV file with debug 'a_value' column.
+
+        The 'a_value' column contains 1/vf(DATA_VALUE) where vf is the value
+        function of the ADJUSTED_CRITERION.
+
+        Args:
+            session_id: The session's ``_id``.
+
+        Returns:
+            tuple[bytes, str, str]: (content, filename, ``'text/csv'``).
+
+        Raises:
+            NotFoundError: When the session does not exist or has no BWT data.
+            ValidationError: When value functions are incomplete.
+        """
+        session = self._get_session_or_raise(session_id)
+        bwt_data = session.get('bwt')
+        if bwt_data is None:
+            raise NotFoundError('No PILE-BWT data to export')
+        
+        criteria = self._session_svc.resolve_session_criteria(session)
+        vf = session.get('value_functions') or {}
+        
+        if not self._session_svc.is_value_functions_complete(criteria, vf):
+            raise ValidationError('Complete value functions before exporting debug data')
+        
+        content = self.build_pile_bwt_debug_csv(bwt_data, vf, criteria)
+        return content.encode(), f'pile_bwt_debug_a_values_{session.get("name", session_id)}.csv', 'text/csv'
 
     def export_all_outputs_zip(self, session_id):
         """Package all session exports into a single ZIP archive.

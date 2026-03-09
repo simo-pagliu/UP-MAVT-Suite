@@ -212,8 +212,9 @@ def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_list
             vf = vf_lists[vf_elicit_idx].get(crit)
             confidence_info = confidence_lists[vf_elicit_idx].get(crit)
             
-            if vf is None and isinstance(confidence_info, dict):
-                # Qualitative criterion: use normalized position with per-rank confidence
+            if isinstance(confidence_info, dict):
+                # Qualitative criterion: per-rank confidence
+                # VF is identity function vf(x) = x
                 normalized_value = float(raw_value)  # raw_value is already x_normalized
                 
                 # Get the rank for this alternative from qualitative_indicators
@@ -232,8 +233,8 @@ def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_list
                         normalized_value + error_margin
                     )
                     normalized_value = np.clip(normalized_value, 0.0, 1.0)
-            elif vf is not None and isinstance(confidence_info, int):
-                # Quantitative criterion: traditional VF + single confidence
+            elif isinstance(confidence_info, int):
+                # Quantitative criterion: single confidence value
                 normalized_value = float(vf(raw_value))
                 confidence = confidence_info
                 

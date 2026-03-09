@@ -337,6 +337,12 @@ def export_pile_csv(session_id):
     return _send(content, filename, mime)
 
 
+@bp.route('/session/<session_id>/pile/export-debug', methods=['GET'])
+def export_pile_debug_csv(session_id):
+    content, filename, mime = ExportService(current_app.db).export_pile_debug_csv(session_id)
+    return _send(content, filename, mime)
+
+
 @bp.route('/session/<session_id>/pile/export-json', methods=['GET'])
 def export_pile_json(session_id):
     content, filename, mime = ExportService(current_app.db).export_pile_json(session_id)

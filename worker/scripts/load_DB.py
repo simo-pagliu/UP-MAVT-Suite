@@ -318,27 +318,9 @@ def build_value_functions_from_session(session_doc, criteria, return_confidence=
         points = []
         
         if criterion.get('is_qualitative'):
-            # Generate qualitative value function points
-            if qualitative_indicators and name in qualitative_indicators:
-                qi_data = qualitative_indicators[name]
-                ranking = qi_data.get('ranking', {})
-                values = qi_data.get('values', {})
-                is_increasing = qi_data.get('isIncreasing', True)
-                
-                if ranking and values:
-                    unique_ranks = sorted(set(ranking.values()))
-                    if unique_ranks:
-                        total_points = len(unique_ranks) + 2
-                        points.append({'x': 0, 'y': 0 if is_increasing else 1})
-                        
-                        for idx, rank in enumerate(reversed(unique_ranks)):
-                            x_pos = idx + 1
-                            x_normalized = x_pos / (total_points - 1)
-                            y_value = values.get(rank, values.get(str(rank), x_normalized))
-                            points.append({'x': x_normalized, 'y': y_value})
-                        
-                        points.append({'x': 1, 'y': 1 if is_increasing else 0})
-            
+            # For weight computation, qualitative criteria MUST use identity function: vf(x) = x
+            # This is required for constraint checking (a_value = 1/vf(x))
+            points = [{'x': 0, 'y': 0}, {'x': 1, 'y': 1}]
             if return_confidence and qualitative_indicators and name in qualitative_indicators:
                 qual_data = qualitative_indicators[name]
                 confidences_dict = qual_data.get('confidences', {})

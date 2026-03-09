@@ -572,42 +572,26 @@ def build_value_functions_from_csv(data_dir, session_name, criteria, return_conf
             continue
         
         points = []
-
-        cfg = criteria_map.get(name, {}) if isinstance(criteria_map, dict) else {}
-        if isinstance(cfg, dict):
-            points = cfg.get('points', [])
-            if return_confidence:
-                confidence_dict[name] = _parse_confidence_value(cfg.get('confidence', 4), default=4)
-
-        if (not points or len(points) < 2) and name in qualitative_indicators:
-            qi_data = qualitative_indicators.get(name, {})
-            ranking = qi_data.get('ranking', {}) if isinstance(qi_data, dict) else {}
-            values = qi_data.get('values', {}) if isinstance(qi_data, dict) else {}
-
-            if ranking and values:
-                unique_ranks = sorted(set(ranking.values()))
-                if unique_ranks:
-                    total_points = len(unique_ranks) + 2
-                    points = [{'x': 0.0, 'y': 0.0}]
-
-                    for idx, rank in enumerate(reversed(unique_ranks)):
-                        x_normalized = (idx + 1) / (total_points - 1)
-                        y_value = values.get(str(rank), values.get(rank, x_normalized))
-                        try:
-                            y_num = float(y_value)
-                        except (TypeError, ValueError):
-                            y_num = float(x_normalized)
-                        points.append({'x': float(x_normalized), 'y': y_num})
-
-                    points.append({'x': 1.0, 'y': 1.0})
-
-            if return_confidence and name not in confidence_dict:
+        
+        if criterion.get('is_qualitative'):
+            # For weight computation, qualitative criteria MUST use identity function: vf(x) = x
+            # This is required for constraint checking (a_value = 1/vf(x))
+            points = [{'x': 0, 'y': 0}, {'x': 1, 'y': 1}]
+            if return_confidence and name in qualitative_indicators:
+                qi_data = qualitative_indicators[name]
                 conf_map = qi_data.get('confidences', {}) if isinstance(qi_data, dict) else {}
-                if isinstance(conf_map, dict) and conf_map:
+                if isinstance(conf_map, dict):
                     confidence_dict[name] = {
                         int(k) if isinstance(k, str) and k.isdigit() else k: _parse_confidence_value(v, default=4)
                         for k, v in conf_map.items()
                     }
+        else:
+            # Quantitative criterion
+            cfg = criteria_map.get(name, {}) if isinstance(criteria_map, dict) else {}
+            if isinstance(cfg, dict):
+                points = cfg.get('points', [])
+                if return_confidence:
+                    confidence_dict[name] = _parse_confidence_value(cfg.get('confidence', 4), default=4)
 
         if not points or len(points) < 2:
             continue
