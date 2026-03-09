@@ -476,8 +476,8 @@ def compute_weights(value_functions, comparisons, criteria_names=None, print_fn=
     print_fn(f"  Max violation: {min_violation:.8f}")
     print_fn(f"  Sum check: {np.sum(best_weights):.6f}")
     
-    if min_violation > 0.1:
-        print_fn("\nWARNING: Minimum violation is large (>0.1).")
+    if min_violation > 10:
+        print_fn("\nWARNING: Minimum violation is large (>10).")
         print_fn("This may indicate infeasible or very constrained problem.")
 
     # ========================================================================
