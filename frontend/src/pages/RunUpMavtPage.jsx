@@ -979,8 +979,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                       <Alert status="warning" borderRadius="md">
                         <AlertIcon />
                         <AlertDescription>
-                          Due to the complexity of the search, this process may take some time. For example, with 15 criteria organized into 4 groups,
-                          the computation typically requires between 15 and 30 minutes <strong>per elicitation</strong>. Your patience is appreciated.
+                          Due to the complexity of the search, this process can take some minutes. Please be patient.
                         </AlertDescription>
                       </Alert>
                     </VStack>
