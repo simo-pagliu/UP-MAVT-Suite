@@ -294,9 +294,14 @@ class SessionService:
             return []
         input_id = self._sessions._to_oid(session.get('input_id'))
         if input_id:
-            input_doc = self._inputs.find_by_id(input_id)
-            if isinstance(input_doc, dict) and isinstance(input_doc.get('criteria'), list):
-                return input_doc.get('criteria')
+            try:
+                input_doc = self._inputs.find_by_id(input_id)
+                if isinstance(input_doc, dict):
+                    criteria = input_doc.get('criteria')
+                    if isinstance(criteria, list):
+                        return criteria
+            except Exception as e:
+                print(f"Warning: Could not fetch input document {input_id}: {e}")
         return session.get('criteria', [])
 
     def _serialize_session(self, session):
@@ -641,7 +646,7 @@ class SessionService:
         # Check both practitioner lock and BWT user lock
         if session.get('session_locked', False):
             raise LockedError('Session is locked')
-        if session.get('bwt', {}).get('qi_vf_lock_active', False):
+        if (session.get('bwt') or {}).get('qi_vf_lock_active', False):
             raise LockedError('QI/VF are locked by PILE-BWT')
         criteria = self.resolve_session_criteria(session)
         normalized = self.normalize_qualitative_indicators(criteria, value)
@@ -665,7 +670,7 @@ class SessionService:
         # Check both practitioner lock and BWT user lock
         if session.get('session_locked', False):
             raise LockedError('Session is locked')
-        if session.get('bwt', {}).get('qi_vf_lock_active', False):
+        if (session.get('bwt') or {}).get('qi_vf_lock_active', False):
             raise LockedError('QI/VF are locked by PILE-BWT')
         self._sessions.update(session_id, {'value_functions': value})
 

@@ -21,6 +21,20 @@ def _send(content, filename, mimetype):
 
 
 # --------------------------------------------------------------------------- #
+# Health Check
+# --------------------------------------------------------------------------- #
+@bp.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint to verify backend and database connectivity."""
+    try:
+        # Try to perform a simple database operation
+        current_app.db.command('ping')
+        return jsonify({'status': 'ok', 'database': 'connected'}), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'database': 'disconnected', 'error': str(e)}), 503
+
+
+# --------------------------------------------------------------------------- #
 # Admin
 # --------------------------------------------------------------------------- #
 @bp.route('/admin/login', methods=['POST'])
@@ -111,8 +125,16 @@ def update_qualitative(session_id):
     value = data.get('value')
     if value is None:
         return jsonify({'error': 'Value is required'}), 400
-    SessionService(current_app.db).update_qualitative(session_id, value)
-    return jsonify({'status': 'updated'}), 200
+    try:
+        SessionService(current_app.db).update_qualitative(session_id, value)
+        return jsonify({'status': 'updated'}), 200
+    except ServiceError:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"ERROR in update_qualitative: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'error': f'Internal error: {str(e)}'}), 500
 
 
 @bp.route('/session/<session_id>/value', methods=['PUT'])
@@ -123,8 +145,16 @@ def update_value(session_id):
     value = data.get('value')
     if value is None:
         return jsonify({'error': 'Value is required'}), 400
-    SessionService(current_app.db).update_value_functions(session_id, value)
-    return jsonify({'status': 'updated'}), 200
+    try:
+        SessionService(current_app.db).update_value_functions(session_id, value)
+        return jsonify({'status': 'updated'}), 200
+    except ServiceError:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"ERROR in update_value: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'error': f'Internal error: {str(e)}'}), 500
 
 
 @bp.route('/session/<session_id>/bwt', methods=['PUT'])

@@ -33,6 +33,18 @@ def create_app():
     # Store db in app context
     app.db = db
     
+    # Register global error handler
+    @app.errorhandler(Exception)
+    def handle_general_error(e):
+        import traceback
+        error_type = type(e).__name__
+        error_msg = str(e)
+        print(f"UNHANDLED ERROR: {error_type}: {error_msg}")
+        traceback.print_exc()
+        if 'mongo' in error_msg.lower() or 'connection' in error_msg.lower():
+            return {'error': f'Database connection error: {error_msg}'}, 503
+        return {'error': f'{error_type}: {error_msg}'}, 500
+    
     # Register blueprints
     from app.routes import api
     app.register_blueprint(api.bp)

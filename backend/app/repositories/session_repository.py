@@ -25,7 +25,14 @@ class SessionRepository(BaseRepository):
             dict | None: The document, or ``None`` if not found.
         """
         oid = self._to_oid(session_id)
-        return self._col.find_one({'_id': oid}) if oid else None
+        print(f"DEBUG: find_by_id - session_id={session_id}, converted oid={oid}")
+        if oid:
+            result = self._col.find_one({'_id': oid})
+            print(f"DEBUG: find_by_id - query result: {result is not None}")
+            return result
+        else:
+            print(f"DEBUG: find_by_id - failed to convert to oid")
+            return None
 
     def find_by_name(self, name):
         """Retrieve a session by its unique name (session code).
