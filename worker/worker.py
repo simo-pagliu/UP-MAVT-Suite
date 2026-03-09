@@ -218,10 +218,13 @@ def handle_run_step(task):
             ws = weight_solutions_data.get(session_id, [])
             weight_solutions_list.append(ws)
         
+        # Extract qualitative indicators
+        qualitative_indicators = session_docs[0].get('qualitative_indicators') if session_docs else None
+        
         # Build alternatives and criteria names
         alternatives, criteria_names = build_alternatives_with_qualitative(
             input_doc if input_doc else {'criteria': criteria},
-            session_docs[0].get('qualitative_indicators') if session_docs else None
+            qualitative_indicators
         )
         
         logger.log(f"  ✓ Loaded {len(alternatives)} alternatives")
@@ -245,7 +248,8 @@ def handle_run_step(task):
                 formatted = run_upmavt(
                     vf_lists, confidence_lists, weight_solutions_list,
                     alternatives, criteria_names,
-                    step_params, print_fn=logger.log
+                    step_params, qualitative_indicators=qualitative_indicators,
+                    print_fn=logger.log
                 )
                 results_by_aggregation[agg_method] = formatted
 
@@ -271,7 +275,8 @@ def handle_run_step(task):
             formatted = run_upmavt(
                 vf_lists, confidence_lists, weight_solutions_list,
                 alternatives, criteria_names,
-                step_params, print_fn=logger.log
+                step_params, qualitative_indicators=qualitative_indicators,
+                print_fn=logger.log
             )
 
             # Save results

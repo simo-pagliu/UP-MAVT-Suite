@@ -394,7 +394,7 @@ def format_results_for_db(results, alternatives, mc_mode):
 # MAIN ENTRY POINT (called by the worker)
 # ============================================================================
 def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives, 
-               criteria_names, params, print_fn=None):
+               criteria_names, params, qualitative_indicators=None, print_fn=None):
     """Run UP-MAVT simulation.
 
     Parameters
@@ -416,6 +416,8 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
         - mc_mode: str ("strict" or "non_strict")
         - use_random_weights: bool
         - opinion_weights: list or None
+    qualitative_indicators : dict or None
+        Qualitative indicators mapping criterion_name -> {'ranking': {alt_name: rank, ...}}.
     print_fn : callable or None
         Logging function.
 
@@ -480,7 +482,7 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
         alternatives, criteria_names, weight_solutions_list, vf_lists,
         confidence_lists, constraint_data_list, aggregation_method,
         opinion_weights, mc_iterations, mc_mode, use_random_weights=use_random_weights,
-        qualitative_indicators=None, print_fn=print_fn,
+        qualitative_indicators=qualitative_indicators, print_fn=print_fn,
     )
     print_fn("✓ Simulation complete")
 

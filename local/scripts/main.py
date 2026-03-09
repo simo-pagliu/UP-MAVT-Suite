@@ -279,7 +279,7 @@ def prepare_upmavt_data(data_dir, session_names, criteria, weight_solutions):
     Returns
     -------
     tuple
-        (vf_lists, confidence_lists, weight_solutions_list, alternatives, criteria_names)
+        (vf_lists, confidence_lists, weight_solutions_list, alternatives, criteria_names, qualitative_indicators)
     """
     vf_lists = []
     confidence_lists = []
@@ -297,7 +297,10 @@ def prepare_upmavt_data(data_dir, session_names, criteria, weight_solutions):
     
     alternatives, criteria_names = build_alternatives_from_csv(data_dir)
     
-    return vf_lists, confidence_lists, weight_solutions_list, alternatives, criteria_names
+    # TODO: Load qualitative_indicators from CSV data if available
+    qualitative_indicators = None
+    
+    return vf_lists, confidence_lists, weight_solutions_list, alternatives, criteria_names, qualitative_indicators
 
 
 def step_1_compute_weights(data_dir, output_dir, session_names):
@@ -382,7 +385,7 @@ def step_2_consensus_analysis(data_dir, output_dir, session_names, weight_soluti
         input_data = load_input_data(data_dir)
         criteria = input_data['criteria']
         
-        vf_lists, conf_lists, ws_list, alternatives, crit_names = prepare_upmavt_data(
+        vf_lists, conf_lists, ws_list, alternatives, crit_names, qi = prepare_upmavt_data(
             data_dir, session_names, criteria, weight_solutions
         )
         
@@ -394,7 +397,7 @@ def step_2_consensus_analysis(data_dir, output_dir, session_names, weight_soluti
             'opinion_weights': None,
         }
         
-        results = run_upmavt(vf_lists, conf_lists, ws_list, alternatives, crit_names, params, print_fn=print)
+        results = run_upmavt(vf_lists, conf_lists, ws_list, alternatives, crit_names, params, qi, print_fn=print)
         
         output_csv = os.path.join(output_dir, 'step2_consensus_results.csv')
         save_step_results_csv(results, output_csv)
@@ -460,7 +463,7 @@ def step_3_dominance_analysis(data_dir, output_dir, session_names, weight_soluti
         input_data = load_input_data(data_dir)
         criteria = input_data['criteria']
         
-        vf_lists, conf_lists, ws_list, alternatives, crit_names = prepare_upmavt_data(
+        vf_lists, conf_lists, ws_list, alternatives, crit_names, qi = prepare_upmavt_data(
             data_dir, session_names, criteria, weight_solutions
         )
         
@@ -472,7 +475,7 @@ def step_3_dominance_analysis(data_dir, output_dir, session_names, weight_soluti
             'opinion_weights': None,
         }
         
-        results = run_upmavt(vf_lists, conf_lists, ws_list, alternatives, crit_names, params, print_fn=lambda m: None)
+        results = run_upmavt(vf_lists, conf_lists, ws_list, alternatives, crit_names, params, qi, print_fn=lambda m: None)
         
         output_csv = os.path.join(output_dir, 'step3_dominance_results.csv')
         save_step_results_csv(results, output_csv)
@@ -507,7 +510,7 @@ def step_4_compensation_analysis(data_dir, output_dir, session_names, weight_sol
         input_data = load_input_data(data_dir)
         criteria = input_data['criteria']
         
-        vf_lists, conf_lists, ws_list, alternatives, crit_names = prepare_upmavt_data(
+        vf_lists, conf_lists, ws_list, alternatives, crit_names, qi = prepare_upmavt_data(
             data_dir, session_names, criteria, weight_solutions
         )
         
@@ -522,7 +525,7 @@ def step_4_compensation_analysis(data_dir, output_dir, session_names, weight_sol
                 'opinion_weights': None,
             }
             
-            results = run_upmavt(vf_lists, conf_lists, ws_list, alternatives, crit_names, params, print_fn=lambda m: None)
+            results = run_upmavt(vf_lists, conf_lists, ws_list, alternatives, crit_names, params, qi, print_fn=lambda m: None)
             
             output_csv = os.path.join(output_dir, f'step4_compensation_{agg_method}_results.csv')
             save_step_results_csv(results, output_csv)
@@ -566,7 +569,7 @@ def step_5_uncertainty_analysis(data_dir, output_dir, session_names, weight_solu
         input_data = load_input_data(data_dir)
         criteria = input_data['criteria']
         
-        vf_lists, conf_lists, ws_list, alternatives, crit_names = prepare_upmavt_data(
+        vf_lists, conf_lists, ws_list, alternatives, crit_names, qi = prepare_upmavt_data(
             data_dir, session_names, criteria, weight_solutions
         )
         
@@ -578,7 +581,7 @@ def step_5_uncertainty_analysis(data_dir, output_dir, session_names, weight_solu
             'opinion_weights': None,
         }
         
-        results = run_upmavt(vf_lists, conf_lists, ws_list, alternatives, crit_names, params, print_fn=lambda m: None)
+        results = run_upmavt(vf_lists, conf_lists, ws_list, alternatives, crit_names, params, qi, print_fn=lambda m: None)
         
         output_csv = os.path.join(output_dir, 'step5_uncertainty_results.csv')
         save_step_results_csv(results, output_csv)
@@ -637,7 +640,7 @@ def step_6_final_results(data_dir, output_dir, session_names, weight_solutions):
         input_data = load_input_data(data_dir)
         criteria = input_data['criteria']
         
-        vf_lists, conf_lists, ws_list, alternatives, crit_names = prepare_upmavt_data(
+        vf_lists, conf_lists, ws_list, alternatives, crit_names, qi = prepare_upmavt_data(
             data_dir, session_names, criteria, weight_solutions
         )
         
@@ -649,7 +652,7 @@ def step_6_final_results(data_dir, output_dir, session_names, weight_solutions):
             'opinion_weights': None,
         }
         
-        results = run_upmavt(vf_lists, conf_lists, ws_list, alternatives, crit_names, params, print_fn=lambda m: None)
+        results = run_upmavt(vf_lists, conf_lists, ws_list, alternatives, crit_names, params, qi, print_fn=lambda m: None)
         
         output_csv = os.path.join(output_dir, 'step6_final_results.csv')
         save_step_results_csv(results, output_csv)
