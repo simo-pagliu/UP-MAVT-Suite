@@ -97,6 +97,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   // Weight space plot state
   const [selectedWeightSession, setSelectedWeightSession] = useState('')
   const [weightSpaceData, setWeightSpaceData] = useState(null)
+  const [useNonLinearModel, setUseNonLinearModel] = useState(true)
 
   // Step 2 results state
   const [step2Results, setStep2Results] = useState(null)
@@ -397,7 +398,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     try {
       const response = await axios.post(
         `${API_URL}/study-session/${studySessionId}/compute-weights`,
-        { selected_session_ids: selectedSessions }
+        {
+          selected_session_ids: selectedSessions,
+          use_non_linear_model: useNonLinearModel,
+        }
       )
       const taskId = response.data.task_id
       setActiveTaskId(taskId)
@@ -1013,6 +1017,20 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   showConsole={showConsole}
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
+                  parameters={
+                    <VStack spacing={2} align="stretch">
+                      <Checkbox
+                        isChecked={useNonLinearModel}
+                        onChange={(e) => setUseNonLinearModel(e.target.checked)}
+                        isDisabled={runningStep !== null}
+                      >
+                        Use non-linear model
+                      </Checkbox>
+                      <Text fontSize="sm" color="gray.600">
+                        (Non-linear model allows for evaluation of weight space, linear model return a single weight set)
+                      </Text>
+                    </VStack>
+                  }
                   statusInfo={
                     weightsComputed ? (
                       <HStack spacing={3}>

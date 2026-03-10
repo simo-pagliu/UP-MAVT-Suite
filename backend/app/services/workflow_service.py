@@ -31,7 +31,7 @@ class WorkflowService:
         self._tasks = TaskRepository(db)
         self._session_svc = SessionService(db)
 
-    def create_compute_weights_task(self, study_session_id, selected_session_ids):
+    def create_compute_weights_task(self, study_session_id, selected_session_ids, use_non_linear_model=True):
         """Enqueue a background task to compute weights for the selected sessions.
 
         Any existing pending or running ``compute_weights`` tasks for the same
@@ -41,6 +41,8 @@ class WorkflowService:
             study_session_id: The parent study session's ``_id``.
             selected_session_ids (list): The ``_id`` values of the elicitation
                 sessions to include.
+            use_non_linear_model (bool): Whether to use the non-linear
+                weight model for constraint violation.
 
         Returns:
             str: The ``_id`` of the newly created task as a hex string.
@@ -61,6 +63,7 @@ class WorkflowService:
             'params': {
                 'study_session_id': study_session_id,
                 'selected_session_ids': selected_session_ids,
+                'use_non_linear_model': bool(use_non_linear_model),
             },
             'console_output': '',
             'created_at': datetime.now(timezone.utc),

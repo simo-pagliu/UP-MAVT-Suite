@@ -87,9 +87,11 @@ def handle_compute_weights(task):
     params = task.get('params', {})
     study_session_id = params.get('study_session_id')
     selected_session_ids = params.get('selected_session_ids', [])
+    use_non_linear_model = bool(params.get('use_non_linear_model', True))
 
     try:
         logger.log("=" * 60)
+        logger.log(f"Model: {'non-linear' if use_non_linear_model else 'linear'}")
         logger.log("COMPUTE WEIGHTS")
         logger.log("=" * 60)
 
@@ -115,7 +117,13 @@ def handle_compute_weights(task):
                 comparisons = build_comparisons_from_session(session_doc)
                 criteria_names = [c['criterion_name'] for c in criteria if 'criterion_name' in c]
                 
-                ws = compute_weights(value_functions, comparisons, criteria_names=criteria_names, print_fn=logger.log)
+                ws = compute_weights(
+                    value_functions,
+                    comparisons,
+                    criteria_names=criteria_names,
+                    print_fn=logger.log,
+                    use_non_linear_model=use_non_linear_model,
+                )
                 weight_solutions[session_id] = ws
 
                 logger.log(f"✓ Session {session_name} completed ({len(ws)} feasible solutions)")

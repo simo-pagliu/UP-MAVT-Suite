@@ -171,7 +171,8 @@ def geometric_mean(intermediate_results):
     """(v1^w1 * v2^w2 * ... * vn^wn)"""
     product = 1.0
     for weight, value in intermediate_results:
-        product *= value ** weight
+        if value > 0:
+            product *= value ** weight
     return product
 
 
@@ -179,11 +180,11 @@ def harmonic_mean(intermediate_results):
     """1 / (w1/v1 + w2/v2 + ... + wn/vn)"""
     denom = 0.0
     for weight, value in intermediate_results:
-        if value != 0:
+        if value > 0:
             denom += weight / value
-        else:
-            return 0.0
-    return 1.0 / denom
+    if denom > 0:
+        return 1.0 / denom
+    return 0.001  # Avoid zero
 
 
 # ============================================================================
@@ -228,7 +229,7 @@ def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_list
                     normalized_value - error_margin,
                     normalized_value + error_margin
                 )
-            normalized_value = np.clip(normalized_value, 0.0, 1.0)
+            normalized_value = np.clip(normalized_value, 0.001, 1.0)
 
             if crit not in sampled_weights:
                 raise KeyError(f"Missing weight for criterion '{crit}' in sampled_weights")

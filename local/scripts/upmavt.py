@@ -232,7 +232,7 @@ def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_list
                     normalized_value - error_margin,
                     normalized_value + error_margin
                 )
-            normalized_value = np.clip(normalized_value, 0.0, 1.0)
+            normalized_value = np.clip(normalized_value, 0.001, 1.0)
 
             if crit not in sampled_weights:
                 raise KeyError(f"Missing weight for criterion '{crit}' in sampled_weights")

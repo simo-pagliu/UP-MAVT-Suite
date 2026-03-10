@@ -100,7 +100,7 @@ def _iter_comparison_terms(weights, constraint_data):
         yield comp_type, w_ref, w_adj, vf_adj_val
 
 
-def _comparison_abs_violation(comp_type, w_ref, w_adj, vf_adj_val):
+def _comparison_abs_violation(comp_type, w_ref, w_adj, vf_adj_val, use_non_linear_model=True):
     """Compute absolute violation for a single comparison.
     
     Both 'best' and 'worst' use the same formula:
@@ -122,11 +122,15 @@ def _comparison_abs_violation(comp_type, w_ref, w_adj, vf_adj_val):
     float
         Absolute violation value (should be <= z for feasibility)
     """
-    # Both best and worst use: 1/vf_adj - w_adj/w_ref
-    return abs(1.0 / vf_adj_val - (w_adj + EPS) / (w_ref + EPS))
+    # Both best and worst use the same pattern. The selected model controls
+    # whether the ratio form (non-linear) or the weighted-difference form
+    # (linear) is used.
+    if use_non_linear_model:
+        return abs(1.0 / vf_adj_val - (w_adj + EPS) / (w_ref + EPS))
+    return abs(1.0 / vf_adj_val * w_ref - w_adj)
 
 
-def compute_max_violation_weights_only(weights, constraint_data):
+def compute_max_violation_weights_only(weights, constraint_data, use_non_linear_model=True):
     """Compute the maximum absolute constraint violation from weights alone.
     
     Evaluates all comparison constraints:
@@ -147,7 +151,9 @@ def compute_max_violation_weights_only(weights, constraint_data):
         Maximum violation across all constraints (0 = fully satisfied).
     """
     violations = [
-        _comparison_abs_violation(comp_type, w_ref, w_adj, vf_adj_val)
+        _comparison_abs_violation(
+            comp_type, w_ref, w_adj, vf_adj_val, use_non_linear_model=use_non_linear_model
+        )
         for comp_type, w_ref, w_adj, vf_adj_val in _iter_comparison_terms(weights, constraint_data)
     ]
 
@@ -159,13 +165,15 @@ def check_sum_to_one(weights, threshold=0.001):
     return abs(np.sum(weights) - 1.0) <= threshold
 
 
-def check_constraints_satisfied(weights, constraint_data, tol=FEASIBILITY_TOL):
+def check_constraints_satisfied(weights, constraint_data, tol=FEASIBILITY_TOL, use_non_linear_model=True):
     """Check if weights satisfy all constraints within tolerance."""
-    violation = compute_max_violation_weights_only(weights, constraint_data)
+    violation = compute_max_violation_weights_only(
+        weights, constraint_data, use_non_linear_model=use_non_linear_model
+    )
     return violation <= tol
 
 
-def constraint_func(x, constraint_data, z_star=None):
+def constraint_func(x, constraint_data, z_star=None, use_non_linear_model=True):
     """Legacy constraint function for backward compatibility with upmavt.py.
     
     Evaluates constraints in logarithmic z-variable format.
@@ -194,7 +202,9 @@ def constraint_func(x, constraint_data, z_star=None):
     
     violations = []
     for comp_type, w_ref, w_adj, vf_adj_val in _iter_comparison_terms(weights, constraint_data):
-        abs_violation = _comparison_abs_violation(comp_type, w_ref, w_adj, vf_adj_val)
+        abs_violation = _comparison_abs_violation(
+            comp_type, w_ref, w_adj, vf_adj_val, use_non_linear_model=use_non_linear_model
+        )
         violations.append(np.log(z) - np.log(abs_violation))
 
     return violations
@@ -206,7 +216,7 @@ def constraint_func(x, constraint_data, z_star=None):
 # ============================================================================
 # OPTIMIZATION - Three-Phase Approach
 # ============================================================================
-def find_minimum_infeasibility(constraint_data, num_criteria, print_fn=None):
+def find_minimum_infeasibility(constraint_data, num_criteria, use_non_linear_model=True, print_fn=None):
     """PHASE 1: Find the minimum achievable constraint violation.
     
     Uses global optimization via Differential Evolution.
@@ -230,7 +240,11 @@ def find_minimum_infeasibility(constraint_data, num_criteria, print_fn=None):
     """
     if print_fn is None:
         print_fn = print
-    objective = partial(compute_max_violation_weights_only, constraint_data=constraint_data)
+    objective = partial(
+        compute_max_violation_weights_only,
+        constraint_data=constraint_data,
+        use_non_linear_model=use_non_linear_model,
+    )
     
     bounds = [(0.001, 1.0) for _ in range(num_criteria)]
     
@@ -258,7 +272,7 @@ def find_minimum_infeasibility(constraint_data, num_criteria, print_fn=None):
     return de_weights, de_violation
 
 
-def sample_feasible_region_lhs(constraint_data, num_criteria, n_samples=None, print_fn=None):
+def sample_feasible_region_lhs(constraint_data, num_criteria, n_samples=None, use_non_linear_model=True, print_fn=None):
     """PHASE 2: Sample the feasible region using Latin Hypercube Sampling.
     
     Generates diverse weight vectors across the feasible region and refines them
@@ -307,7 +321,11 @@ def sample_feasible_region_lhs(constraint_data, num_criteria, n_samples=None, pr
     print_fn(f"Refining samples via local optimization...")
     refined_weights = []
 
-    objective = partial(compute_max_violation_weights_only, constraint_data=constraint_data)
+    objective = partial(
+        compute_max_violation_weights_only,
+        constraint_data=constraint_data,
+        use_non_linear_model=use_non_linear_model,
+    )
 
     for idx, weights in enumerate(weights_list):
         if idx % max(1, len(weights_list) // 10) == 0:
@@ -332,7 +350,7 @@ def sample_feasible_region_lhs(constraint_data, num_criteria, n_samples=None, pr
 
 
 def enumerate_weight_space(weights_list, criterion_names, min_violation=0.0,
-                          constraint_data=None, print_fn=None):
+                          constraint_data=None, use_non_linear_model=True, print_fn=None):
     """PHASE 3: Filter, discretize, and enumerate unique feasible weight sets.
     
     Keeps only weights satisfying constraints, rounds to 0.001 resolution,
@@ -365,7 +383,9 @@ def enumerate_weight_space(weights_list, criterion_names, min_violation=0.0,
     feasible = []
     for w in weights_list:
         if constraint_data is not None:
-            violation = compute_max_violation_weights_only(w, constraint_data)
+            violation = compute_max_violation_weights_only(
+                w, constraint_data, use_non_linear_model=use_non_linear_model
+            )
             if violation <= min_violation + 0.01:  # Small tolerance buffer
                 feasible.append(w)
         else:
@@ -407,7 +427,7 @@ def enumerate_weight_space(weights_list, criterion_names, min_violation=0.0,
 # ============================================================================
 # MAIN ENTRY POINT (called by the worker)
 # ============================================================================
-def compute_weights(value_functions, comparisons, criteria_names=None, print_fn=None):
+def compute_weights(value_functions, comparisons, criteria_names=None, print_fn=None, use_non_linear_model=True):
     """Compute weight space using three-phase approach.
     
     PHASE 1: Find minimum infeasibility (best possible constraint satisfaction)
@@ -436,6 +456,7 @@ def compute_weights(value_functions, comparisons, criteria_names=None, print_fn=
     print_fn("=" * 70)
     print_fn("THREE-PHASE WEIGHT SPACE EXPLORATION")
     print_fn("=" * 70)
+    print_fn(f"Model: {'non-linear' if use_non_linear_model else 'linear'}")
 
     if not criteria_names:
         criteria_names = list(value_functions.keys())
@@ -468,7 +489,9 @@ def compute_weights(value_functions, comparisons, criteria_names=None, print_fn=
     print_fn("=" * 70)
     
     best_weights, min_violation = find_minimum_infeasibility(
-        constraint_data, num_criteria, print_fn=print_fn
+        constraint_data, num_criteria,
+        use_non_linear_model=use_non_linear_model,
+        print_fn=print_fn
     )
     
     print_fn(f"\nBest solution found:")
@@ -480,6 +503,28 @@ def compute_weights(value_functions, comparisons, criteria_names=None, print_fn=
         print_fn("\nWARNING: Minimum violation is large (>10).")
         print_fn("This may indicate infeasible or very constrained problem.")
 
+    # Linear model mode only needs the best Phase 1 solution.
+    if not use_non_linear_model:
+        best_weights = best_weights / np.sum(best_weights)
+        single_solution = {
+            crit_name: round(float(best_weights[idx]), 3)
+            for idx, crit_name in enumerate(crit_names)
+        }
+
+        print_fn("\nSkipping Phase 2 and Phase 3 for linear model.")
+        print_fn("Using the best Phase 1 solution as final result.")
+        print_fn("\n" + "=" * 70)
+        print_fn("SUMMARY")
+        print_fn("=" * 70)
+        print_fn("Total feasible solutions enumerated: 1")
+        print_fn("Criteria in solutions:")
+        for crit_name in sorted(single_solution.keys()):
+            print_fn(f"  {crit_name}")
+        print_fn("\nWeight space computation complete.")
+        print_fn("=" * 70)
+
+        return [single_solution]
+
     # ========================================================================
     # PHASE 2: Sample feasible region
     # ========================================================================
@@ -488,7 +533,10 @@ def compute_weights(value_functions, comparisons, criteria_names=None, print_fn=
     print_fn("=" * 70)
     
     sampled_weights = sample_feasible_region_lhs(
-        constraint_data, num_criteria, n_samples=LHS_SAMPLES, print_fn=print_fn
+        constraint_data, num_criteria,
+        n_samples=LHS_SAMPLES,
+        use_non_linear_model=use_non_linear_model,
+        print_fn=print_fn
     )
 
     # ========================================================================
@@ -502,6 +550,7 @@ def compute_weights(value_functions, comparisons, criteria_names=None, print_fn=
         sampled_weights, crit_names,
         min_violation=min_violation,
         constraint_data=constraint_data,
+        use_non_linear_model=use_non_linear_model,
         print_fn=print_fn
     )
     

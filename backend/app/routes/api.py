@@ -374,7 +374,11 @@ def export_csv(session_id):
 def compute_weights_endpoint(study_session_id):
     data = request.json or {}
     svc = WorkflowService(current_app.db)
-    task_id = svc.create_compute_weights_task(study_session_id, data.get('selected_session_ids', []))
+    task_id = svc.create_compute_weights_task(
+        study_session_id,
+        data.get('selected_session_ids', []),
+        data.get('use_non_linear_model', True),
+    )
     return jsonify({'task_id': task_id}), 202
 
 
