@@ -76,6 +76,22 @@ export function parseDistribution(str) {
     }
   }
 
+  // Triangular: "TRI(min, mode, max)" (alias of trapezoid with peak_start === peak_end)
+  const triangularMatch = str.match(/^TRI\(([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\)$/)
+  if (triangularMatch) {
+    const min = parseFloat(triangularMatch[1])
+    const mode = parseFloat(triangularMatch[2])
+    const max = parseFloat(triangularMatch[3])
+    return {
+      type: 'trapezoid',
+      min,
+      peak_start: mode,
+      peak_end: mode,
+      max,
+      base_prob: 0
+    }
+  }
+
   // Trapezoid: "TRAP(min, peak_start, peak_end, max, base_prob)"
   const trapezoidMatch = str.match(/^TRAP\(([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\)$/)
   if (trapezoidMatch) {

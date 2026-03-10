@@ -58,6 +58,16 @@ const clamp = (v, min, max) => {
 const sortByX = (pts) => [...pts].sort((a, b) => a.x - b.x)
 
 const deriveRange = (criterion) => {
+  // Check if custom min/max values are provided
+  if (criterion.use_custom_min_max) {
+    const minVal = Number(criterion.min_value)
+    const maxVal = Number(criterion.max_value)
+    if (Number.isFinite(minVal) && Number.isFinite(maxVal) && minVal < maxVal) {
+      return { min: minVal, max: maxVal }
+    }
+  }
+  
+  // Fall back to computing from alternatives data
   const alternatives = criterion.alternatives || []
   const bounds = []
   

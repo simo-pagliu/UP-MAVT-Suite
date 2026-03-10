@@ -325,6 +325,12 @@ def export_input_raw_csv(session_id):
     return _send(content, filename, mime)
 
 
+@bp.route('/session/<session_id>/export-input-data', methods=['GET'])
+def export_input_data_csv(session_id):
+    content, filename, mime = ExportService(current_app.db).export_input_data_csv(session_id)
+    return _send(content, filename, mime)
+
+
 @bp.route('/session/<session_id>/qualitative/export', methods=['GET'])
 def export_qualitative_csv(session_id):
     content, filename, mime = ExportService(current_app.db).export_qualitative_csv(session_id)

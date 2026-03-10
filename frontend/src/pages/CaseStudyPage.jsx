@@ -591,6 +591,12 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
                           Value Functions
                         </MenuItem>
                         <MenuItem
+                          onClick={() => handleDownload(`/session/${session._id}/export-input-data`, `input_data_${session.name}.csv`)}
+                          isDisabled={!session.progress.hasQualitativeIndicators}
+                        >
+                          Input Data
+                        </MenuItem>
+                        <MenuItem
                           onClick={() => handleDownload(`/session/${session._id}/pile/export`, `pile_bwt_${session.name}.csv`)}
                           isDisabled={!session.progress.hasBwt}
                         >

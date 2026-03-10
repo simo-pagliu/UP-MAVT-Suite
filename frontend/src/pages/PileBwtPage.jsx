@@ -860,6 +860,17 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     if (criterion?.is_qualitative) {
       return { min: 0, max: 1 }
     }
+    
+    // Check if custom min/max values are provided
+    if (criterion.use_custom_min_max) {
+      const minVal = Number(criterion.min_value)
+      const maxVal = Number(criterion.max_value)
+      if (Number.isFinite(minVal) && Number.isFinite(maxVal) && minVal < maxVal) {
+        return { min: minVal, max: maxVal }
+      }
+    }
+    
+    // Fall back to computing from alternatives data
     const alternatives = criterion.alternatives || []
     const bounds = []
     
@@ -991,71 +1002,159 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     return sorted[sorted.length - 1].x
   }
 
+  // Build ranking induced by BEST comparisons (lower VF means better criterion)
+  const getBestComparisonRanking = (comps = comparisons) => {
+    const groupName = allGroups[selectedGroupIndex]?.name
+    if (!groupName) return {}
+
+    const ranking = {}
+    pairs.forEach((pair) => {
+      if (pair?.type !== 'best') return
+      const comp = comps.find(
+        (c) =>
+          c.reference_criterion === pair.reference.criterion_name &&
+          c.adjusted_criterion === pair.adjusted.criterion_name &&
+          c.type === 'best' &&
+          c.group === groupName
+      )
+      if (!comp) return
+      ranking[pair.reference.criterion_name] = interpolateVF(pair.adjusted.criterion_name, comp.data_value)
+    })
+
+    return ranking
+  }
+
+  // For WORST comparisons, compute VF bounds implied by BEST-ranking consistency
+  // Returns bounds on current VF value: lowerBound <= currentVF <= upperBound
+  const getWorstConsistencyBounds = (pairIndex, comps = comparisons) => {
+    const pair = pairs[pairIndex]
+    if (!pair || pair.type !== 'worst') return { lowerBound: null, upperBound: null }
+
+    const groupName = allGroups[selectedGroupIndex]?.name
+    if (!groupName) return { lowerBound: null, upperBound: null }
+
+    const ranking = getBestComparisonRanking(comps)
+    const currentCriterion = pair.adjusted.criterion_name
+    const currentRank = ranking[currentCriterion]
+    if (currentRank === undefined || currentRank === null) return { lowerBound: null, upperBound: null }
+
+    const epsilon = 1e-10
+    // Global rule: all WORST comparisons must stay above BEST-to-WORST VF
+    let lowerBound = bestToWorstValue
+    let upperBound = null
+
+    // Compare with already-answered WORST comparisons and enforce same ordering as BEST phase
+    // Use nearest rank neighbors to keep ordinal consistency without over-constraining from distant criteria.
+    const previousWorst = []
+    for (let i = 0; i < pairIndex; i++) {
+      if (pairs[i]?.type !== 'worst') continue
+
+      const prevPair = pairs[i]
+      const prevComp = comps.find(
+        (c) =>
+          c.reference_criterion === prevPair.reference.criterion_name &&
+          c.adjusted_criterion === prevPair.adjusted.criterion_name &&
+          c.type === 'worst' &&
+          c.group === groupName
+      )
+      if (!prevComp) continue
+
+      const prevCriterion = prevPair.adjusted.criterion_name
+      const prevRank = ranking[prevCriterion]
+      if (prevRank === undefined || prevRank === null) continue
+
+      previousWorst.push({
+        rank: prevRank,
+        vf: interpolateVF(prevCriterion, prevComp.data_value),
+      })
+    }
+
+    // In BEST phase, larger rank value means better criterion.
+    // For WORST phase, better criteria need less compensation (smaller VF),
+    // while worse criteria need more compensation (larger VF).
+    const nearestBetter = previousWorst
+      .filter((item) => item.rank > currentRank + epsilon)
+      .sort((a, b) => a.rank - b.rank)[0]
+
+    const nearestWorse = previousWorst
+      .filter((item) => item.rank < currentRank - epsilon)
+      .sort((a, b) => b.rank - a.rank)[0]
+
+    if (nearestBetter) {
+      // Better criterion needs LESS compensation => current must be >= neighbor VF
+      lowerBound = lowerBound === null ? nearestBetter.vf : Math.max(lowerBound, nearestBetter.vf)
+    }
+
+    if (nearestWorse) {
+      // Worse criterion needs MORE compensation => current must be <= neighbor VF
+      upperBound = upperBound === null ? nearestWorse.vf : Math.min(upperBound, nearestWorse.vf)
+    }
+
+    const equalRank = previousWorst.find((item) => Math.abs(item.rank - currentRank) <= epsilon)
+    if (equalRank) {
+      lowerBound = lowerBound === null ? equalRank.vf : Math.max(lowerBound, equalRank.vf)
+      upperBound = upperBound === null ? equalRank.vf : Math.min(upperBound, equalRank.vf)
+    }
+
+    return { lowerBound, upperBound }
+  }
+
   // Get consistency threshold for the current pair
-  // Returns the minimum value function value required for consistency
+  // Returns a VF lower bound for BEST, and rank-implied VF bounds for WORST
   const getConsistencyThreshold = (pairIndex, comps = comparisons) => {
     if (pairIndex === 0 && pairs[pairIndex]?.type === 'best') {
       // First comparison (BEST-to-WORST) has no constraint
-      return null
+      return { lowerBound: null, upperBound: null }
     }
 
     const pair = pairs[pairIndex]
-    if (!pair) return null
+    if (!pair) return { lowerBound: null, upperBound: null }
 
     if (pair.type === 'best') {
       // Phase 2: BEST-to-OTHERS - must be >= bestToWorstValue
-      return bestToWorstValue
+      return { lowerBound: bestToWorstValue, upperBound: null }
     } else {
-      // Phase 3: OTHERS-to-WORST - ordinal consistency
-      // Must be >= the maximum of all previous OTHERS-to-WORST comparisons
-      const groupName = allGroups[selectedGroupIndex]?.name
-      if (!groupName) return null
-      
-      // Find all previous OTHERS-to-WORST comparisons in this group
-      const previousWorstComps = []
-      for (let i = 0; i < pairIndex; i++) {
-        if (pairs[i]?.type === 'worst') {
-          const comp = comps.find(
-            (c) =>
-              c.reference_criterion === pairs[i].reference.criterion_name &&
-              c.adjusted_criterion === pairs[i].adjusted.criterion_name &&
-              c.type === 'worst' &&
-              c.group === groupName
-          )
-          if (comp) {
-            const vfValue = interpolateVF(pairs[i].adjusted.criterion_name, comp.data_value)
-            previousWorstComps.push(vfValue)
-          }
-        }
-      }
-      
-      if (previousWorstComps.length > 0) {
-        // Must be >= the maximum of previous OTHERS-to-WORST
-        return Math.max(...previousWorstComps)
-      } else {
-        // First OTHERS-to-WORST comparison: must be >= bestToWorstValue
-        return bestToWorstValue
-      }
+      // Phase 3: OTHERS-to-WORST - must preserve ranking learned in BEST phase
+      return getWorstConsistencyBounds(pairIndex, comps)
     }
   }
 
   // Check if current slider value is consistent
   const checkConsistency = (pairIndex, dataValue, comps = comparisons) => {
     const pair = pairs[pairIndex]
-    if (!pair) return { isConsistent: true, threshold: null, thresholdDataValue: null }
+    if (!pair) return { isConsistent: true, threshold: null, thresholdDataValue: null, thresholdKind: null }
 
     const currentVFValue = interpolateVF(pair.adjusted.criterion_name, dataValue)
-    const threshold = getConsistencyThreshold(pairIndex, comps)
+    const { lowerBound, upperBound } = getConsistencyThreshold(pairIndex, comps)
 
-    if (threshold === null) {
+    if (lowerBound === null && upperBound === null) {
       // No constraint
-      return { isConsistent: true, threshold: null, thresholdDataValue: null }
+      return { isConsistent: true, threshold: null, thresholdDataValue: null, thresholdKind: null }
     }
 
-    const isConsistent = currentVFValue >= threshold - 1e-10 // Small epsilon for floating point
-    const thresholdDataValue = inverseValueFunction(pair.adjusted.criterion_name, threshold)
+    const epsilon = 1e-10
+    const violatesLower = lowerBound !== null && currentVFValue < lowerBound - epsilon
+    const violatesUpper = upperBound !== null && currentVFValue > upperBound + epsilon
+    const isConsistent = !violatesLower && !violatesUpper
 
-    return { isConsistent, threshold, thresholdDataValue }
+    let threshold = null
+    let thresholdKind = null
+    if (violatesLower) {
+      threshold = lowerBound
+      thresholdKind = 'lower'
+    } else if (violatesUpper) {
+      threshold = upperBound
+      thresholdKind = 'upper'
+    } else {
+      threshold = lowerBound !== null ? lowerBound : upperBound
+      thresholdKind = lowerBound !== null ? 'lower' : 'upper'
+    }
+
+    const thresholdDataValue = threshold === null
+      ? null
+      : inverseValueFunction(pair.adjusted.criterion_name, threshold)
+
+    return { isConsistent, threshold, thresholdDataValue, thresholdKind }
   }
 
   const getBarChartData = (groupCriteria) => {
@@ -1973,9 +2072,13 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                   </Text>
                   {(() => {
                     const pair = pairs[currentPairIndex]
-                    const { threshold, thresholdDataValue } = checkConsistency(currentPairIndex, sliderValue, comparisons)
+                    const { thresholdDataValue, thresholdKind } = checkConsistency(currentPairIndex, sliderValue, comparisons)
                     const isIncreasing = isVFIncreasing(pair.adjusted.criterion_name)
-                    const adjective = isIncreasing ? 'at least' : 'at most'
+                    // lower VF bound means VF must be >= threshold
+                    // upper VF bound means VF must be <= threshold
+                    const adjective = thresholdKind === 'upper'
+                      ? (isIncreasing ? 'at most' : 'at least')
+                      : (isIncreasing ? 'at least' : 'at most')
                     
                     if (pair?.type === 'best') {
                       return (

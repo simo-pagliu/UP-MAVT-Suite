@@ -100,6 +100,18 @@ describe('parseDistribution', () => {
     })
   })
 
+  it('parses triangular alias format "TRI(min, mode, max)"', () => {
+    const result = parseDistribution('TRI(0, 3, 6)')
+    expect(result).toEqual({
+      type: 'trapezoid',
+      min: 0,
+      peak_start: 3,
+      peak_end: 3,
+      max: 6,
+      base_prob: 0,
+    })
+  })
+
   it('parses custom_1 format "CUSTOM_1({a1,a2}, xl, xh)"', () => {
     const result = parseDistribution('CUSTOM_1({0.3, 0.7}, 0.2, 0.8)')
     expect(result).toEqual({

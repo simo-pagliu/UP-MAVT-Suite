@@ -4,7 +4,7 @@ import csv
 import io
 import json
 import zipfile
-from scipy.interpolate import interp1d
+from bisect import bisect_right
 
 from app.repositories import SessionRepository, InputRepository
 from app.services.session_service import SessionService
@@ -70,11 +70,10 @@ class ExportService:
 
     @staticmethod
     def get_qualitative_x_value(qualitative_indicators, criterion_name, alt_name):
-        """Compute the normalised X position (0–1) for an alternative in a qualitative criterion.
+        """Return the x-position on the value function for a qualitative alternative.
 
-        The X value represents the alternative's relative position in the
-        ranking.  The best rank maps to the highest X value (closest to 1) and
-        the worst rank maps to the lowest non-zero X value.
+        Retrieves the actual x-value from the QI data's values field, which was
+        set during elicitation. Does NOT recalculate from the rank.
 
         Args:
             qualitative_indicators (dict): The session's qualitative indicator
@@ -94,27 +93,29 @@ class ExportService:
         ranking = data.get('ranking')
         if not isinstance(ranking, dict):
             return ''
+        values = data.get('values')
+        if not isinstance(values, dict):
+            return ''
         rank = ranking.get(alt_name)
         if rank is None:
             return ''
-        unique_ranks = sorted(set(ranking.values()))
-        if not unique_ranks:
+        
+        # Use the actual value from the QI data for this rank
+        rank_key = str(rank) if not isinstance(rank, str) else rank
+        x_value = values.get(rank_key, values.get(int(rank_key) if rank_key.isdigit() else rank))
+        
+        if x_value is None:
             return ''
-        total_points = len(unique_ranks) + 2
-        rank_list = list(reversed(unique_ranks))
-        if rank not in rank_list:
-            return ''
-        idx = rank_list.index(rank)
-        return (idx + 1) / (total_points - 1)
+        
+        return float(x_value)
 
     @staticmethod
     def generate_qualitative_value_function(qualitative_indicators, criterion_name):
-        """Build a piecewise-linear value function from qualitative ranking data.
+        """Build the qualitative value function as identity: y = x.
 
-        The function spans from (0, 0) to (1, 1) for increasing criteria or
-        from (0, 1) to (1, 0) for decreasing criteria.  Intermediate points
-        are placed at evenly-spaced X positions corresponding to each unique
-        rank, with Y values taken from the stored ``values`` dict.
+        For qualitative criteria, trend direction is already captured by the
+        alternative values assigned during elicitation/preprocessing. The value
+        function itself must remain the same identity line for all cases.
 
         Args:
             qualitative_indicators (dict): The session's qualitative indicator
@@ -131,22 +132,7 @@ class ExportService:
         data = qualitative_indicators.get(criterion_name) if criterion_name else None
         if not isinstance(data, dict):
             return []
-        ranking = data.get('ranking')
-        values = data.get('values')
-        is_increasing = data.get('isIncreasing', True)
-        if not isinstance(ranking, dict) or not isinstance(values, dict):
-            return []
-        unique_ranks = sorted(set(ranking.values()))
-        if not unique_ranks:
-            return []
-        total_points = len(unique_ranks) + 2
-        points = [{'x': 0, 'y': 0 if is_increasing else 1}]
-        for idx, rank in enumerate(reversed(unique_ranks)):
-            x_normalized = (idx + 1) / (total_points - 1)
-            y_value = values.get(rank, values.get(str(rank), x_normalized))
-            points.append({'x': x_normalized, 'y': y_value})
-        points.append({'x': 1, 'y': 1 if is_increasing else 0})
-        return points
+        return [{'x': 0, 'y': 0}, {'x': 1, 'y': 1}]
 
     # ------------------------------------------------------------------ #
     # CSV builders
@@ -177,6 +163,64 @@ class ExportService:
                     continue
                 writer.writerow([criterion_name, unit, alt.get('name', ''), alt.get('value', '')])
         return output.getvalue()
+    @classmethod
+    def build_input_data_csv(cls, criteria, qualitative_indicators=None):
+        """Build an input data CSV combining quantitative raw values and qualitative ranking data.
+
+        For quantitative criteria: shows raw values from alternatives
+        For qualitative criteria: shows rank and assigned value from qualitative indicators
+
+        Columns: ``CRITERION_NAME``, ``UNIT``, ``ALTERNATIVE``, ``VALUE``, ``RANK``, ``CONFIDENCE``
+
+        Args:
+            criteria (list[dict]): The session's criteria list.
+            qualitative_indicators (dict | None): The session's qualitative indicators.
+
+        Returns:
+            str: The CSV text (UTF-8).
+        """
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['CRITERION_NAME', 'UNIT', 'ALTERNATIVE', 'VALUE', 'RANK', 'CONFIDENCE'])
+        
+        for criterion in criteria:
+            if not isinstance(criterion, dict):
+                continue
+            criterion_name = criterion.get('criterion_name', '')
+            unit = criterion.get('unit', '')
+            is_qualitative = criterion.get('is_qualitative', False)
+            
+            if is_qualitative and qualitative_indicators:
+                # Qualitative criterion: show ranking data
+                data = qualitative_indicators.get(criterion_name, {}) if criterion_name else {}
+                ranking = data.get('ranking', {}) if isinstance(data, dict) else {}
+                confidences = data.get('confidences', {}) if isinstance(data, dict) else {}
+                
+                for alt in criterion.get('alternatives', []):
+                    if not isinstance(alt, dict):
+                        continue
+                    alt_name = alt.get('name', '')
+                    if not alt_name:
+                        continue
+                    
+                    rank = ranking.get(alt_name, '')
+                    value = cls.get_qualitative_alt_value(qualitative_indicators, criterion_name, alt_name)
+                    confidence = 4
+                    if rank and isinstance(confidences, dict):
+                        confidence = confidences.get(rank, confidences.get(str(rank), 4))
+                    
+                    writer.writerow([criterion_name, unit, alt_name, value, rank, confidence])
+            else:
+                # Quantitative criterion: show raw values
+                for alt in criterion.get('alternatives', []):
+                    if not isinstance(alt, dict):
+                        continue
+                    alt_name = alt.get('name', '')
+                    value = alt.get('value', '')
+                    writer.writerow([criterion_name, unit, alt_name, value, '', ''])
+        
+        return output.getvalue()
+
 
     @classmethod
     def build_alternatives_csv(cls, criteria, qualitative_indicators):
@@ -440,6 +484,44 @@ class ExportService:
         # Build value function callables for QUANTITATIVE criteria
         vf_dict = {}
         criteria_map = value_functions_data.get('criteria', {}) if isinstance(value_functions_data, dict) else {}
+
+        def build_piecewise_function(points):
+            parsed_points = []
+            for point in points:
+                if not isinstance(point, dict) or 'x' not in point or 'y' not in point:
+                    continue
+                parsed_points.append((float(point['x']), float(point['y'])))
+
+            if len(parsed_points) < 2:
+                return None
+
+            sorted_points = sorted(parsed_points, key=lambda pair: pair[0])
+            x_values = [pair[0] for pair in sorted_points]
+            y_values = [pair[1] for pair in sorted_points]
+
+            def piecewise_function(raw_x):
+                x_value = float(raw_x)
+
+                if x_value <= x_values[0]:
+                    return y_values[0]
+                if x_value >= x_values[-1]:
+                    return y_values[-1]
+
+                left_index = bisect_right(x_values, x_value) - 1
+                right_index = left_index + 1
+
+                x_left = x_values[left_index]
+                y_left = y_values[left_index]
+                x_right = x_values[right_index]
+                y_right = y_values[right_index]
+
+                if x_right == x_left:
+                    return y_right
+
+                interpolation_ratio = (x_value - x_left) / (x_right - x_left)
+                return y_left + interpolation_ratio * (y_right - y_left)
+
+            return piecewise_function
         
         for name in quantitative_criteria:
             cfg = criteria_map.get(name, {})
@@ -451,18 +533,9 @@ class ExportService:
                 continue
             
             try:
-                x_vals = [float(p['x']) for p in points if 'x' in p and 'y' in p]
-                y_vals = [float(p['y']) for p in points if 'x' in p and 'y' in p]
-                
-                if len(x_vals) >= 2:
-                    min_y, max_y = min(y_vals), max(y_vals)
-                    vf_dict[name] = interp1d(
-                        x_vals,
-                        y_vals,
-                        kind='linear',
-                        fill_value=(min_y, max_y),
-                        bounds_error=False,
-                    )
+                piecewise_function = build_piecewise_function(points)
+                if piecewise_function is not None:
+                    vf_dict[name] = piecewise_function
             except (TypeError, ValueError, Exception):
                 continue
         
@@ -725,6 +798,34 @@ class ExportService:
             raise NotFoundError('No input data to export')
         content = self.build_input_raw_csv(criteria)
         return content.encode(), f'input_raw_{session.get("name", session_id)}.csv', 'text/csv'
+
+    def export_input_data_csv(self, session_id):
+        """Export a session's elicited input data as a CSV file.
+
+        This export includes:
+        - quantitative criteria raw input values
+        - qualitative criteria ranking-derived values/confidences
+
+        Args:
+            session_id: The session's ``_id``.
+
+        Returns:
+            tuple[bytes, str, str]: (content, filename, ``'text/csv'``).
+
+        Raises:
+            NotFoundError: When the session does not exist or has no criteria.
+            ValidationError: When qualitative indicators are incomplete for
+                sessions with qualitative criteria.
+        """
+        session = self._get_session_or_raise(session_id)
+        criteria = self._session_svc.resolve_session_criteria(session)
+        if not isinstance(criteria, list) or not criteria:
+            raise NotFoundError('No input data to export')
+        qi = session.get('qualitative_indicators') or {}
+        if not self._session_svc.is_qualitative_complete(criteria, qi):
+            raise ValidationError('Complete qualitative indicators before export')
+        content = self.build_input_data_csv(criteria, qi)
+        return content.encode(), f'input_data_{session.get("name", session_id)}.csv', 'text/csv'
 
     def export_qualitative_csv(self, session_id):
         """Export a session's qualitative indicators as a CSV file.

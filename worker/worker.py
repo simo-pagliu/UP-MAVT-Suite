@@ -248,7 +248,7 @@ def handle_run_step(task):
                 formatted = run_upmavt(
                     vf_lists, confidence_lists, weight_solutions_list,
                     alternatives, criteria_names,
-                    step_params, qualitative_indicators=qualitative_indicators,
+                    step_params,
                     print_fn=logger.log
                 )
                 results_by_aggregation[agg_method] = formatted
@@ -275,7 +275,7 @@ def handle_run_step(task):
             formatted = run_upmavt(
                 vf_lists, confidence_lists, weight_solutions_list,
                 alternatives, criteria_names,
-                step_params, qualitative_indicators=qualitative_indicators,
+                step_params,
                 print_fn=logger.log
             )
 

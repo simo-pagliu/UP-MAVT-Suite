@@ -13,6 +13,7 @@ seamless drop-in replacement.
 import os
 import csv
 import json
+from bisect import bisect_right
 from pathlib import Path
 
 
@@ -76,6 +77,49 @@ def _parse_points_string(points_raw):
             continue
 
     return points
+
+
+def _build_piecewise_linear_function(points):
+    """Build a piecewise-linear function with endpoint clamping.
+
+    Interpolates only between the two neighboring points that bracket x.
+    """
+    parsed_points = []
+    for point in points:
+        if not isinstance(point, dict) or 'x' not in point or 'y' not in point:
+            continue
+        parsed_points.append((float(point['x']), float(point['y'])))
+
+    if len(parsed_points) < 2:
+        return None
+
+    sorted_points = sorted(parsed_points, key=lambda pair: pair[0])
+    x_values = [pair[0] for pair in sorted_points]
+    y_values = [pair[1] for pair in sorted_points]
+
+    def piecewise_function(raw_x):
+        x_value = float(raw_x)
+
+        if x_value <= x_values[0]:
+            return y_values[0]
+        if x_value >= x_values[-1]:
+            return y_values[-1]
+
+        left_index = bisect_right(x_values, x_value) - 1
+        right_index = left_index + 1
+
+        x_left = x_values[left_index]
+        y_left = y_values[left_index]
+        x_right = x_values[right_index]
+        y_right = y_values[right_index]
+
+        if x_right == x_left:
+            return y_right
+
+        interpolation_ratio = (x_value - x_left) / (x_right - x_left)
+        return y_left + interpolation_ratio * (y_right - y_left)
+
+    return piecewise_function
 
 
 def load_input_data(data_dir):
@@ -546,12 +590,10 @@ def build_value_functions_from_csv(data_dir, session_name, criteria, return_conf
     -------
     dict or tuple
         If return_confidence=False:
-            Mapping criterion_name -> scipy interp1d function
+            Mapping criterion_name -> piecewise-linear callable
         If return_confidence=True:
             (vf_dict, confidence_dict)
     """
-    from scipy.interpolate import interp1d
-    
     vf_dict = {}
     confidence_dict = {}
 
@@ -574,17 +616,12 @@ def build_value_functions_from_csv(data_dir, session_name, criteria, return_conf
         points = []
         
         if criterion.get('is_qualitative'):
-            # For weight computation, qualitative criteria MUST use identity function: vf(x) = x
-            # This is required for constraint checking (a_value = 1/vf(x))
+            # For weight computation and UP-MAVT, qualitative criteria use identity function: vf(x) = x
+            # The uncertainty is encoded in the alternative values themselves (x ± error%)
+            # So the VF has no error: confidence = 4
             points = [{'x': 0, 'y': 0}, {'x': 1, 'y': 1}]
-            if return_confidence and name in qualitative_indicators:
-                qi_data = qualitative_indicators[name]
-                conf_map = qi_data.get('confidences', {}) if isinstance(qi_data, dict) else {}
-                if isinstance(conf_map, dict):
-                    confidence_dict[name] = {
-                        int(k) if isinstance(k, str) and k.isdigit() else k: _parse_confidence_value(v, default=4)
-                        for k, v in conf_map.items()
-                    }
+            if return_confidence:
+                confidence_dict[name] = 4  # No error in VF, uncertainty is in alternative values
         else:
             # Quantitative criterion
             cfg = criteria_map.get(name, {}) if isinstance(criteria_map, dict) else {}
@@ -596,21 +633,10 @@ def build_value_functions_from_csv(data_dir, session_name, criteria, return_conf
         if not points or len(points) < 2:
             continue
         
-        x_vals = [float(p['x']) for p in points if 'x' in p and 'y' in p]
-        y_vals = [float(p['y']) for p in points if 'x' in p and 'y' in p]
-        
-        if len(x_vals) < 2:
+        piecewise_function = _build_piecewise_linear_function(points)
+        if piecewise_function is None:
             continue
-        
-        min_y, max_y = min(y_vals), max(y_vals)
-        interp_func = interp1d(
-            x_vals,
-            y_vals,
-            kind='linear',
-            fill_value=(min_y, max_y),
-            bounds_error=False,
-        )
-        vf_dict[name] = interp_func
+        vf_dict[name] = piecewise_function
     
     if return_confidence:
         return vf_dict, confidence_dict
@@ -671,8 +697,64 @@ def build_alternatives_from_csv(data_dir, session_name=None):
     input_data = load_input_data(data_dir)
     alternatives = input_data.get('alternatives', {})
     criteria_names = input_data.get('criteria_names', [])
+    criteria = input_data.get('criteria', [])
     
-    # TODO: Add qualitative substitution if session_name is provided
-    # This would require loading qualitative_indicators from the session
+    # Add qualitative substitution if session_name is provided
+    if session_name:
+        session_dir = os.path.join(data_dir, session_name)
+        qi_path = os.path.join(session_dir, 'qualitative_indicators.csv')
+        if os.path.exists(qi_path):
+            qualitative_indicators = _load_qualitative_indicators_csv(qi_path)
+            
+            if qualitative_indicators:
+                # Confidence to error percentage mapping
+                confidence_errors = {
+                    0: 10.0,
+                    1: 7.5,
+                    2: 5.0,
+                    3: 2.5,
+                    4: 0.0,
+                }
+                
+                for criterion in criteria:
+                    if not criterion.get('is_qualitative'):
+                        continue
+                    
+                    crit_name = criterion.get('criterion_name')
+                    if not crit_name or crit_name not in qualitative_indicators:
+                        continue
+                    
+                    qi_data = qualitative_indicators[crit_name]
+                    ranking = qi_data.get('ranking', {})
+                    values = qi_data.get('values', {})
+                    confidences = qi_data.get('confidences', {})
+                    
+                    if not ranking or not values:
+                        continue
+                    
+                    for alt_name in alternatives.keys():
+                        if alt_name in ranking:
+                            rank = ranking[alt_name]
+                            
+                            # Use the actual value from the QI data, not recalculated from rank
+                            rank_key = str(rank) if not isinstance(rank, str) else rank
+                            x_pos = values.get(rank_key, values.get(int(rank_key) if rank_key.isdigit() else rank))
+                            
+                            if x_pos is None:
+                                continue
+                            
+                            x_pos = float(x_pos)
+                            
+                            # Get confidence for this rank and encode uncertainty
+                            conf_key = str(rank) if not isinstance(rank, str) else rank
+                            confidence = confidences.get(conf_key, confidences.get(int(conf_key) if conf_key.isdigit() else conf_key, 4))
+                            error_pct = confidence_errors.get(int(confidence), 0.0)
+                            
+                            if error_pct > 0:
+                                # Format as "x_pos ± error_pct%"
+                                alternatives[alt_name][crit_name] = f"{x_pos} ± {error_pct}%"
+                            else:
+                                # No uncertainty, just store the x_pos
+                                alternatives[alt_name][crit_name] = x_pos
     
     return alternatives, criteria_names

@@ -175,6 +175,20 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       console.error('Error fetching step 6 results:', error)
     }
   }, [studySessionId])
+
+  const fetchWeightSpace = useCallback(async (sessionId) => {
+    if (!sessionId || !studySessionId) return
+    try {
+      const response = await axios.get(
+        `${API_URL}/study-session/${studySessionId}/weight-space/${sessionId}`
+      )
+      setWeightSpaceData(response.data.weight_solutions || response.data.weight_space)
+    } catch (error) {
+      console.error('Error fetching weight space:', error)
+      setWeightSpaceData(null)
+    }
+  }, [studySessionId])
+
   useEffect(() => {
     const fetchSessions = async () => {
       if (!studySessionId) return
@@ -242,7 +256,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   // ============================================================================
   // TASK POLLING
   // ============================================================================
-  const startPolling = useCallback((taskId, stepName) => {
+  const startPolling = useCallback((taskId, stepName, stepNumber = null) => {
     if (pollRef.current) clearInterval(pollRef.current)
 
     pollRef.current = setInterval(async () => {
@@ -257,7 +271,28 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           pollRef.current = null
           setRunningStep(null)
           setActiveTaskId(null)
-          fetchWorkflowStatus()
+          
+          // Fetch workflow status first
+          await fetchWorkflowStatus()
+          
+          // Then fetch the step results for the completed step
+          if (stepNumber === 2) {
+            await fetchStep2Results()
+          } else if (stepNumber === 3) {
+            await fetchStep3Results()
+          } else if (stepNumber === 4) {
+            await fetchStep4Results()
+          } else if (stepNumber === 5) {
+            await fetchStep5Results()
+          } else if (stepNumber === 6) {
+            await fetchStep6Results()
+          } else if (stepNumber === null && stepName.includes('Weights')) {
+            // If weights were computed and we have a selected weight session, refetch its weight space
+            if (selectedWeightSession) {
+              await fetchWeightSpace(selectedWeightSession)
+            }
+          }
+          
           toast({ title: `${stepName} completed`, status: 'success', duration: 3000 })
         } else if (task.status === 'failed') {
           clearInterval(pollRef.current)
@@ -281,7 +316,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         console.error('Polling error:', error)
       }
     }, 2000)
-  }, [fetchWorkflowStatus, toast])
+  }, [fetchWorkflowStatus, fetchStep2Results, fetchStep3Results, fetchStep4Results, fetchStep5Results, fetchStep6Results, fetchWeightSpace, selectedWeightSession, toast])
 
   // Check for active/running tasks on mount (called after startPolling is defined)
   const checkForActiveTask = useCallback(async () => {
@@ -300,12 +335,12 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         
         if (taskType === 'compute_weights') {
           setRunningStep('weights')
-          startPolling(activeTask.task_id, 'Compute Weights')
+          startPolling(activeTask.task_id, 'Compute Weights', null)
         } else if (taskType === 'run_step') {
           const stepNumber = params.step_number
           const stepName = params.step_name || `Step ${stepNumber}`
           setRunningStep(stepName)
-          startPolling(activeTask.task_id, stepName)
+          startPolling(activeTask.task_id, stepName, stepNumber)
         }
       }
     } catch (error) {
@@ -366,7 +401,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       )
       const taskId = response.data.task_id
       setActiveTaskId(taskId)
-      startPolling(taskId, 'Compute Weights')
+      startPolling(taskId, 'Compute Weights', null)
     } catch (error) {
       setRunningStep(null)
       toast({
@@ -410,7 +445,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     const stepConfigs = {
       2: { mc_mode: 'strict', aggregation_method: consensusAggregation, use_random_weights: false },
       3: { mc_mode: 'non_strict', aggregation_method: dominanceAggregation, use_random_weights: true },
-      4: { mc_mode: 'non_strict', aggregation_method: 'weighted_sum', use_random_weights: true },
+      4: { mc_mode: 'non_strict', aggregation_method: 'weighted_sum', use_random_weights: false },
       5: { mc_mode: 'strict', aggregation_method: uncertaintyAggregation, use_random_weights: false },
       6: { mc_mode: 'non_strict', aggregation_method: resultsAggregation, use_random_weights: false },
     }
@@ -434,7 +469,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       )
       const taskId = response.data.task_id
       setActiveTaskId(taskId)
-      startPolling(taskId, stepName)
+      startPolling(taskId, stepName, stepNumber)
     } catch (error) {
       setRunningStep(null)
       toast({
@@ -470,19 +505,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   // ============================================================================
   // WEIGHT SPACE PLOT
   // ============================================================================
-  const fetchWeightSpace = useCallback(async (sessionId) => {
-    if (!sessionId || !studySessionId) return
-    try {
-      const response = await axios.get(
-        `${API_URL}/study-session/${studySessionId}/weight-space/${sessionId}`
-      )
-      setWeightSpaceData(response.data.weight_solutions || response.data.weight_space)
-    } catch (error) {
-      console.error('Error fetching weight space:', error)
-      setWeightSpaceData(null)
-    }
-  }, [studySessionId])
-
   useEffect(() => {
     if (selectedWeightSession) {
       fetchWeightSpace(selectedWeightSession)

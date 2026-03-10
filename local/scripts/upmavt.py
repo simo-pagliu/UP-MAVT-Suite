@@ -24,8 +24,8 @@ def weight_sampler(weight_solutions, criteria, constraint_data=None, use_random_
     """Sample a random set of weights.
 
     Uses direct sampling from precomputed feasible solutions.
-    If ``use_random_weights`` is True, falls back to unconstrained
-    Dirichlet sampling.
+    If ``use_random_weights`` is True, samples unconstrained
+    weights from a Dirichlet distribution.
 
     Parameters
     ----------
@@ -51,16 +51,12 @@ def weight_sampler(weight_solutions, criteria, constraint_data=None, use_random_
         return {crit: raw[i] for i, crit in enumerate(criteria)}
 
     if not isinstance(weight_solutions, list) or len(weight_solutions) == 0:
-        # Fallback: equal weights if no solutions are available
-        n = max(1, len(criteria))
-        return {crit: 1.0 / n for crit in criteria}
-
+        raise ValueError("No precomputed weight solutions available")
     selected = weight_solutions[np.random.randint(len(weight_solutions))]
     if not isinstance(selected, dict):
-        n = max(1, len(criteria))
-        return {crit: 1.0 / n for crit in criteria}
+        raise ValueError("Selected weight solution is not a valid mapping")
 
-    return {crit: float(selected.get(crit, 0.0)) for crit in criteria}
+    return {crit: float(selected[crit]) for crit in criteria}
 
 
 # ============================================================================
@@ -87,6 +83,13 @@ def sample_from_distribution(dist_str):
         parts = dist_str[2:-1].split(',')
         a, b = float(parts[0].strip()), float(parts[1].strip())
         return np.random.uniform(a, b)
+
+    # Triangular distribution: TRI(a, b, c)
+    if dist_str.startswith('TRI('):
+        parts = dist_str[4:-1].split(',')
+        if len(parts) >= 3:
+            a, b, c = float(parts[0].strip()), float(parts[1].strip()), float(parts[2].strip())
+            return np.random.triangular(a, b, c)
 
     # Percentage or absolute margin: 50 ± 5% or 50 ± 5
     if '±' in dist_str:
@@ -149,8 +152,8 @@ def sample_from_distribution(dist_str):
     # Fallback
     try:
         return float(dist_str.replace('{', '').replace('}', ''))
-    except Exception:
-        return 0.0
+    except Exception as exc:
+        raise ValueError(f"Unsupported or invalid distribution format: {dist_str}") from exc
 
 
 # ============================================================================
@@ -189,11 +192,13 @@ def harmonic_mean(intermediate_results):
 # ============================================================================
 def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_lists,
                          weight_elicit_idx, vf_elicit_idx, sampled_weights,
-                         aggregation_func, qualitative_indicators=None):
+                         aggregation_func):
     """Evaluate single alternative using MAVT.
     
-    For quantitative criteria: sample raw value -> apply VF -> add confidence error
-    For qualitative criteria: use normalized x position -> add confidence error per rank
+    Sample from alternative value distribution -> apply VF -> apply confidence error
+    
+    For qualitative criteria: uncertainty is already encoded in alternative values (x ± error%),
+    and VF is identity (y=x) with confidence=4 (no additional error).
     """
     confidence_errors = {
         0: 0.10,
@@ -207,49 +212,31 @@ def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_list
 
     for crit in criteria:
         if crit in alt_data:
+            # Sample from distribution (handles both deterministic values and distributions)
             raw_value = sample_from_distribution(alt_data[crit])
 
             vf = vf_lists[vf_elicit_idx].get(crit)
-            confidence_info = confidence_lists[vf_elicit_idx].get(crit)
+            confidence = confidence_lists[vf_elicit_idx].get(crit, 4)
             
-            if isinstance(confidence_info, dict):
-                # Qualitative criterion: per-rank confidence
-                # VF is identity function vf(x) = x
-                normalized_value = float(raw_value)  # raw_value is already x_normalized
-                
-                # Get the rank for this alternative from qualitative_indicators
-                qi_info = qualitative_indicators[crit]
-                ranking = qi_info['ranking']
-                rank = ranking[alt_name]
-                # Get confidence for this rank from confidence_info dict
-                confidence = confidence_info[rank]
-                
-                # Apply confidence error margin
-                error_pct = confidence_errors[confidence]
-                if error_pct > 0:
-                    error_margin = normalized_value * error_pct
-                    normalized_value = np.random.uniform(
-                        normalized_value - error_margin,
-                        normalized_value + error_margin
-                    )
-                    normalized_value = np.clip(normalized_value, 0.0, 1.0)
-            elif isinstance(confidence_info, int):
-                # Quantitative criterion: single confidence value
-                normalized_value = float(vf(raw_value))
-                confidence = confidence_info
-                
-                error_pct = confidence_errors[confidence]
-                if error_pct > 0:
-                    error_margin = normalized_value * error_pct
-                    normalized_value = np.random.uniform(
-                        normalized_value - error_margin,
-                        normalized_value + error_margin
-                    )
-                    normalized_value = np.clip(normalized_value, 0.0, 1.0)
-            else:
+            if vf is None:
                 continue
+            
+            # Apply value function
+            normalized_value = float(vf(raw_value))
+            
+            # Apply confidence error margin
+            error_pct = confidence_errors.get(confidence, 0.0)
+            if error_pct > 0:
+                error_margin = normalized_value * error_pct
+                normalized_value = np.random.uniform(
+                    normalized_value - error_margin,
+                    normalized_value + error_margin
+                )
+            normalized_value = np.clip(normalized_value, 0.0, 1.0)
 
-            w = sampled_weights.get(crit, 1.0 / len(criteria))
+            if crit not in sampled_weights:
+                raise KeyError(f"Missing weight for criterion '{crit}' in sampled_weights")
+            w = float(sampled_weights[crit])
             intermediate_results.append((w, normalized_value))
 
     score = aggregation_func(intermediate_results)
@@ -262,7 +249,7 @@ def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_list
 def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
                     confidence_lists, constraint_data_list, aggregation_method,
                     opinion_weights, num_iterations, mc_mode, use_random_weights=False,
-                    qualitative_indicators=None, print_fn=None):
+                    print_fn=None):
     """Run MC simulation.
 
     Parameters
@@ -319,8 +306,7 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
                 for alt_name, alt_data in alternatives.items():
                     score = evaluate_alternative(
                         alt_name, alt_data, criteria, vf_lists, confidence_lists,
-                        elicit_idx, elicit_idx, sampled_weights, agg_func,
-                        qualitative_indicators=qualitative_indicators
+                        elicit_idx, elicit_idx, sampled_weights, agg_func
                     )
                     results[elicit_idx][alt_name].append(score)
     else:
@@ -342,8 +328,7 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
             for alt_name, alt_data in alternatives.items():
                 score = evaluate_alternative(
                     alt_name, alt_data, criteria, vf_lists, confidence_lists,
-                    weight_elicit_idx, vf_elicit_idx, sampled_weights, agg_func,
-                    qualitative_indicators=qualitative_indicators
+                    weight_elicit_idx, vf_elicit_idx, sampled_weights, agg_func
                 )
                 results[alt_name].append(score)
 
@@ -394,7 +379,7 @@ def format_results_for_db(results, alternatives, mc_mode):
 # MAIN ENTRY POINT (called by the worker)
 # ============================================================================
 def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives, 
-               criteria_names, params, qualitative_indicators=None, print_fn=None):
+               criteria_names, params, print_fn=None):
     """Run UP-MAVT simulation.
 
     Parameters
@@ -416,8 +401,6 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
         - mc_mode: str ("strict" or "non_strict")
         - use_random_weights: bool
         - opinion_weights: list or None
-    qualitative_indicators : dict or None
-        Qualitative indicators mapping criterion_name -> {'ranking': {alt_name: rank, ...}}.
     print_fn : callable or None
         Logging function.
 
@@ -482,7 +465,7 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
         alternatives, criteria_names, weight_solutions_list, vf_lists,
         confidence_lists, constraint_data_list, aggregation_method,
         opinion_weights, mc_iterations, mc_mode, use_random_weights=use_random_weights,
-        qualitative_indicators=qualitative_indicators, print_fn=print_fn,
+        print_fn=print_fn,
     )
     print_fn("✓ Simulation complete")
 
