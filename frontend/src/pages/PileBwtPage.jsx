@@ -456,6 +456,12 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     qi_vf_lock_active: Boolean(lockActive),
   })
 
+  const syncBwtSignatures = () => {
+    setBwtSignature(criteriaSignature)
+    setBwtQiSignature(qiSignature)
+    setBwtVfSignature(vfSignature)
+  }
+
   // Track which group the current pairs belong to
   const [pairsGroupName, setPairsGroupName] = useState(null)
 
@@ -1205,6 +1211,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         value: buildBwtPayload(comparisons, true),
       })
       setBwtLockActive(true)
+      syncBwtSignatures()
       toast({
         title: 'QI/VF locked',
         description: 'You can now start PILE-BWT elicitation.',
@@ -1308,6 +1315,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
           value: buildBwtPayload(updatedComparisons),
         })
+        syncBwtSignatures()
         setComparisons(updatedComparisons)
         setCurrentPairIndex(currentPairIndex + 1)
         setSliderTouched(false)
@@ -1348,6 +1356,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
           await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
             value: buildBwtPayload(updated),
           })
+          syncBwtSignatures()
           setComparisons(updated)
           latestComparisons = updated
         } catch (error) {
@@ -1383,6 +1392,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
         value: buildBwtPayload(comps),
       })
+      syncBwtSignatures()
       setComparisons(comps)
       toast({
         title: 'Saved',
