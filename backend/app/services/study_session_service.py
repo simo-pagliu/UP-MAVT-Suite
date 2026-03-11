@@ -108,6 +108,8 @@ class StudySessionService:
         study['_id'] = str(study_id)
         study['input_id'] = self._studies._str_id(study.get('input_id'))
         study['criteria'] = criteria
+        study['title'] = study.get('title', '')
+        study['description'] = study.get('description', '')
         if include_sessions:
             sessions = self._sessions.find_by_study_session_id(study_id)
             for s in sessions:
@@ -118,7 +120,7 @@ class StudySessionService:
             study['sessions'] = sessions
         return study
 
-    def create(self, code):
+    def create(self, code, title='', description=''):
         """Create a new study session with the given practitioner code.
 
         Args:
@@ -141,10 +143,40 @@ class StudySessionService:
             'input_id': None,
             'features': {'qi': False, 'vf': False, 'bwt': False},
             'vf_method': 'mid-splitting',
+            'title': str(title or '').strip(),
+            'description': str(description or '').strip(),
             'created_at': datetime.now(timezone.utc),
         }
         inserted_id = self._studies.insert(doc)
         return str(inserted_id)
+
+    def update_metadata(self, study_session_id, title=None, description=None):
+        """Update the title/description metadata of a study session."""
+        study = self._studies.find_by_id(study_session_id)
+        if not study:
+            raise NotFoundError('Study session not found')
+
+        update_doc = {}
+        if title is not None:
+            if not isinstance(title, str):
+                raise ValidationError('Title must be a string')
+            update_doc['title'] = title.strip()
+        if description is not None:
+            if not isinstance(description, str):
+                raise ValidationError('Description must be a string')
+            update_doc['description'] = description.strip()
+
+        if update_doc:
+            self._studies.update(study_session_id, update_doc)
+
+        updated = self._studies.find_by_id(study_session_id)
+        if not updated:
+            raise NotFoundError('Study session not found')
+        updated['_id'] = str(updated['_id'])
+        updated['input_id'] = self._studies._str_id(updated.get('input_id'))
+        updated['title'] = updated.get('title', '')
+        updated['description'] = updated.get('description', '')
+        return updated
 
     def get_by_id(self, study_session_id):
         """Retrieve and serialise a study session by its identifier.
@@ -456,6 +488,8 @@ class StudySessionService:
             'exported_at': datetime.now(timezone.utc).isoformat(),
             'study': {
                 'code': study.get('code'),
+                'title': study.get('title', ''),
+                'description': study.get('description', ''),
                 'features': study.get('features', {'qi': False, 'vf': False, 'bwt': False}),
                 'vf_method': study.get('vf_method', 'mid-splitting'),
                 'created_at': study.get('created_at').isoformat() if study.get('created_at') else None,
@@ -539,9 +573,13 @@ class StudySessionService:
                 raise ConflictError('Study code conflict')
             requested_study_code = self.generate_unique_study_code()
 
-        study_session_id = self.create(requested_study_code)
-
         study_meta = metadata.get('study') or {}
+        study_session_id = self.create(
+            requested_study_code,
+            title=study_meta.get('title', ''),
+            description=study_meta.get('description', ''),
+        )
+
         self.update_features(
             study_session_id,
             study_meta.get('features') or {'qi': False, 'vf': False, 'bwt': False},

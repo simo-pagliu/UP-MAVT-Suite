@@ -11,6 +11,7 @@ import {
 
 function RecapPage({ sessionId, onNavigate }) {
   const [sessionData, setSessionData] = useState(null)
+  const [studyData, setStudyData] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -19,9 +20,22 @@ function RecapPage({ sessionId, onNavigate }) {
       setLoading(true)
       try {
         const response = await axios.get(`${API_URL}/session/${sessionId}`)
-        setSessionData(response.data)
+        const session = response.data
+        setSessionData(session)
+        const studySessionId = session?.study_session_id
+        if (studySessionId) {
+          try {
+            const studyResponse = await axios.get(`${API_URL}/study-session/${studySessionId}`)
+            setStudyData(studyResponse.data)
+          } catch {
+            setStudyData(null)
+          }
+        } else {
+          setStudyData(null)
+        }
       } catch {
         setSessionData(null)
+        setStudyData(null)
       } finally {
         setLoading(false)
       }
@@ -86,6 +100,17 @@ function RecapPage({ sessionId, onNavigate }) {
 
         {!loading && (
           <>
+            {(studyData?.title || studyData?.description) && (
+              <>
+                <Divider />
+                <VStack align="stretch" spacing={2}>
+                  <Text fontWeight="semibold">Case Study</Text>
+                  {studyData?.title && <Text><strong>Title:</strong> {studyData.title}</Text>}
+                  {studyData?.description && <Text><strong>Description:</strong> {studyData.description}</Text>}
+                </VStack>
+              </>
+            )}
+
             <Divider />
             <VStack align="stretch" spacing={3}>
               <Text fontWeight="semibold">Completion checklist</Text>

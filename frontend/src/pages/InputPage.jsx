@@ -14,6 +14,7 @@ import {
   Input,
   FormControl,
   FormLabel,
+  Textarea,
   useToast,
   Table,
   Thead,
@@ -43,6 +44,8 @@ import { API_URL } from '../config'
 
 function InputPage({ studySessionId }, ref) {
   const [name, setName] = useState('')
+  const [metadataDefaults, setMetadataDefaults] = useState({ title: '', description: '' })
+  const [metadataFormKey, setMetadataFormKey] = useState(0)
   const [criteria, setCriteria] = useState([])
   const [originalCriteria, setOriginalCriteria] = useState([])
   const [loading, setLoading] = useState(false)
@@ -51,6 +54,7 @@ function InputPage({ studySessionId }, ref) {
   const [isEditing, setIsEditing] = useState(false)
   const [hasExistingSessions, setHasExistingSessions] = useState(false)
   const [hasModifiedInput, setHasModifiedInput] = useState(false)
+  const [savingMetadata, setSavingMetadata] = useState(false)
   
   // Distribution modal state
   const { isOpen: isDistModalOpen, onOpen: onDistModalOpen, onClose: onDistModalClose } = useDisclosure()
@@ -63,6 +67,8 @@ function InputPage({ studySessionId }, ref) {
   
   const toast = useToast()
   const fileInputRef = useRef(null)
+  const studyTitleRef = useRef(null)
+  const studyDescriptionRef = useRef(null)
 
   const parseCsvLine = (line) => {
     const values = []
@@ -124,6 +130,8 @@ function InputPage({ studySessionId }, ref) {
   useEffect(() => {
     if (!studySessionId) {
       setName('')
+      setMetadataDefaults({ title: '', description: '' })
+      setMetadataFormKey((prev) => prev + 1)
       setCriteria([])
       setOriginalCriteria([])
       setIsExistingStudySession(false)
@@ -139,6 +147,11 @@ function InputPage({ studySessionId }, ref) {
         if (study.code) {
           setName(study.code)
         }
+        setMetadataDefaults({
+          title: study.title || '',
+          description: study.description || '',
+        })
+        setMetadataFormKey((prev) => prev + 1)
         if (study.criteria && Array.isArray(study.criteria)) {
           const normalized = normalizeCriteria(study.criteria)
           setCriteria(normalized)
@@ -697,6 +710,39 @@ function InputPage({ studySessionId }, ref) {
     }
   }
 
+  const handleSaveStudyMetadata = async () => {
+    if (!studySessionId) return
+    setSavingMetadata(true)
+    try {
+      const title = studyTitleRef.current?.value ?? ''
+      const description = studyDescriptionRef.current?.value ?? ''
+      await axios.patch(`${API_URL}/study-session/${studySessionId}`, {
+        title,
+        description,
+      })
+
+      // Keep defaults in sync with saved values without introducing per-keystroke re-renders.
+      setMetadataDefaults({ title, description })
+      toast({
+        title: 'Completed',
+        description: 'Case study details saved',
+        status: 'success',
+        duration: 2500,
+        isClosable: true,
+      })
+    } catch (error) {
+      toast({
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to save case study details',
+        status: 'error',
+        duration: 4000,
+        isClosable: true,
+      })
+    } finally {
+      setSavingMetadata(false)
+    }
+  }
+
   return (
     <Box bg="white" p={6} borderRadius="lg" boxShadow="sm">
       <VStack spacing={6} align="stretch">
@@ -711,6 +757,38 @@ function InputPage({ studySessionId }, ref) {
 
         {studySessionId && (
           <>
+            <VStack align="stretch" spacing={3}>
+              <Heading as="h2" size="sm">Case Study Details</Heading>
+              <FormControl>
+                <FormLabel mb={1}>Title</FormLabel>
+                <Input
+                  key={`title-${metadataFormKey}`}
+                  ref={studyTitleRef}
+                  defaultValue={metadataDefaults.title}
+                  placeholder="Enter case study title"
+                />
+              </FormControl>
+              <FormControl>
+                <FormLabel mb={1}>Description</FormLabel>
+                <Textarea
+                  key={`description-${metadataFormKey}`}
+                  ref={studyDescriptionRef}
+                  defaultValue={metadataDefaults.description}
+                  placeholder="Enter a short description of this case study"
+                  rows={4}
+                />
+              </FormControl>
+              <HStack justify="flex-end">
+                <Button
+                  colorScheme="blue"
+                  onClick={handleSaveStudyMetadata}
+                  isLoading={savingMetadata}
+                >
+                  Save Details
+                </Button>
+              </HStack>
+            </VStack>
+
             <Divider />
 
             <VStack align="stretch" spacing={4}>

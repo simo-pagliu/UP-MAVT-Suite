@@ -61,6 +61,18 @@ class TestCreate:
         study = svc.get_by_id(sid)
         assert study['vf_method'] == 'mid-splitting'
 
+    def test_create_sets_empty_metadata_defaults(self, svc):
+        sid = svc.create('META-DEFAULTS')
+        study = svc.get_by_id(sid)
+        assert study['title'] == ''
+        assert study['description'] == ''
+
+    def test_create_accepts_metadata(self, svc):
+        sid = svc.create('META-SET', title='My Title', description='My Description')
+        study = svc.get_by_id(sid)
+        assert study['title'] == 'My Title'
+        assert study['description'] == 'My Description'
+
 
 # ---------------------------------------------------------------------------
 # get_by_id / get_by_code
@@ -114,6 +126,23 @@ class TestUpdateFeatures:
     def test_update_features_updates_vf_method(self, svc, study_id):
         result = svc.update_features(study_id, {'qi': True}, 'free-edit')
         assert result['vf_method'] == 'free-edit'
+
+
+class TestUpdateMetadata:
+    def test_update_metadata_ok(self, svc, study_id):
+        result = svc.update_metadata(study_id, title='Case A', description='A short description')
+        assert result['title'] == 'Case A'
+        assert result['description'] == 'A short description'
+
+    def test_update_metadata_not_found_raises(self, svc):
+        with pytest.raises(NotFoundError):
+            svc.update_metadata(str(ObjectId()), title='x')
+
+    def test_update_metadata_rejects_invalid_types(self, svc, study_id):
+        with pytest.raises(ValidationError, match='Title must be a string'):
+            svc.update_metadata(study_id, title=123)
+        with pytest.raises(ValidationError, match='Description must be a string'):
+            svc.update_metadata(study_id, description=456)
 
 
 # ---------------------------------------------------------------------------

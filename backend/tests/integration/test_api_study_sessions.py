@@ -56,6 +56,19 @@ class TestCreateStudySession:
         resp = client.post('/api/study-session', json={'code': 'DUP'})
         assert resp.status_code == 409
 
+    def test_create_with_metadata(self, client):
+        resp = client.post('/api/study-session', json={
+            'code': 'META-CREATE',
+            'title': 'Water Policy Study',
+            'description': 'Stakeholder elicitation for the water policy case.',
+        })
+        assert resp.status_code == 201
+        sid = resp.json['study_session_id']
+        fetched = client.get(f'/api/study-session/{sid}')
+        assert fetched.status_code == 200
+        assert fetched.json['title'] == 'Water Policy Study'
+        assert fetched.json['description'] == 'Stakeholder elicitation for the water policy case.'
+
 
 # ---------------------------------------------------------------------------
 # GET /api/study-sessions
@@ -130,6 +143,16 @@ class TestUpdateStudySession:
         })
         assert resp.status_code == 200
         assert resp.json['vf_method'] == 'free-edit'
+
+    def test_update_metadata_ok(self, client):
+        sid = create_study(client)
+        resp = client.patch(f'/api/study-session/{sid}', json={
+            'title': 'Case Alpha',
+            'description': 'Description for stakeholders',
+        })
+        assert resp.status_code == 200
+        assert resp.json['title'] == 'Case Alpha'
+        assert resp.json['description'] == 'Description for stakeholders'
 
 
 # ---------------------------------------------------------------------------

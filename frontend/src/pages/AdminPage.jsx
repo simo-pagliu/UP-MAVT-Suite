@@ -424,7 +424,7 @@ function AdminPage(props, ref) {
             <Thead>
               <Tr>
                 <Th width="40px"></Th>
-                <Th>Name</Th>
+                <Th>Case Study</Th>
                 <Th>Date Created</Th>
                 <Th>Status</Th>
                 <Th>Progress</Th>
@@ -451,7 +451,17 @@ function AdminPage(props, ref) {
                           isDisabled={!study.sessions || study.sessions.length === 0}
                         />
                       </Td>
-                      <Td fontWeight="bold">{study.code}</Td>
+                      <Td>
+                        <VStack align="start" spacing={0}>
+                          <Text fontWeight="bold">{study.code}</Text>
+                          {study.title ? <Text fontSize="sm">{study.title}</Text> : null}
+                          {study.description ? (
+                            <Text fontSize="xs" color="gray.600" noOfLines={2} maxW="360px">
+                              {study.description}
+                            </Text>
+                          ) : null}
+                        </VStack>
+                      </Td>
                       <Td>{formatDate(study.created_at)}</Td>
                       <Td>
                         <Badge

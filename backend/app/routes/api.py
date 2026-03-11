@@ -180,7 +180,11 @@ def create_study_session():
     auto_generate = bool(data.get('auto_generate', False))
     if not code and auto_generate:
         code = svc.generate_unique_study_code()
-    study_session_id = svc.create(code)
+    study_session_id = svc.create(
+        code,
+        title=data.get('title', ''),
+        description=data.get('description', ''),
+    )
     return jsonify({'study_session_id': study_session_id, 'code': code}), 201
 
 
@@ -203,14 +207,22 @@ def get_study_session(study_session_id):
 def update_study_session(study_session_id):
     data = request.json or {}
     svc = StudySessionService(current_app.db)
+    result = None
     if 'features' in data or 'vf_method' in data:
         result = svc.update_features(
             study_session_id,
             data.get('features', {}),
             data.get('vf_method'),
         )
-        return jsonify(result), 200
-    return jsonify(svc.get_by_id(study_session_id)), 200
+    if 'title' in data or 'description' in data:
+        result = svc.update_metadata(
+            study_session_id,
+            title=data.get('title') if 'title' in data else None,
+            description=data.get('description') if 'description' in data else None,
+        )
+    if result is None:
+        result = svc.get_by_id(study_session_id)
+    return jsonify(result), 200
 
 
 @bp.route('/study-session/<study_session_id>', methods=['DELETE'])
