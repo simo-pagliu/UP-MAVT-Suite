@@ -83,7 +83,7 @@ class WorkflowService:
             step_number (int): The UP-MAVT step to run (2–6).
             selected_session_ids (list): The elicitation session IDs to include.
             mc_iterations (int): Number of Monte-Carlo iterations (clamped to
-                [100, 5000]).
+                [100, 5000] for steps 2-5, [100, 10000] for step 6).
             aggregation_method (str): Aggregation method shortcode or full
                 name (``'SUM'``/``'weighted_sum'``, ``'GEO'``/``'geometric_mean'``,
                 ``'HAR'``/``'harmonic_mean'``).
@@ -107,7 +107,8 @@ class WorkflowService:
             raise ValidationError('No sessions selected')
 
         try:
-            mc_iterations = max(100, min(5000, int(mc_iterations)))
+            upper = 10000 if step_number == 6 else 5000
+            mc_iterations = max(100, min(upper, int(mc_iterations)))
         except (TypeError, ValueError):
             mc_iterations = 1000
 

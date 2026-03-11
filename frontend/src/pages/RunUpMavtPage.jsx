@@ -456,6 +456,16 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
     const config = { ...stepConfigs[stepNumber], ...overrides }
 
+    // Clear previous results for this step so they don't linger during the new run
+    const stepResultClearers = {
+      2: () => setStep2Results(null),
+      3: () => setStep3Results(null),
+      4: () => setStep4Results(null),
+      5: () => setStep5Results(null),
+      6: () => setStep6Results(null),
+    }
+    stepResultClearers[stepNumber]?.()
+
     setRunningStep(stepName)
     setConsoleOutput(`Submitting Step ${stepNumber} task...\n`)
 
@@ -546,7 +556,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   }
 
   const updateMcIterations = (step, value) => {
-    const v = Math.max(100, Math.min(5000, parseInt(value) || 1000))
+    const maxAllowed = step === 6 ? 10000 : 5000
+    const v = Math.max(100, Math.min(maxAllowed, parseInt(value) || 1000))
     setMcIterations((prev) => ({ ...prev, [step]: v }))
   }
 
@@ -1623,7 +1634,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                         <NumberInput
                           value={mcIterations[6]}
                           min={100}
-                          max={5000}
+                          max={10000}
                           step={100}
                           onChange={(_, val) => updateMcIterations(6, val)}
                           isDisabled={runningStep !== null}
