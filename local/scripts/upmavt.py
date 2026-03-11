@@ -9,7 +9,8 @@ Simone Pagliuca, 2025-2026
 import numpy as np
 from scipy.interpolate import interp1d
 import sys
-from weight_space_definition import (
+import re
+from .weight_space_definition import (
     build_constraint_structure,
 )
 
@@ -24,8 +25,8 @@ def weight_sampler(weight_solutions, criteria, constraint_data=None, use_random_
     """Sample a random set of weights.
 
     Uses direct sampling from precomputed feasible solutions.
-    If ``use_random_weights`` is True, samples unconstrained
-    weights from a Dirichlet distribution.
+    If ``use_random_weights`` is True, falls back to unconstrained
+    Dirichlet sampling.
 
     Parameters
     ----------
@@ -44,7 +45,7 @@ def weight_sampler(weight_solutions, criteria, constraint_data=None, use_random_
     dict
         Mapping criterion_name -> sampled weight.
     """
-    if use_random_weights:
+    if use_random_weights and (not isinstance(weight_solutions, list) or len(weight_solutions) == 0):
         # Dirichlet distribution: uniform random weights
         n = len(criteria)
         raw = np.random.dirichlet(np.ones(n))
@@ -102,6 +103,37 @@ def sample_from_distribution(dist_str):
         else:
             margin = float(margin_str)
         return np.random.uniform(base - margin, base + margin)
+
+    # Histogram-like distribution: (a-b: p%, c-d: q%, ...)
+    if dist_str.startswith('(') and dist_str.endswith(')'):
+        inner = dist_str[1:-1].strip()
+        if inner:
+            ranges = []
+            probs = []
+            parts = [p.strip() for p in inner.split(',') if p.strip()]
+            for part in parts:
+                match = re.match(
+                    r'^([-+]?\d+(?:\.\d+)?)\s*-\s*([-+]?\d+(?:\.\d+)?)\s*:\s*([-+]?\d+(?:\.\d+)?)%$',
+                    part,
+                )
+                if not match:
+                    ranges = []
+                    probs = []
+                    break
+                a = float(match.group(1))
+                b = float(match.group(2))
+                p = float(match.group(3))
+                low, high = (a, b) if a <= b else (b, a)
+                ranges.append((low, high))
+                probs.append(max(0.0, p))
+
+            if ranges:
+                total = sum(probs)
+                if total > 0:
+                    p_norm = [p / total for p in probs]
+                    idx = int(np.random.choice(len(ranges), p=p_norm))
+                    low, high = ranges[idx]
+                    return np.random.uniform(low, high)
 
     # Trapezoidal: TRAP(a, b, c, d[, min_prob])
     if dist_str.startswith('TRAP('):
@@ -184,7 +216,7 @@ def harmonic_mean(intermediate_results):
             denom += weight / value
     if denom > 0:
         return 1.0 / denom
-    return 0.0
+    return 0.001  # Avoid zero
 
 
 # ============================================================================
@@ -217,9 +249,6 @@ def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_list
 
             vf = vf_lists[vf_elicit_idx].get(crit)
             confidence = confidence_lists[vf_elicit_idx].get(crit, 4)
-            
-            if vf is None:
-                continue
             
             # Apply value function
             normalized_value = float(vf(raw_value))
