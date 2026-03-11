@@ -50,6 +50,14 @@ const MODE = {
   FREE: 'free-edit',
 }
 
+const CLAMP_FIELD_LABELS = {
+  low: 'Low threshold',
+  high: 'High threshold',
+  step1: 'Step 3 value',
+  step2: 'Step 4 value',
+  step3: 'Step 5 value',
+}
+
 const clamp = (v, min, max) => {
   const num = Number.isFinite(v) ? v : min
   return Math.min(Math.max(num, min), max)
@@ -127,18 +135,18 @@ const buildGaussianPoints = (range, mean, sigma, count, inverted) => {
 
 const buildMidSplitPoints = (range, shape, midSplit, thresholds) => {
   const anchors = buildThresholdAnchors(shape, thresholds, range)
-  if (midSplit.skipFirst || !midSplit.step1) return anchors
+  if (midSplit.skipFirst || midSplit.step1 === null || midSplit.step1 === undefined) return anchors
 
   const pts = [...anchors]
   const increasing = shape === 'linear_increasing'
 
   pts.push({ x: midSplit.step1, y: 0.5 })
 
-  if (!midSplit.skipSecond && midSplit.step2) {
+  if (!midSplit.skipSecond && midSplit.step2 !== null && midSplit.step2 !== undefined) {
     pts.push({ x: midSplit.step2, y: increasing ? 0.25 : 0.75 })
   }
 
-  if (!midSplit.skipThird && midSplit.step3) {
+  if (!midSplit.skipThird && midSplit.step3 !== null && midSplit.step3 !== undefined) {
     pts.push({ x: midSplit.step3, y: increasing ? 0.75 : 0.25 })
   }
 
@@ -342,6 +350,28 @@ function ValueFunctionPlot({ range, points, thresholds, onDrag, draggable, shape
         </g>
         {points.map((p, idx) => (
           <g key={`${p.x}-${idx}`}>
+            {draggable && dragIndex === idx && (
+              <>
+                <rect
+                  x={toSvgX(p.x) - 34}
+                  y={Math.max(2, toSvgY(p.y) - 30)}
+                  width={68}
+                  height={18}
+                  rx={4}
+                  fill="rgba(26, 32, 44, 0.85)"
+                />
+                <text
+                  x={toSvgX(p.x)}
+                  y={Math.max(14, toSvgY(p.y) - 17)}
+                  textAnchor="middle"
+                  fontSize="10"
+                  fill="#F7FAFC"
+                  fontWeight="600"
+                >
+                  ({p.x.toFixed(2)}, {p.y.toFixed(2)})
+                </text>
+              </>
+            )}
             <circle
               cx={toSvgX(p.x)}
               cy={toSvgY(p.y)}
@@ -373,6 +403,9 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
   const [clampHint, setClampHint] = useState(null)
   const [isSessionLocked, setIsSessionLocked] = useState(false)
   const [isBwtLockActive, setIsBwtLockActive] = useState(false)
+  const midStep1InputRef = useRef(null)
+  const midStep2InputRef = useRef(null)
+  const midStep3InputRef = useRef(null)
   const toast = useToast()
 
   useEffect(() => {
@@ -547,6 +580,17 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
 
   const activeData = active ? valueFunctions[active] : null
   const currentMidStep = active ? (midFlowStep[active] ?? 0) : 0
+  const hasClampWarning = Boolean(clampHint)
+  const clampHintText = useMemo(() => {
+    if (!clampHint) return null
+    const label = CLAMP_FIELD_LABELS[clampHint.field] || 'Value'
+    return `${label} was outside allowed bounds and adjusted to ${clampHint.value}. Enter a valid value to continue.`
+  }, [clampHint])
+
+  useEffect(() => {
+    // Reset field warnings when switching criterion.
+    setClampHint(null)
+  }, [active])
 
   useEffect(() => {
     if (!active || !activeData || activeData.mode !== MODE.MID) return
@@ -605,7 +649,8 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
     const clamped = clamp(valueNum ?? range.min, range.min, range.max)
     if (clamped !== valueNum) {
       setClampHint({ field: key, value: clamped })
-      setTimeout(() => setClampHint(null), 1500)
+    } else if (clampHint?.field === key) {
+      setClampHint(null)
     }
     markDirty((prev) => {
       const updated = { ...prev }
@@ -641,27 +686,80 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
   const handleMidSplitChange = (stepKey, valueNum, shouldClamp = true) => {
     if (!activeData) return
     const { range, shape, thresholds, midSplit } = activeData
-      let finalValue = valueNum ?? thresholds.low
+
+    // Empty input means remove this indifference point.
+    if (valueNum === null) {
+      if (clampHint?.field === stepKey) setClampHint(null)
+      markDirty((prev) => {
+        const updated = { ...prev }
+        const newMidSplit = { ...updated[active].midSplit, [stepKey]: null }
+        if (stepKey === 'step1') {
+          // Step 2 and 3 depend on step 1.
+          newMidSplit.step2 = null
+          newMidSplit.step3 = null
+        }
+        const points = buildMidSplitPoints(range, shape, newMidSplit, updated[active].thresholds)
+        updated[active] = { ...updated[active], midSplit: newMidSplit, mode: MODE.MID, points }
+        return updated
+      })
+      return
+    }
+
+    let finalValue = valueNum ?? thresholds.low
+    const originalValue = valueNum
+    const span = Math.max(range.max - range.min, 1)
+    const strictGap = Math.max(span * 1e-6, 1e-9)
     
     if (shouldClamp) {
-        // Enforce indifference point constraints based on threshold-relative logic
+      // Enforce indifference point constraints based on threshold-relative logic
       if (stepKey === 'step1') {
-          // Step 1 (0.5 point): must be between low and high thresholds
-        finalValue = clamp(finalValue, thresholds.low, thresholds.high)
+        // Step 1 (0.5 point): must be strictly between low and high thresholds
+        const minVal = thresholds.low + strictGap
+        const maxVal = thresholds.high - strictGap
+        finalValue = clamp(finalValue, minVal, maxVal)
       } else if (stepKey === 'step2') {
-          // Step 2 (0.25 point): must be between low threshold and step1
-        const maxVal = midSplit.step1 ?? thresholds.high
-        finalValue = clamp(finalValue, thresholds.low, maxVal)
+        // Step 2: strictly between low threshold and step1
+        const reference = midSplit.step1 ?? thresholds.high
+        const minVal = thresholds.low + strictGap
+        const maxVal = reference - strictGap
+        finalValue = clamp(finalValue, minVal, maxVal)
       } else if (stepKey === 'step3') {
-          // Step 3 (0.75 point): must be between step1 and high threshold
-        const minVal = midSplit.step1 ?? thresholds.low
-        finalValue = clamp(finalValue, minVal, thresholds.high)
+        // Step 3: strictly between step1 and high threshold
+        const reference = midSplit.step1 ?? thresholds.low
+        const minVal = reference + strictGap
+        const maxVal = thresholds.high - strictGap
+        finalValue = clamp(finalValue, minVal, maxVal)
+      }
+
+      if (Number.isFinite(originalValue) && finalValue !== originalValue) {
+        setClampHint({ field: stepKey, value: finalValue })
+      } else if (clampHint?.field === stepKey) {
+        setClampHint(null)
       }
     }
     
     markDirty((prev) => {
       const updated = { ...prev }
-      const newMidSplit = { ...updated[active].midSplit, [stepKey]: finalValue }
+      const previousMidSplit = updated[active].midSplit || {}
+      const newMidSplit = { ...previousMidSplit, [stepKey]: finalValue }
+
+      // Step 2/3 are conditional on step1. If step1 changes after going back,
+      // invalidate downstream indifference points to avoid inconsistent state.
+      if (stepKey === 'step1' && previousMidSplit.step1 !== finalValue) {
+        newMidSplit.step2 = null
+        newMidSplit.step3 = null
+        newMidSplit.skipSecond = false
+        newMidSplit.skipThird = false
+      }
+
+      // If user provides a value for a previously skipped step, re-enable it.
+      if (stepKey === 'step2' && finalValue !== null && finalValue !== undefined) {
+        newMidSplit.skipSecond = false
+      }
+      if (stepKey === 'step3' && finalValue !== null && finalValue !== undefined) {
+        newMidSplit.skipThird = false
+      }
+
       const points = buildMidSplitPoints(range, shape, newMidSplit, updated[active].thresholds)
       updated[active] = { ...updated[active], midSplit: newMidSplit, mode: MODE.MID, points }
       return updated
@@ -706,25 +804,28 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
       return
     }
     if (currentMidStep === 2) {
+      const typedStep1 = commitMidInputForStep('step1')
       if (activeData.midSplit?.skipFirst) {
         setCurrentMidStep(5)
         return
       }
-      if (!(activeData.midSplit?.step1 !== null)) return
+      if (!(typedStep1 !== null || activeData.midSplit?.step1 !== null)) return
       setCurrentMidStep(3)
       return
     }
     if (currentMidStep === 3) {
+      const typedStep2 = commitMidInputForStep('step2')
       if (activeData.midSplit?.skipSecond) {
         setCurrentMidStep(4)
         return
       }
-      if (!(activeData.midSplit?.step2 !== null)) return
+      if (!(typedStep2 !== null || activeData.midSplit?.step2 !== null)) return
       setCurrentMidStep(4)
       return
     }
     if (currentMidStep === 4) {
-      if (activeData.midSplit?.skipThird || activeData.midSplit?.step3 !== null) {
+      const typedStep3 = commitMidInputForStep('step3')
+      if (activeData.midSplit?.skipThird || activeData.midSplit?.step3 !== null || typedStep3 !== null) {
         setCurrentMidStep(5)
         toast({
           title: 'Criterion completed',
@@ -738,6 +839,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
 
   const handleMidDone = () => {
     if (!activeData) return
+    const typedStep3 = commitMidInputForStep('step3')
     if (activeData.midSplit?.skipFirst) {
       setCurrentMidStep(5)
       toast({
@@ -749,7 +851,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
       return
     }
     const secondDone = activeData.midSplit?.skipSecond || activeData.midSplit?.step2 !== null
-    const thirdDone = activeData.midSplit?.skipThird || activeData.midSplit?.step3 !== null
+    const thirdDone = activeData.midSplit?.skipThird || activeData.midSplit?.step3 !== null || typedStep3 !== null
     if (secondDone && thirdDone) {
       setCurrentMidStep(5)
       toast({
@@ -778,6 +880,27 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
       setCurrentMidStep(5)
       return
     }
+  }
+
+  const commitMidInputForStep = (stepKey) => {
+    const refMap = {
+      step1: midStep1InputRef,
+      step2: midStep2InputRef,
+      step3: midStep3InputRef,
+    }
+    const inputRef = refMap[stepKey]
+    const raw = inputRef?.current?.value?.trim()
+    if (raw === undefined) return null
+    if (raw === '') {
+      handleMidSplitChange(stepKey, null, false)
+      return null
+    }
+    const num = parseFloat(raw)
+    if (Number.isFinite(num)) {
+      handleMidSplitChange(stepKey, num, true)
+      return num
+    }
+    return null
   }
 
   const handleGaussianChange = (key, valueNum) => {
@@ -1127,7 +1250,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                           <Button
                             colorScheme="blue"
                             onClick={handleMidNext}
-                            isDisabled={!activeData.midSplit?.directionAnswered}
+                            isDisabled={!activeData.midSplit?.directionAnswered || hasClampWarning}
                           >
                             Next
                           </Button>
@@ -1176,48 +1299,40 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                           </Box>
                           <FormControl maxW="150px">
                             <FormLabel fontSize="sm" m={0} fontWeight="medium">Low threshold</FormLabel>
-                            <Tooltip
-                              isOpen={clampHint?.field === 'low'}
-                              label={`Auto-clamped to ${clampHint?.value}`}
-                              placement="top"
-                            >
-                              <Input
-                                key={`low-${activeData.thresholds.low}`}
-                                type="number"
-                                size="sm"
-                                defaultValue={activeData.thresholds.low}
-                                onBlur={(e) => {
-                                  const num = parseFloat(e.target.value)
-                                  if (Number.isFinite(num)) handleThresholdChange('low', num)
-                                }}
-                              />
-                            </Tooltip>
+                            <Input
+                              key={`low-${activeData.thresholds.low}`}
+                              type="number"
+                              size="sm"
+                              defaultValue={activeData.thresholds.low}
+                              onBlur={(e) => {
+                                const num = parseFloat(e.target.value)
+                                if (Number.isFinite(num)) handleThresholdChange('low', num)
+                              }}
+                            />
                           </FormControl>
                           <FormControl maxW="150px">
                             <FormLabel fontSize="sm" m={0} fontWeight="medium">High threshold</FormLabel>
-                            <Tooltip
-                              isOpen={clampHint?.field === 'high'}
-                              label={`Auto-clamped to ${clampHint?.value}`}
-                              placement="top"
-                            >
-                              <Input
-                                key={`high-${activeData.thresholds.high}`}
-                                type="number"
-                                size="sm"
-                                defaultValue={activeData.thresholds.high}
-                                onBlur={(e) => {
-                                  const num = parseFloat(e.target.value)
-                                  if (Number.isFinite(num)) handleThresholdChange('high', num)
-                                }}
-                              />
-                            </Tooltip>
+                            <Input
+                              key={`high-${activeData.thresholds.high}`}
+                              type="number"
+                              size="sm"
+                              defaultValue={activeData.thresholds.high}
+                              onBlur={(e) => {
+                                const num = parseFloat(e.target.value)
+                                if (Number.isFinite(num)) handleThresholdChange('high', num)
+                              }}
+                            />
                           </FormControl>
                         </HStack>
+                        {(clampHint?.field === 'low' || clampHint?.field === 'high') && clampHintText && (
+                          <Text fontSize="xs" color="orange.600">{clampHintText}</Text>
+                        )}
                         <HStack>
                           <Button variant="outline" onClick={() => setCurrentMidStep(0)}>Back</Button>
                           <Button
                             colorScheme="blue"
                             onClick={handleMidNext}
+                            isDisabled={hasClampWarning}
                           >
                             Next
                           </Button>
@@ -1228,27 +1343,36 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                     {currentMidStep === 2 && (
                       <VStack align="stretch" spacing={3}>
                         <QuestionPrompt>
-                          Step 3: At which point X is equally important to improve <strong>{active}</strong> from <strong>{activeData.thresholds.low}</strong> to <strong>X</strong> as from <strong>X</strong> to <strong>{activeData.thresholds.high}</strong>?
+                          Step 3: At which point X is equally important to {activeData.shape === 'linear_decreasing' ? 'reduce' : 'improve'} <strong>{active}</strong> from <strong>{activeData.shape === 'linear_decreasing' ? activeData.thresholds.high : activeData.thresholds.low}</strong> to <strong>X</strong> as from <strong>X</strong> to <strong>{activeData.shape === 'linear_decreasing' ? activeData.thresholds.low : activeData.thresholds.high}</strong>?
                         </QuestionPrompt>
                         {!activeData.midSplit.skipFirst && (
                           <Input
                             key={`mid-step1-${activeData.midSplit.step1 ?? 'blank'}`}
+                              ref={midStep1InputRef}
                             type="number"
                             defaultValue={activeData.midSplit.step1 ?? ''}
                             placeholder="Enter X"
                             onBlur={(e) => {
-                              const num = parseFloat(e.target.value)
+                              const raw = e.target.value.trim()
+                              if (raw === '') {
+                                handleMidSplitChange('step1', null, false)
+                                return
+                              }
+                              const num = parseFloat(raw)
                               if (Number.isFinite(num)) handleMidSplitChange('step1', num, true)
                             }}
                           />
                         )}
+                        {clampHint?.field === 'step1' && clampHintText && (
+                          <Text fontSize="xs" color="orange.600">{clampHintText}</Text>
+                        )}
                         <HStack>
                           <Button variant="outline" onClick={handleSkipCurrentStep}>Skip</Button>
-                          <Button variant="outline" onClick={() => setCurrentMidStep(1)}>Back</Button>
+                          <Button variant="outline" onClick={() => setCurrentMidStep(1)} isDisabled={hasClampWarning}>Back</Button>
                           <Button
                             colorScheme="blue"
                             onClick={handleMidNext}
-                            isDisabled={!(activeData.midSplit.skipFirst || activeData.midSplit.step1 !== null)}
+                            isDisabled={!(activeData.midSplit.skipFirst || activeData.midSplit.step1 !== null) || hasClampWarning}
                           >
                             Next
                           </Button>
@@ -1260,7 +1384,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                       <VStack align="stretch" spacing={3}>
                         <QuestionPrompt>
                           <Text>
-                            Step 4: At which point X is equally important to improve <strong>{active}</strong> from <strong>{activeData.thresholds.low}</strong> to <strong>X</strong> as from <strong>X</strong> to <strong>{activeData.midSplit.step1 ?? activeData.thresholds.high}</strong>?
+                            Step 4: At which point X is equally important to {activeData.shape === 'linear_decreasing' ? 'reduce' : 'improve'} <strong>{active}</strong> from <strong>{activeData.shape === 'linear_decreasing' ? activeData.midSplit.step1 ?? activeData.thresholds.high : activeData.thresholds.low}</strong> to <strong>X</strong> as from <strong>X</strong> to <strong>{activeData.shape === 'linear_decreasing' ? activeData.thresholds.low : activeData.midSplit.step1 ?? activeData.thresholds.high}</strong>?
                           </Text>
                         </QuestionPrompt>
                         {!activeData.midSplit.skipFirst && (
@@ -1270,23 +1394,32 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                             </Text>
                             <Input
                               key={`mid-step2-${activeData.midSplit.step2 ?? 'blank'}`}
+                                ref={midStep2InputRef}
                               type="number"
                               defaultValue={activeData.midSplit.step2 ?? ''}
                               placeholder="Enter X"
                               onBlur={(e) => {
-                                const num = parseFloat(e.target.value)
+                                const raw = e.target.value.trim()
+                                if (raw === '') {
+                                  handleMidSplitChange('step2', null, false)
+                                  return
+                                }
+                                const num = parseFloat(raw)
                                 if (Number.isFinite(num)) handleMidSplitChange('step2', num, true)
                               }}
                             />
                           </Box>
                         )}
+                        {clampHint?.field === 'step2' && clampHintText && (
+                          <Text fontSize="xs" color="orange.600">{clampHintText}</Text>
+                        )}
                         <HStack>
-                          <Button variant="outline" onClick={handleSkipCurrentStep}>Skip</Button>
-                          <Button variant="outline" onClick={() => setCurrentMidStep(2)}>Back</Button>
+                          <Button variant="outline" onClick={handleSkipCurrentStep} isDisabled={hasClampWarning}>Skip</Button>
+                          <Button variant="outline" onClick={() => setCurrentMidStep(2)} isDisabled={hasClampWarning}>Back</Button>
                           <Button
                             colorScheme="blue"
                             onClick={handleMidNext}
-                            isDisabled={!activeData.midSplit.skipFirst && !(activeData.midSplit.skipSecond || activeData.midSplit.step2 !== null)}
+                            isDisabled={(!activeData.midSplit.skipFirst && !(activeData.midSplit.skipSecond || activeData.midSplit.step2 !== null)) || hasClampWarning}
                           >
                             Next
                           </Button>
@@ -1298,7 +1431,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                       <VStack align="stretch" spacing={3}>
                         <QuestionPrompt>
                           <Text>
-                            Step 5: At which point X is equally important to improve <strong>{active}</strong> from <strong>{activeData.midSplit.step1 ?? activeData.thresholds.low}</strong> to <strong>X</strong> as from <strong>X</strong> to <strong>{activeData.thresholds.high}</strong>?
+                            Step 5: At which point X is equally important to {activeData.shape === 'linear_decreasing' ? 'reduce' : 'improve'} <strong>{active}</strong> from <strong>{activeData.shape === 'linear_decreasing' ? activeData.thresholds.high : activeData.midSplit.step1 ?? activeData.thresholds.low}</strong> to <strong>X</strong> as from <strong>X</strong> to <strong>{activeData.shape === 'linear_decreasing' ? activeData.midSplit.step1 ?? activeData.thresholds.low : activeData.thresholds.high}</strong>?
                           </Text>
                         </QuestionPrompt>
                         {!activeData.midSplit.skipFirst && (
@@ -1308,23 +1441,32 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                             </Text>
                             <Input
                               key={`mid-step3-${activeData.midSplit.step3 ?? 'blank'}`}
+                                ref={midStep3InputRef}
                               type="number"
                               defaultValue={activeData.midSplit.step3 ?? ''}
                               placeholder="Enter X"
                               onBlur={(e) => {
-                                const num = parseFloat(e.target.value)
+                                const raw = e.target.value.trim()
+                                if (raw === '') {
+                                  handleMidSplitChange('step3', null, false)
+                                  return
+                                }
+                                const num = parseFloat(raw)
                                 if (Number.isFinite(num)) handleMidSplitChange('step3', num, true)
                               }}
                             />
                           </Box>
                         )}
+                        {clampHint?.field === 'step3' && clampHintText && (
+                          <Text fontSize="xs" color="orange.600">{clampHintText}</Text>
+                        )}
                         <HStack>
-                          <Button variant="outline" onClick={handleSkipCurrentStep}>Skip</Button>
-                          <Button variant="outline" onClick={() => setCurrentMidStep(3)}>Back</Button>
+                          <Button variant="outline" onClick={handleSkipCurrentStep} isDisabled={hasClampWarning}>Skip</Button>
+                          <Button variant="outline" onClick={() => setCurrentMidStep(3)} isDisabled={hasClampWarning}>Back</Button>
                           <Button
                             colorScheme="blue"
                             onClick={handleMidDone}
-                            isDisabled={!activeData.midSplit.skipFirst && !(activeData.midSplit.skipThird || activeData.midSplit.step3 !== null)}
+                            isDisabled={(!activeData.midSplit.skipFirst && !(activeData.midSplit.skipThird || activeData.midSplit.step3 !== null)) || hasClampWarning}
                           >
                             Done
                           </Button>

@@ -1269,7 +1269,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     setCurrentPairIndex(0)
     setSelectionStep(null)
     setStep('evaluate-pairs')
-    setSliderValue(getDataRange(bestCriterion).min)
+    setSliderValue(getWorstDataValue(bestCriterion))
   }
 
   const upsertComparisonForPair = (pairIndex, value = sliderValue, comps = comparisons) => {
@@ -1321,7 +1321,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         setSliderTouched(false)
         setIsConsistencyError(false)
         const nextComp = getComparisonForPair(currentPairIndex + 1, updatedComparisons)
-        setSliderValue(nextComp ? nextComp.data_value : getDataRange(pairs[currentPairIndex + 1].adjusted).min)
+        setSliderValue(nextComp ? nextComp.data_value : getWorstDataValue(pairs[currentPairIndex + 1].adjusted))
         // Scroll to top
         if (mainContentRef.current) {
           mainContentRef.current.scrollTop = 0
@@ -1377,7 +1377,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       setSliderTouched(false)
       setIsConsistencyError(false)
       const prevComp = getComparisonForPair(currentPairIndex - 1, latestComparisons)
-      setSliderValue(prevComp ? prevComp.data_value : getDataRange(pairs[currentPairIndex - 1].adjusted).min)
+      setSliderValue(prevComp ? prevComp.data_value : getWorstDataValue(pairs[currentPairIndex - 1].adjusted))
       // Scroll to top
       if (mainContentRef.current) {
         mainContentRef.current.scrollTop = 0
@@ -1845,6 +1845,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       const comparison = getComparisonForPair(currentPairIndex)
       const isAllComplete = isGroupComplete(selectedGroupIndex)
       const currentVFValue = interpolateVF(pair.adjusted.criterion_name, sliderValue)
+      const isAdjustedIncreasing = isVFIncreasing(pair.adjusted.criterion_name)
 
       const plot1Data = groupCriteria.map((crit) => {
         const isReference = crit.criterion_name === pair.reference.criterion_name
@@ -1930,6 +1931,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               max={adjustedRange.max}
               step={(adjustedRange.max - adjustedRange.min) / 100}
               value={sliderValue}
+              isReversed={!isAdjustedIncreasing}
               onChange={(value) => {
                 setSliderValue(value)
                 setSliderTouched(true)
@@ -1958,7 +1960,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               <SliderThumb w="20px" h="20px" bg="blue.500" borderRadius="full" border="2px solid white" boxShadow="0 2px 4px rgba(0,0,0,0.2)" />
             </Slider>
             <HStack spacing={2} mt={3} fontSize="sm" color="gray.600" justify="space-between">
-              <Text>{adjustedRange.min.toFixed(2)}</Text>
+              <Text>{(isAdjustedIncreasing ? adjustedRange.min : adjustedRange.max).toFixed(2)}</Text>
               <HStack spacing={3}>
                 <FormLabel mb={0} fontWeight="semibold">
                   "{pair.adjusted.criterion_name}" [{pair.adjusted.unit}]: <strong>{sliderInputValue}</strong>
@@ -2002,7 +2004,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                   />
                 </NumberInput>
               </HStack>
-              <Text>{adjustedRange.max.toFixed(2)}</Text>
+              <Text>{(isAdjustedIncreasing ? adjustedRange.max : adjustedRange.min).toFixed(2)}</Text>
             </HStack>
           </Box>
 
@@ -2356,7 +2358,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                               setCurrentPairIndex(pairIdx)
                               setIsConsistencyError(false)
                               const targetComp = getComparisonForPair(pairIdx, latestComparisons)
-                              setSliderValue(targetComp ? targetComp.data_value : getDataRange(pairs[pairIdx].adjusted).min)
+                              setSliderValue(targetComp ? targetComp.data_value : getWorstDataValue(pairs[pairIdx].adjusted))
                               // Scroll to top
                               if (mainContentRef.current) {
                                 mainContentRef.current.scrollTop = 0
