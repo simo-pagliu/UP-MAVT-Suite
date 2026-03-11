@@ -214,6 +214,8 @@ def harmonic_mean(intermediate_results):
     for weight, value in intermediate_results:
         if value > 0:
             denom += weight / value
+        else:
+            return 0.001  # Avoid zero or negative values in harmonic mean
     if denom > 0:
         return 1.0 / denom
     return 0.001  # Avoid zero
@@ -324,7 +326,23 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
 
         for iteration in range(num_iterations):
             if iteration % 100 == 0:
-                print_fn(f"  Iteration {iteration}/{num_iterations}")
+                n_so_far = iteration  # samples collected before this iteration
+                if n_so_far > 1:
+                    # Average MC_std across elicitations for each alternative
+                    mc_std_parts = []
+                    for alt_name in alternatives.keys():
+                        all_scores = []
+                        for elicit_idx in range(num_elicitations):
+                            all_scores.extend(results[elicit_idx][alt_name])
+                        if len(all_scores) > 1:
+                            arr = np.array(all_scores)
+                            n = len(arr)
+                            mc_std = np.sqrt(1 / (n * (n - 1)) * (np.sum(arr ** 2) - 1 / n * np.sum(arr) ** 2))
+                            mc_std_parts.append(f"{alt_name}={mc_std:.4f}")
+                    std_str = ', '.join(mc_std_parts)
+                    print_fn(f"  Iteration {iteration}/{num_iterations}  MC_std = {std_str}")
+                else:
+                    print_fn(f"  Iteration {iteration}/{num_iterations}")
                 sys.stdout.flush()
             for elicit_idx in range(num_elicitations):
                 sampled_weights = weight_sampler(
@@ -344,7 +362,19 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
 
         for iteration in range(num_iterations):
             if iteration % 100 == 0:
-                print_fn(f"  Iteration {iteration}/{num_iterations}")
+                n_so_far = iteration
+                if n_so_far > 1:
+                    mc_std_parts = []
+                    for alt_name in alternatives.keys():
+                        if len(results[alt_name]) > 1:
+                            arr = np.array(results[alt_name])
+                            n = len(arr)
+                            mc_std = np.sqrt(1 / (n * (n - 1)) * (np.sum(arr ** 2) - 1 / n * np.sum(arr) ** 2))
+                            mc_std_parts.append(f"{alt_name}={mc_std:.4f}")
+                    std_str = ', '.join(mc_std_parts)
+                    print_fn(f"  Iteration {iteration}/{num_iterations}  MC_std = {std_str}")
+                else:
+                    print_fn(f"  Iteration {iteration}/{num_iterations}")
                 sys.stdout.flush()
             weight_elicit_idx = np.random.choice(num_elicitations, p=opinion_weights)
             sampled_weights = weight_sampler(
