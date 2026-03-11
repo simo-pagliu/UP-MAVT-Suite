@@ -1062,12 +1062,12 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
               <VStack align="start" spacing={2} flex={1}>
                 <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
                   {isBwtLockActive
-                    ? 'Value Functions are locked while PILE-BWT is active.'
+                    ? 'Value Functions are locked while weight elicitation is active.'
                     : 'Value Functions are locked by the practitioner.'}
                 </Text>
                 {isBwtLockActive ? (
                   <Button size="xs" variant="outline" onClick={() => onPageChange?.('pile')}>
-                    Go to PILE-BWT to unlock
+                    Go to Weights to unlock
                   </Button>
                 ) : (
                   <Text fontSize="xs" color="yellow.800">

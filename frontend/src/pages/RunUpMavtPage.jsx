@@ -993,7 +993,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   description={
                     <VStack spacing={2} align="stretch">
                       <Text>
-                        The PILE-BWT method computes weights by solving an optimization problem, as described in{' '}
+                        Weight elicitation computes weights by solving an optimization problem, as described in{' '}
                         <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
                           PLACEHOLDER <ExternalLinkIcon mx="2px" />
                         </Link>

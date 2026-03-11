@@ -150,7 +150,7 @@ const buildProgress = (criteria, session) => {
   const steps = [
     { key: 'qi', label: 'QI', done: hasQualitativeIndicators },
     { key: 'vf', label: 'VF', done: hasValueFunctions },
-    { key: 'bwt', label: 'PILE-BWT', done: hasBwt },
+    { key: 'bwt', label: 'Weights', done: hasBwt },
   ]
 
   const completed = steps.filter((s) => s.done).length
@@ -226,7 +226,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
       })
       toast({
         title: 'Features updated',
-        description: `${featureName === 'qi' ? 'QI' : featureName === 'vf' ? 'Value Functions' : 'PILE-BWT'} ${newFeatures[featureName] ? 'enabled' : 'disabled'}`,
+        description: `${featureName === 'qi' ? 'QI' : featureName === 'vf' ? 'Value Functions' : 'Weight elicitation'} ${newFeatures[featureName] ? 'enabled' : 'disabled'}`,
         status: 'success',
         duration: 2000,
         isClosable: true,
@@ -518,7 +518,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
                 isDisabled={savingFeatures}
               >
                 <VStack align="start" spacing={0}>
-                  <Text fontWeight="medium">PILE-BWT</Text>
+                  <Text fontWeight="medium">Weight Elicitation</Text>
                   <Text fontSize="xs" color="gray.600">Criteria with optional min/max</Text>
                 </VStack>
               </Checkbox>
@@ -600,7 +600,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
                           onClick={() => handleDownload(`/session/${session._id}/pile/export`, `pile_bwt_${session.name}.csv`)}
                           isDisabled={!session.progress.hasBwt}
                         >
-                          PILE-BWT
+                          Weight Elicitation
                         </MenuItem>
                         <MenuItem
                           onClick={() => handleDownload(`/session/${session._id}/pile/export-debug`, `pile_bwt_debug_a_values_${session.name}.csv`)}

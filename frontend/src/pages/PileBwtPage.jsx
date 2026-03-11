@@ -411,7 +411,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     if (isSessionLocked && !bwtLockActive) {
       toast({
         title: 'Session locked by practitioner',
-        description: 'BWT updates are disabled until the practitioner/admin unlocks the session.',
+        description: 'Weight elicitation updates are disabled until the practitioner/admin unlocks the session.',
         status: 'warning',
         isClosable: true,
       })
@@ -487,7 +487,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       setConsistencyConstraints({})
       setIsConsistencyError(false)
       toast({
-        title: 'PILE-BWT reset',
+        title: 'Weight elicitation reset',
         description: 'Outdated comparisons were reset after criteria changes.',
         status: 'warning',
         isClosable: true,
@@ -495,7 +495,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     } catch (error) {
       toast({
         title: 'Request failed',
-        description: error.response?.data?.error || 'Failed to reset PILE-BWT data',
+        description: error.response?.data?.error || 'Failed to reset weight elicitation data',
         status: 'error',
         isClosable: true,
       })
@@ -556,7 +556,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       setIsConsistencyError(false)
       
       toast({
-        title: 'PILE-BWT partially reset',
+        title: 'Weight elicitation partially reset',
         description: `Removed ${removedCount} comparison(s) involving: ${criterionNames.join(', ')}`,
         status: 'warning',
         isClosable: true,
@@ -564,7 +564,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     } catch (error) {
       toast({
         title: 'Request failed',
-        description: error.response?.data?.error || 'Failed to reset affected PILE-BWT comparisons',
+        description: error.response?.data?.error || 'Failed to reset affected weight elicitation comparisons',
         status: 'error',
         isClosable: true,
       })
@@ -617,7 +617,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       if (hasIntraW) resetGroups.push('intra-W')
       
       toast({
-        title: 'PILE-BWT partially reset',
+        title: 'Weight elicitation partially reset',
         description: `Reset groups: ${resetGroups.join(', ')} after QI/VF changes.`,
         status: 'warning',
         isClosable: true,
@@ -625,7 +625,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     } catch (error) {
       toast({
         title: 'Request failed',
-        description: error.response?.data?.error || 'Failed to reset affected PILE-BWT groups',
+        description: error.response?.data?.error || 'Failed to reset affected weight elicitation groups',
         status: 'error',
         isClosable: true,
       })
@@ -742,7 +742,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     if (isSessionLocked && !bwtLockActive) {
       toast({
         title: 'Session locked by practitioner',
-        description: 'BWT editing is disabled. Ask the practitioner/admin to unlock.',
+        description: 'Weight elicitation editing is disabled. Ask the practitioner/admin to unlock.',
         status: 'warning',
         isClosable: true,
       })
@@ -752,7 +752,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     if (!bwtLockActive) {
       toast({
         title: 'Lock required',
-        description: 'Please lock QI/VF from the banner above before editing PILE-BWT.',
+        description: 'Please lock QI/VF from the banner above before editing weight elicitation.',
         status: 'info',
         isClosable: true,
       })
@@ -1182,7 +1182,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     if (isSessionLocked && !bwtLockActive) {
       toast({
         title: 'Session locked by practitioner',
-        description: 'BWT editing is disabled. Ask the practitioner/admin to unlock.',
+        description: 'Weight elicitation editing is disabled. Ask the practitioner/admin to unlock.',
         status: 'warning',
         isClosable: true,
       })
@@ -1192,7 +1192,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     if (!bwtLockActive) {
       toast({
         title: 'Lock required',
-        description: 'Please lock QI/VF from the banner above before starting PILE-BWT.',
+        description: 'Please lock QI/VF from the banner above before starting weight elicitation.',
         status: 'info',
         isClosable: true,
       })
@@ -1214,7 +1214,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       syncBwtSignatures()
       toast({
         title: 'QI/VF locked',
-        description: 'You can now start PILE-BWT elicitation.',
+        description: 'You can now start weight elicitation.',
         status: 'success',
         isClosable: true,
       })
@@ -1404,7 +1404,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     } catch (error) {
       toast({
         title: 'Request failed',
-        description: error.response?.data?.error || 'Failed to save BWT data',
+        description: error.response?.data?.error || 'Failed to save weight elicitation data',
         status: 'error',
         isClosable: true,
       })
@@ -1449,7 +1449,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
           <VStack spacing={4} textAlign="center" maxW="500px">
             <Heading size="lg" color="orange.600">Qualitative Indicators Required</Heading>
             <Text color="gray.700" fontSize="md">
-              You must complete the elicitation of all qualitative indicators before proceeding with the PILE-BWT analysis.
+              You must complete the elicitation of all qualitative indicators before proceeding with weight elicitation.
             </Text>
             <Button
               colorScheme="blue"
@@ -1482,9 +1482,9 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               <Alert status="error" borderRadius="md" textAlign="left" w="100%">
                 <AlertIcon />
                 <Box flex="1">
-                  <AlertTitle>BWT invalid</AlertTitle>
+                  <AlertTitle>Weight elicitation invalid</AlertTitle>
                   <AlertDescription>
-                    The criteria have changed since the last elicitation. Please reset and redo the BWT process.
+                    The criteria have changed since the last elicitation. Please reset and redo weight elicitation.
                   </AlertDescription>
                 </Box>
                 <HStack spacing={2} ml={4}>
@@ -1503,7 +1503,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                     onClick={handleCriteriaMismatchReset}
                     isLoading={saving}
                   >
-                    Reset BWT
+                    Reset weight elicitation
                   </Button>
                 </HStack>
               </Alert>
@@ -1543,9 +1543,9 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               <Alert status="error" borderRadius="md">
                 <AlertIcon />
                 <Box flex="1">
-                  <AlertTitle>BWT invalid</AlertTitle>
+                  <AlertTitle>Weight elicitation invalid</AlertTitle>
                   <AlertDescription>
-                    The criteria have changed since the last elicitation. Please reset and redo the BWT process.
+                    The criteria have changed since the last elicitation. Please reset and redo weight elicitation.
                   </AlertDescription>
                 </Box>
                 <HStack spacing={2} ml={4}>
@@ -1564,7 +1564,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                     onClick={handleCriteriaMismatchReset}
                     isLoading={saving}
                   >
-                    Reset BWT
+                    Reset weight elicitation
                   </Button>
                 </HStack>
               </Alert>
@@ -1777,9 +1777,9 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             <Alert status="error" borderRadius="md">
               <AlertIcon />
               <Box flex="1">
-                <AlertTitle>BWT invalid</AlertTitle>
+                <AlertTitle>Weight elicitation invalid</AlertTitle>
                 <AlertDescription>
-                  The criteria have changed since the last elicitation. Please reset and redo the BWT process.
+                  The criteria have changed since the last elicitation. Please reset and redo weight elicitation.
                 </AlertDescription>
               </Box>
               <HStack spacing={2} ml={4}>
@@ -1798,7 +1798,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                   onClick={handleCriteriaMismatchReset}
                   isLoading={saving}
                 >
-                  Reset BWT
+                  Reset weight elicitation
                 </Button>
               </HStack>
             </Alert>
@@ -1880,9 +1880,9 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             <Alert status="error" borderRadius="md">
               <AlertIcon />
               <Box flex="1">
-                <AlertTitle>BWT invalid</AlertTitle>
+                <AlertTitle>Weight elicitation invalid</AlertTitle>
                 <AlertDescription>
-                  The criteria have changed since the last elicitation. Please reset and redo the BWT process.
+                  The criteria have changed since the last elicitation. Please reset and redo weight elicitation.
                 </AlertDescription>
               </Box>
               <HStack spacing={2} ml={4}>
@@ -1901,7 +1901,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                   onClick={handleCriteriaMismatchReset}
                   isLoading={saving}
                 >
-                  Reset BWT
+                  Reset weight elicitation
                 </Button>
               </HStack>
             </Alert>
@@ -2244,7 +2244,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         <VStack spacing={4} align="stretch" mb={6}>
           <Heading size="md">Weights</Heading>
           <Text fontSize="sm" color="gray.600">
-            Apply the PILE-BWT method, perform pairwise comparisons to determine the weights of each criteria.
+            Perform pairwise comparisons to determine criterion weights.
           </Text>
         </VStack>
         <VStack spacing={3} align="stretch">
@@ -2451,7 +2451,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               <InfoIcon color="blue.600" />
               <VStack align="start" spacing={2} flex={1}>
                 <Text fontSize="sm" color="blue.800" fontWeight="semibold">
-                  To work on PILE-BWT, you need to lock QI and VF pages. PILE-BWT remains editable while locked.
+                  To work on weight elicitation, you need to lock QI and VF pages. Weight elicitation remains editable while locked.
                 </Text>
                 <Button size="xs" colorScheme="blue" onClick={handleLockForBwt} isLoading={saving}>
                   Lock QI/VF to continue
@@ -2465,7 +2465,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               <CheckCircleIcon color="green.600" />
               <VStack align="start" spacing={2} flex={1}>
                 <Text fontSize="sm" color="green.800" fontWeight="semibold">
-                  QI and VF are locked. You can now work on PILE-BWT elicitation.
+                  QI and VF are locked. You can now work on weight elicitation.
                 </Text>
                 {!showUnlockConfirm ? (
                   <Button size="xs" variant="outline" colorScheme="green" onClick={() => setShowUnlockConfirm(true)} isLoading={saving}>
@@ -2493,7 +2493,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               <WarningIcon color="red.600" />
               <VStack align="start" spacing={1} flex={1}>
                 <Text fontSize="sm" color="red.800" fontWeight="semibold">
-                  This session is locked by the practitioner. PILE-BWT editing is disabled.
+                  This session is locked by the practitioner. Weight elicitation editing is disabled.
                 </Text>
                 <Text fontSize="xs" color="red.700">
                   Ask the practitioner/admin to unlock this session.
@@ -2516,7 +2516,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               <Box>
                 <AlertTitle>Qualitative Indicators Required</AlertTitle>
                 <AlertDescription>
-                  Please complete the elicitation of all qualitative indicators before proceeding with the PILE-BWT analysis.
+                  Please complete the elicitation of all qualitative indicators before proceeding with weight elicitation.
                 </AlertDescription>
               </Box>
             </HStack>

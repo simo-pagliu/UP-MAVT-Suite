@@ -66,7 +66,7 @@ export const isValueFunctionsComplete = (criteria, valueFunctions) => {
 }
 
 /**
- * Returns `true` when the PILE-BWT comparison data contains enough comparisons
+ * Returns `true` when the weight elicitation comparison data contains enough comparisons
  * for every criterion group, and — when multiple groups exist — also enough
  * intra-B and intra-W comparisons to rank the groups relative to each other.
  *
