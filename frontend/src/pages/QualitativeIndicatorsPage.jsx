@@ -180,29 +180,28 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
       
       // Remove from source
       const sourceTierIdx = dragSource.tierIdx
+      const sourceTierSize = newTiers[sourceTierIdx].length
       newTiers[sourceTierIdx].splice(dragSource.itemIdx, 1)
-      
-      // Remove empty tiers and track how positions shift
-      const filteredTiers = []
-      let removedBeforeInsertPoint = 0
-      let removedBeforeSource = 0
-      
-      newTiers.forEach((tier, idx) => {
-        if (tier.length > 0) {
-          filteredTiers.push(tier)
-        } else {
-          if (idx <= afterTierIdx) removedBeforeInsertPoint++
-          if (idx < sourceTierIdx) removedBeforeSource++
-        }
-      })
-      
-      // Adjust insert position based on removed tiers
-      let insertIdx = afterTierIdx + 1 - removedBeforeInsertPoint
-      
-      // If source was before insert point and got removed, adjust further
-      if (sourceTierIdx <= afterTierIdx && newTiers[sourceTierIdx].length === 0) {
-        insertIdx--
+      const sourceTierWasRemoved = newTiers[sourceTierIdx].length === 0
+
+      // If the source tier had a single item, dropping on the immediately-adjacent
+      // between-tier slots should be a no-op (no effective rank change).
+      if (sourceTierSize === 1 && (afterTierIdx === sourceTierIdx - 1 || afterTierIdx === sourceTierIdx)) {
+        return prev
       }
+      
+      const filteredTiers = newTiers.filter((tier) => tier.length > 0)
+
+      // Insert after the target tier in original coordinates.
+      let insertIdx = afterTierIdx + 1
+
+      // If the source tier disappeared before this insertion boundary,
+      // the filtered array is shorter by one at that point.
+      if (sourceTierWasRemoved && sourceTierIdx <= afterTierIdx) {
+        insertIdx -= 1
+      }
+
+      insertIdx = clamp(insertIdx, 0, filteredTiers.length)
       
       // Insert new tier at the calculated position
       filteredTiers.splice(insertIdx, 0, [{ name: draggedItem, rank: insertIdx }])

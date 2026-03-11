@@ -702,6 +702,11 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     if (!sessionDoc || comparisons.length === 0 || weightSamples.length === 0) return { data: [], comparisons: [] }
 
     const valueFunctionMap = sessionDoc?.value_functions?.criteria || {}
+    const criteriaMetaMap = Object.fromEntries(
+      (criteria || [])
+        .filter((criterion) => criterion?.criterion_name)
+        .map((criterion) => [criterion.criterion_name, criterion])
+    )
     const allDataPoints = []
     const comparisonLabels = []
 
@@ -712,8 +717,15 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
       if (!referenceCriterion || !adjustedCriterion || !Number.isFinite(comparisonValue)) return
 
+      const adjustedCriterionMeta = criteriaMetaMap?.[adjustedCriterion]
+      const isQualitativeAdjusted = Boolean(adjustedCriterionMeta?.is_qualitative)
       const adjustedVFPoints = valueFunctionMap?.[adjustedCriterion]?.points
-      const vfValue = interpolateValueFunction(adjustedVFPoints, comparisonValue)
+
+      // Qualitative indicators are modeled with identity VF in computation: vf(x)=x.
+      // Ignore any stale stored VF points to keep consistency with worker constraints.
+      const vfValue = isQualitativeAdjusted
+        ? comparisonValue
+        : interpolateValueFunction(adjustedVFPoints, comparisonValue)
       const declaredRatio = Number.isFinite(vfValue) && vfValue > 0 ? (1 / vfValue) : null
 
       const computedRatios = weightSamples

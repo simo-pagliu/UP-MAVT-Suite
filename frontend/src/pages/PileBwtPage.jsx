@@ -712,6 +712,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             (c) =>
               c.reference_criterion === targetPair.reference.criterion_name &&
               c.adjusted_criterion === targetPair.adjusted.criterion_name &&
+              c.type === targetPair.type &&
               c.group === groupName
           )
           setSliderValue(existing ? existing.data_value : getWorstDataValue(targetPair.adjusted))
@@ -1278,6 +1279,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     const filtered = comps.filter(
       (c) => !(c.reference_criterion === pair.reference.criterion_name &&
         c.adjusted_criterion === pair.adjusted.criterion_name &&
+        c.type === pair.type &&
         c.group === allGroups[selectedGroupIndex].name)
     )
     return [...filtered, newComparison]
@@ -1409,6 +1411,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     return comps.find(
       (c) => c.reference_criterion === pair.reference.criterion_name &&
         c.adjusted_criterion === pair.adjusted.criterion_name &&
+        c.type === pair.type &&
         c.group === groupName
     )
   }

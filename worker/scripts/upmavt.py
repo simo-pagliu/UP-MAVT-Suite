@@ -9,6 +9,7 @@ Simone Pagliuca, 2025-2026
 import numpy as np
 from scipy.interpolate import interp1d
 import sys
+import re
 from .weight_space_definition import (
     build_constraint_structure,
 )
@@ -102,6 +103,37 @@ def sample_from_distribution(dist_str):
         else:
             margin = float(margin_str)
         return np.random.uniform(base - margin, base + margin)
+
+    # Histogram-like distribution: (a-b: p%, c-d: q%, ...)
+    if dist_str.startswith('(') and dist_str.endswith(')'):
+        inner = dist_str[1:-1].strip()
+        if inner:
+            ranges = []
+            probs = []
+            parts = [p.strip() for p in inner.split(',') if p.strip()]
+            for part in parts:
+                match = re.match(
+                    r'^([-+]?\d+(?:\.\d+)?)\s*-\s*([-+]?\d+(?:\.\d+)?)\s*:\s*([-+]?\d+(?:\.\d+)?)%$',
+                    part,
+                )
+                if not match:
+                    ranges = []
+                    probs = []
+                    break
+                a = float(match.group(1))
+                b = float(match.group(2))
+                p = float(match.group(3))
+                low, high = (a, b) if a <= b else (b, a)
+                ranges.append((low, high))
+                probs.append(max(0.0, p))
+
+            if ranges:
+                total = sum(probs)
+                if total > 0:
+                    p_norm = [p / total for p in probs]
+                    idx = int(np.random.choice(len(ranges), p=p_norm))
+                    low, high = ranges[idx]
+                    return np.random.uniform(low, high)
 
     # Trapezoidal: TRAP(a, b, c, d[, min_prob])
     if dist_str.startswith('TRAP('):

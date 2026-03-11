@@ -92,8 +92,8 @@ export function parseDistribution(str) {
     }
   }
 
-  // Trapezoid: "TRAP(min, peak_start, peak_end, max, base_prob)"
-  const trapezoidMatch = str.match(/^TRAP\(([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\)$/)
+  // Trapezoid: "TRAP(min, peak_start, peak_end, max[, base_prob])"
+  const trapezoidMatch = str.match(/^TRAP\(([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)\s*,\s*([-+]?\d+(?:\.\d+)?)(?:\s*,\s*([-+]?\d+(?:\.\d+)?))?\)$/)
   if (trapezoidMatch) {
     return {
       type: 'trapezoid',
@@ -101,7 +101,7 @@ export function parseDistribution(str) {
       peak_start: parseFloat(trapezoidMatch[2]),
       peak_end: parseFloat(trapezoidMatch[3]),
       max: parseFloat(trapezoidMatch[4]),
-      base_prob: parseFloat(trapezoidMatch[5])
+      base_prob: trapezoidMatch[5] !== undefined ? parseFloat(trapezoidMatch[5]) : 0
     }
   }
   
