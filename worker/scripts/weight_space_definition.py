@@ -268,6 +268,29 @@ def _build_smooth_slsqp_constraints(constraint_data, z_cap, use_non_linear_model
         constraints.append({'type': 'ineq', 'fun': _upper})
         constraints.append({'type': 'ineq', 'fun': _lower})
 
+    # # Append fake multi group constaints
+    # comp_copy = constraint_data['comparisons'][0]
+    # ref_crit = comp_copy['REFERENCE_CRITERION']
+    # adj_crit = comp_copy['ADJUSTED_CRITERION']
+    # comp_value = comp_copy['DATA_VALUE']
+    # ref_idx = constraint_data['criterion_to_index'][ref_crit]
+    # adj_idx = constraint_data['criterion_to_index'][adj_crit]
+    # # Print name of the two criteria used in the fake multi-group constraint for debugging
+    # print(f"Adding fake multi-group constraints between '{ref_crit}' and '{adj_crit}' with value {comp_value} and z_cap {z_cap:.6f}")
+    # def _fake_multi_group_upper(w, ri=ref_idx, ai=adj_idx, z=z_cap):
+    #     return z - (1 - (w[ai] + EPS) / (w[ai] + EPS))
+    # constraints.append({'type': 'ineq', 'fun': _fake_multi_group_upper})
+    # def _fake_multi_group_lower(w, ri=ref_idx, ai=adj_idx, z=z_cap):
+    #     return z + (1 - (w[ai] + EPS) / (w[ai] + EPS))
+    # constraints.append({'type': 'ineq', 'fun': _fake_multi_group_lower})
+    # def _fake_multi_group_upper(w, ri=ref_idx, ai=adj_idx, z=z_cap):
+    #     return z - (1 - (w[ri] + EPS) / (w[ri] + EPS))
+    # constraints.append({'type': 'ineq', 'fun': _fake_multi_group_upper})
+    # def _fake_multi_group_lower(w, ri=ref_idx, ai=adj_idx, z=z_cap):
+    #     return z + (1 - (w[ri] + EPS) / (w[ri] + EPS))
+    # constraints.append({'type': 'ineq', 'fun': _fake_multi_group_lower})
+
+
     return constraints
 
 
