@@ -720,6 +720,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     )
     const allDataPoints = []
     const comparisonLabels = []
+    const COMPARISON_BAND = 0.7
 
     comparisons.forEach((comparison, idx) => {
       const referenceCriterion = comparison?.reference_criterion
@@ -757,17 +758,26 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       allDataPoints.push({
         comparison: comparisonLabel,
         yIndex: idx,
+        yPlot: idx,
         value: Number(declaredRatio.toFixed(4)),
-        type: 'declared'
+        type: 'declared',
       })
 
-      // Add all computed ratios as individual points
-      computedRatios.forEach((ratio) => {
+      // Add each computed ratio as an individual plotted point.
+      // A tiny deterministic vertical spread avoids exact point overlap.
+      const totalComputed = computedRatios.length
+      computedRatios.forEach((ratio, solutionIndex) => {
+        const localOffset = totalComputed === 1
+          ? 0
+          : ((solutionIndex / (totalComputed - 1)) - 0.5) * COMPARISON_BAND
+
         allDataPoints.push({
           comparison: comparisonLabel,
           yIndex: idx,
+          yPlot: idx + localOffset,
           value: Number(ratio.toFixed(4)),
-          type: 'computed'
+          type: 'computed',
+          solutionIndex,
         })
       })
     })
@@ -1105,12 +1115,18 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                 tick={{ fontSize: 10 }}
                               />
                               <YAxis
-                                type="category"
-                                dataKey="comparison"
+                                type="number"
+                                dataKey="yPlot"
                                 name="Comparison"
                                 width={240}
                                 tick={{ fontSize: 10 }}
                                 interval={0}
+                                domain={[
+                                  -0.5,
+                                  Math.max(0, step1ConsistencyComparisons.length - 1) + 0.5,
+                                ]}
+                                ticks={step1ConsistencyComparisons.map((_, idx) => idx)}
+                                tickFormatter={(value) => step1ConsistencyComparisons[Math.round(value)] || ''}
                               />
                               <RechartsTooltip
                                 cursor={{ strokeDasharray: '3 3' }}
@@ -1123,6 +1139,11 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                       <Text fontSize="xs" color={payload[0].color}>
                                         {payload[0].name}: {Number(data.value).toFixed(4)}
                                       </Text>
+                                      {data.type === 'computed' && Number.isInteger(data.solutionIndex) && (
+                                        <Text fontSize="xs" color="gray.600">
+                                          Solution #{data.solutionIndex + 1}
+                                        </Text>
+                                      )}
                                     </Box>
                                   )
                                 }}
