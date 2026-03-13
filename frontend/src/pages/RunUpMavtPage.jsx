@@ -57,6 +57,19 @@ import {
 } from '../utils/sessionUtils'
 
 const STEP2_COLORS = ['#3182CE', '#E57373', '#C77DFF', '#4DD0E1', '#38A169', '#D69E2E']
+const PHASE1_METHOD_OPTIONS = [
+  { value: 'constraint_dominated_ea', label: 'Constraint-dominated evolutionary search (CDS)' },
+  { value: 'differential_evolution', label: 'Differential Evolution (legacy)' },
+]
+const WEIGHT_SAMPLING_OPTIONS = [
+  { value: 'lhs_simplex', label: 'Latin Hypercube + simplex map' },
+  { value: 'dirichlet', label: 'Direct Dirichlet sampling' },
+  { value: 'sobol_simplex', label: 'Sobol low-discrepancy + simplex map' },
+  { value: 'ball_walk', label: 'Ball walk from feasible anchor' },
+  { value: 'adaptive_dirichlet', label: 'Adaptive Dirichlet search' },
+  { value: 'multistart_optimization', label: 'Multi-start optimization' },
+  { value: 'extreme_points', label: 'Extreme-point search' },
+]
 
 // ============================================================================
 // MAIN COMPONENT
@@ -98,6 +111,9 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [selectedWeightSession, setSelectedWeightSession] = useState('')
   const [weightSpaceData, setWeightSpaceData] = useState(null)
   const [useNonLinearModel, setUseNonLinearModel] = useState(true)
+  const [phase1Method, setPhase1Method] = useState('constraint_dominated_ea')
+  const [weightSamplingMethod, setWeightSamplingMethod] = useState('lhs_simplex')
+  const [phase3TolerancePct, setPhase3TolerancePct] = useState(1)
 
   // Step 2 results state
   const [step2Results, setStep2Results] = useState(null)
@@ -113,6 +129,15 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   // Derived state
   const weightsComputed = workflowStatus?.weights?.computed === true
   const weightsTimestamp = workflowStatus?.weights?.timestamp
+  const persistedPhase1Method = workflowStatus?.weights?.phase1_method || 'constraint_dominated_ea'
+  const persistedPhase1MethodLabel = PHASE1_METHOD_OPTIONS.find(
+    (option) => option.value === persistedPhase1Method
+  )?.label || persistedPhase1Method
+  const persistedWeightMethod = workflowStatus?.weights?.method || 'lhs_simplex'
+  const persistedWeightMethodLabel = WEIGHT_SAMPLING_OPTIONS.find(
+    (option) => option.value === persistedWeightMethod
+  )?.label || persistedWeightMethod
+  const persistedPhase3TolerancePct = Number(workflowStatus?.weights?.phase3_tolerance_pct ?? 1)
 
   // ============================================================================
   // LOAD DATA
@@ -223,6 +248,23 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     fetchSessions()
     fetchWorkflowStatus()
   }, [studySessionId, toast, fetchWorkflowStatus])
+
+  useEffect(() => {
+    if (workflowStatus?.weights?.phase1_method) {
+      setPhase1Method(workflowStatus.weights.phase1_method)
+    }
+    if (workflowStatus?.weights?.method) {
+      setWeightSamplingMethod(workflowStatus.weights.method)
+    }
+    if (workflowStatus?.weights?.phase3_tolerance_pct !== undefined) {
+      const pct = Number(workflowStatus.weights.phase3_tolerance_pct)
+      setPhase3TolerancePct(Number.isFinite(pct) ? pct : 1)
+    }
+  }, [
+    workflowStatus?.weights?.phase1_method,
+    workflowStatus?.weights?.method,
+    workflowStatus?.weights?.phase3_tolerance_pct,
+  ])
 
   // Fetch step 2 results when step 2 is completed
   useEffect(() => {
@@ -401,6 +443,9 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         {
           selected_session_ids: selectedSessions,
           use_non_linear_model: useNonLinearModel,
+          phase1_method: phase1Method,
+          weight_sampling_method: weightSamplingMethod,
+          phase3_tolerance_pct: phase3TolerancePct,
         }
       )
       const taskId = response.data.task_id
@@ -1014,19 +1059,20 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   description={
                     <VStack spacing={2} align="stretch">
                       <Text>
-                        Weight elicitation computes weights by solving an optimization problem, as described in{' '}
+                        Step 1 first finds the minimum attainable constraint violation for the selected sessions, then applies the chosen
+                        Phase 2 method to generate candidate weights and filters them into the stored weight space. This lets you compare
+                        direct simplex sampling, low-discrepancy coverage, feasible-region walks, and optimization-based searches from the same UI.
+                      </Text>
+                      <Text>
+                        The current worker implementation supports multiple candidate-generation strategies so you can test how strongly the
+                        final stored weight space depends on the exploration method rather than on the feasibility filter alone.
+                      </Text>
+                      <Text>
+                        For background on the general workflow, see{' '}
                         <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
                           PLACEHOLDER <ExternalLinkIcon mx="2px" />
                         </Link>
-                        . The process begins with a local solver based on{' '}
-                        <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
-                          PLACEHOLDER <ExternalLinkIcon mx="2px" />
-                        </Link>
-                        {' '}to obtain an initial valid solution. Following this, the Differential Evolution algorithm ({' '}
-                        <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
-                          PLACEHOLDER <ExternalLinkIcon mx="2px" />
-                        </Link>
-                        ) is applied to explore the full range of possible weights, thereby defining the weight space.
+                        .
                       </Text>
                       <Alert status="info" borderRadius="md">
                         <AlertIcon />
@@ -1052,6 +1098,62 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onToggleConsole={() => setShowConsole(!showConsole)}
                   parameters={
                     <VStack spacing={2} align="stretch">
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>Phase 1 method (compute z*)</Text>
+                        <Select
+                          value={phase1Method}
+                          onChange={(e) => setPhase1Method(e.target.value)}
+                          isDisabled={runningStep !== null || !useNonLinearModel}
+                        >
+                          {PHASE1_METHOD_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </Select>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Select how Phase 1 computes the minimum violation bound before Phase 2 sampling starts.
+                        </Text>
+                      </Box>
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>Weight space method</Text>
+                        <Select
+                          value={weightSamplingMethod}
+                          onChange={(e) => setWeightSamplingMethod(e.target.value)}
+                          isDisabled={runningStep !== null || !useNonLinearModel}
+                        >
+                          {WEIGHT_SAMPLING_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </Select>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Applies only to the non-linear model. The linear model still returns the single Phase 1 optimum.
+                        </Text>
+                      </Box>
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>Phase 3 tolerance LIM (%)</Text>
+                        <NumberInput
+                          value={phase3TolerancePct}
+                          min={0}
+                          max={100}
+                          step={0.1}
+                          precision={2}
+                          isDisabled={runningStep !== null || !useNonLinearModel}
+                          onChange={(_, valueAsNumber) => {
+                            if (Number.isFinite(valueAsNumber)) {
+                              const clamped = Math.max(0, Math.min(100, valueAsNumber))
+                              setPhase3TolerancePct(clamped)
+                            }
+                          }}
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Phase 3 filtering uses z_cap = z_star + z_star * LIM. Default is 1%.
+                        </Text>
+                      </Box>
                       <Checkbox
                         isChecked={useNonLinearModel}
                         onChange={(e) => setUseNonLinearModel(e.target.checked)}
@@ -1068,6 +1170,9 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     weightsComputed ? (
                       <HStack spacing={3}>
                         <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Weights computed</Badge>
+                        <Badge colorScheme="purple" fontSize="sm" px={2} py={1}>{persistedPhase1MethodLabel}</Badge>
+                        <Badge colorScheme="blue" fontSize="sm" px={2} py={1}>{persistedWeightMethodLabel}</Badge>
+                        <Badge colorScheme="orange" fontSize="sm" px={2} py={1}>LIM {persistedPhase3TolerancePct}%</Badge>
                         <Text fontSize="sm" color="gray.500">{formatTimestamp(weightsTimestamp)}</Text>
                         <Button size="xs" colorScheme="orange" variant="outline" onClick={handleResetWeights}>
                           Reset Weights
@@ -1998,11 +2103,12 @@ function StepSection({
   statusInfo,
   children,
 }) {
-  const consoleEndRef = useRef(null)
+  const consoleBodyRef = useRef(null)
 
   useEffect(() => {
-    if (showConsole && consoleEndRef.current) {
-      consoleEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    if (showConsole && consoleBodyRef.current) {
+      // Keep the console scrolled to the latest output without moving the page viewport.
+      consoleBodyRef.current.scrollTop = consoleBodyRef.current.scrollHeight
     }
   }, [consoleOutput, showConsole])
 
@@ -2054,6 +2160,7 @@ function StepSection({
       {showConsole && (
         <Box bg="gray.900" p={4} borderRadius="md" color="green.300" fontFamily="monospace" fontSize="sm">
           <Box
+            ref={consoleBodyRef}
             maxH="350px"
             overflowY="auto"
             whiteSpace="pre-wrap"
@@ -2062,7 +2169,6 @@ function StepSection({
             fontSize="xs"
           >
             {consoleOutput || 'No output yet...'}
-            <div ref={consoleEndRef} />
           </Box>
         </Box>
       )}

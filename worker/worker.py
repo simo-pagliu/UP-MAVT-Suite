@@ -88,10 +88,20 @@ def handle_compute_weights(task):
     study_session_id = params.get('study_session_id')
     selected_session_ids = params.get('selected_session_ids', [])
     use_non_linear_model = bool(params.get('use_non_linear_model', True))
+    phase1_method = params.get('phase1_method', 'constraint_dominated_ea')
+    weight_sampling_method = params.get('weight_sampling_method', 'lhs_simplex')
+    phase3_tolerance_pct = params.get('phase3_tolerance_pct', 1.0)
+    try:
+        phase3_tolerance_pct = max(0.0, float(phase3_tolerance_pct))
+    except (TypeError, ValueError):
+        phase3_tolerance_pct = 1.0
 
     try:
         logger.log("=" * 60)
         logger.log(f"Model: {'non-linear' if use_non_linear_model else 'linear'}")
+        logger.log(f"Phase 1 method: {phase1_method}")
+        logger.log(f"Weight sampling method: {weight_sampling_method}")
+        logger.log(f"Phase 3 tolerance LIM (%): {phase3_tolerance_pct}")
         logger.log("COMPUTE WEIGHTS")
         logger.log("=" * 60)
 
@@ -123,6 +133,9 @@ def handle_compute_weights(task):
                     criteria_names=criteria_names,
                     print_fn=logger.log,
                     use_non_linear_model=use_non_linear_model,
+                    phase1_method=phase1_method,
+                    weight_sampling_method=weight_sampling_method,
+                    phase3_tolerance_pct=phase3_tolerance_pct,
                 )
                 weight_solutions[session_id] = ws
 
@@ -135,7 +148,15 @@ def handle_compute_weights(task):
             raise ValueError("No weight solutions computed for any session")
 
         # Save results to DB
-        save_computed_weights(db, study_session_id, weight_solutions)
+        save_computed_weights(
+            db,
+            study_session_id,
+            weight_solutions,
+            phase1_method=phase1_method,
+            method=weight_sampling_method,
+            use_non_linear_model=use_non_linear_model,
+            phase3_tolerance_pct=phase3_tolerance_pct,
+        )
 
         logger.log(f"\n✓ All weights computed and saved to database.")
         logger.log(f"  Processed {len(weight_solutions)} elicitation session(s).")

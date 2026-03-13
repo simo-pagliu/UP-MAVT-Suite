@@ -390,6 +390,9 @@ def compute_weights_endpoint(study_session_id):
         study_session_id,
         data.get('selected_session_ids', []),
         data.get('use_non_linear_model', True),
+        data.get('phase1_method', 'constraint_dominated_ea'),
+        data.get('weight_sampling_method', 'lhs_simplex'),
+        data.get('phase3_tolerance_pct', 1.0),
     )
     return jsonify({'task_id': task_id}), 202
 
@@ -459,7 +462,7 @@ def get_workflow_status(study_session_id):
 @bp.route('/study-session/<study_session_id>/weight-space/<session_id>', methods=['GET'])
 def get_weight_space(study_session_id, session_id):
     data = WorkflowService(current_app.db).get_weight_space(study_session_id, session_id)
-    return jsonify({'weight_space': data}), 200
+    return jsonify(data), 200
 
 
 @bp.route('/study-session/<study_session_id>/step-results/<int:step_number>', methods=['GET'])

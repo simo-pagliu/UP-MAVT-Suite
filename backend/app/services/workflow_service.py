@@ -31,7 +31,15 @@ class WorkflowService:
         self._tasks = TaskRepository(db)
         self._session_svc = SessionService(db)
 
-    def create_compute_weights_task(self, study_session_id, selected_session_ids, use_non_linear_model=True):
+    def create_compute_weights_task(
+        self,
+        study_session_id,
+        selected_session_ids,
+        use_non_linear_model=True,
+        phase1_method='constraint_dominated_ea',
+        weight_sampling_method='lhs_simplex',
+        phase3_tolerance_pct=1.0,
+    ):
         """Enqueue a background task to compute weights for the selected sessions.
 
         Any existing pending or running ``compute_weights`` tasks for the same
@@ -43,6 +51,12 @@ class WorkflowService:
                 sessions to include.
             use_non_linear_model (bool): Whether to use the non-linear
                 weight model for constraint violation.
+            phase1_method (str): Phase 1 method used to compute the
+                minimum violation bound.
+            weight_sampling_method (str): Phase 2 candidate generation method
+                used by the worker.
+            phase3_tolerance_pct (float): Phase 3 filtering tolerance percentage
+                LIM used in z_cap = z_star + z_star*LIM.
 
         Returns:
             str: The ``_id`` of the newly created task as a hex string.
@@ -64,6 +78,9 @@ class WorkflowService:
                 'study_session_id': study_session_id,
                 'selected_session_ids': selected_session_ids,
                 'use_non_linear_model': bool(use_non_linear_model),
+                'phase1_method': phase1_method,
+                'weight_sampling_method': weight_sampling_method,
+                'phase3_tolerance_pct': float(phase3_tolerance_pct),
             },
             'console_output': '',
             'created_at': datetime.now(timezone.utc),
@@ -302,6 +319,10 @@ class WorkflowService:
                 'computed': True,
                 'timestamp': ts.isoformat() if ts else None,
                 'session_count': len(ws) if isinstance(ws, dict) else 0,
+                'phase1_method': computed_weights.get('phase1_method', 'constraint_dominated_ea'),
+                'method': computed_weights.get('method', 'lhs_simplex'),
+                'use_non_linear_model': computed_weights.get('use_non_linear_model', True),
+                'phase3_tolerance_pct': computed_weights.get('phase3_tolerance_pct', 1.0),
             }
         steps_status = {}
         for step_num in [2, 3, 4, 5, 6]:
@@ -349,7 +370,13 @@ class WorkflowService:
         data = ws.get(session_id, [])
         if not data:
             raise NotFoundError('Weight space not found for this session')
-        return data
+        return {
+            'weight_space': data,
+            'phase1_method': cw.get('phase1_method', 'constraint_dominated_ea'),
+            'method': cw.get('method', 'lhs_simplex'),
+            'use_non_linear_model': cw.get('use_non_linear_model', True),
+            'phase3_tolerance_pct': cw.get('phase3_tolerance_pct', 1.0),
+        }
 
     def get_step_results(self, study_session_id, step_number):
         """Return the stored results for a specific UP-MAVT step.

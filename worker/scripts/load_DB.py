@@ -256,7 +256,15 @@ def load_step_results(db, study_session_id, step_number):
     return study.get(field)
 
 
-def save_computed_weights(db, study_session_id, weight_solutions):
+def save_computed_weights(
+    db,
+    study_session_id,
+    weight_solutions,
+    phase1_method='constraint_dominated_ea',
+    method='lhs_simplex',
+    use_non_linear_model=True,
+    phase3_tolerance_pct=1.0,
+):
     """Save computed weight solutions to the study session.
     
     Parameters
@@ -267,6 +275,14 @@ def save_computed_weights(db, study_session_id, weight_solutions):
         Study session ID.
     weight_solutions : dict
         {session_id: [list of weight dicts], ...}
+    phase1_method : str
+        Phase 1 optimization method used to compute z_star.
+    method : str
+        Phase 2 sampling/search method used to generate the candidates.
+    use_non_linear_model : bool
+        Whether the non-linear weight model was used.
+    phase3_tolerance_pct : float
+        Percentage LIM used for Phase 3 filtering.
     
     Returns
     -------
@@ -276,6 +292,10 @@ def save_computed_weights(db, study_session_id, weight_solutions):
     
     result_doc = {
         'timestamp': datetime.now(timezone.utc),
+        'phase1_method': phase1_method,
+        'method': method,
+        'use_non_linear_model': bool(use_non_linear_model),
+        'phase3_tolerance_pct': float(phase3_tolerance_pct),
         'weight_solutions': weight_solutions,
     }
     
