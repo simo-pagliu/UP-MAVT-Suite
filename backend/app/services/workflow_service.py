@@ -591,7 +591,7 @@ class WorkflowService:
             rows.append([rank_idx + 1, *[round(float(prob), 6) for prob in rank_row]])
         zf.writestr(path, self._rows_to_csv(headers, rows))
 
-    def _write_strict_results_long_csv(self, zf, path, step_results):
+    def _write_strict_results_full_csv(self, zf, path, step_results):
         alternatives = step_results.get('alternative_names') if isinstance(step_results, dict) else None
         by_elicitation = step_results.get('results_by_elicitation') if isinstance(step_results, dict) else None
         if not isinstance(alternatives, list) or not alternatives or not isinstance(by_elicitation, dict):
@@ -654,9 +654,9 @@ class WorkflowService:
                 zf.writestr(f'steps/step_{step_number}_results.json', self._json_bytes(step_results))
 
                 if step_number in [2, 5]:
-                    self._write_strict_results_long_csv(
+                    self._write_strict_results_full_csv(
                         zf,
-                        f'steps/step_{step_number}_strict_long.csv',
+                        f'steps/step_{step_number}_strict_full.csv',
                         step_results,
                     )
                 elif step_number in [3, 6]:
