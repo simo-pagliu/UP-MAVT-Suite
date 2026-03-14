@@ -178,7 +178,7 @@ class TestBuildPileBwtCsv:
         assert rows[0]['VALUE'] == 'raw_value'
 
 
-class TestBuildPileBwtDebugCsv:
+class TestBuildPileBwtRevisionCsv:
     def test_decreasing_vf_clamps_to_endpoint_y_by_x_bounds(self):
         criteria_list = [
             {
@@ -215,7 +215,7 @@ class TestBuildPileBwtDebugCsv:
             ]
         }
 
-        csv_text = ExportService.build_pile_bwt_debug_csv(
+        csv_text = ExportService.build_pile_bwt_revision_csv(
             bwt_data, value_functions_data, criteria_list
         )
         rows = read_csv(csv_text)

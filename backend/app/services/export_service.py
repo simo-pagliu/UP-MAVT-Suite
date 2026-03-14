@@ -450,8 +450,8 @@ class ExportService:
         return output.getvalue()
 
     @classmethod
-    def build_pile_bwt_debug_csv(cls, bwt_data, value_functions_data, criteria_list):
-        """Build a PILE-BWT comparison CSV with debug 'a_value' column.
+    def build_pile_bwt_revision_csv(cls, bwt_data, value_functions_data, criteria_list):
+        """Build a PILE-BWT comparison CSV with revision 'a_value' column.
 
         The 'a_value' column contains 1/vf(DATA_VALUE) where vf is the value
         function of the ADJUSTED_CRITERION. For qualitative criteria, vf(x) = x
@@ -887,8 +887,8 @@ class ExportService:
         content = json.dumps(payload, ensure_ascii=False, indent=2).encode()
         return content, f'pile_bwt_{session.get("name", session_id)}.json', 'application/json'
 
-    def export_pile_debug_csv(self, session_id):
-        """Export a session's PILE-BWT data as a CSV file with debug 'a_value' column.
+    def export_pile_revision_csv(self, session_id):
+        """Export a session's PILE-BWT data as a CSV file with revision 'a_value' column.
 
         The 'a_value' column contains 1/vf(DATA_VALUE) where vf is the value
         function of the ADJUSTED_CRITERION.
@@ -912,10 +912,10 @@ class ExportService:
         vf = session.get('value_functions') or {}
         
         if not self._session_svc.is_value_functions_complete(criteria, vf):
-            raise ValidationError('Complete value functions before exporting debug data')
+            raise ValidationError('Complete value functions before exporting revision data')
         
-        content = self.build_pile_bwt_debug_csv(bwt_data, vf, criteria)
-        return content.encode(), f'pile_bwt_debug_a_values_{session.get("name", session_id)}.csv', 'text/csv'
+        content = self.build_pile_bwt_revision_csv(bwt_data, vf, criteria)
+        return content.encode(), f'pile_bwt_revision_a_values_{session.get("name", session_id)}.csv', 'text/csv'
 
     def export_all_outputs_zip(self, session_id):
         """Package all session exports into a single ZIP archive.

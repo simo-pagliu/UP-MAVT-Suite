@@ -603,10 +603,10 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
                           Weight Elicitation
                         </MenuItem>
                         <MenuItem
-                          onClick={() => handleDownload(`/session/${session._id}/pile/export-debug`, `pile_bwt_debug_a_values_${session.name}.csv`)}
+                          onClick={() => handleDownload(`/session/${session._id}/pile/export-revision`, `pile_bwt_revision_a_values_${session.name}.csv`)}
                           isDisabled={!session.progress.hasBwt || !session.progress.hasValueFunctions}
                         >
-                          DEBUG - a values
+                          Revision - a values
                         </MenuItem>
                         <MenuItem
                           onClick={() => handleDownload(`/study-session/${studySessionId}/weight-solutions/${session._id}/export`, `weight_solutions_${session.name}.csv`)}
