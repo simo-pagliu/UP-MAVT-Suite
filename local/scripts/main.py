@@ -97,6 +97,17 @@ def ensure_output_dir(output_dir):
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
 
+def map_aggregation_label(selected_label):
+    """Map UI prompt labels to run_upmavt aggregation identifiers."""
+    token = str(selected_label).split()[0].upper()
+    mapping = {
+        'SUM': 'weighted_sum',
+        'GEO': 'geometric_mean',
+        'HAR': 'harmonic_mean',
+    }
+    return mapping.get(token, 'weighted_sum')
+
+
 def log_message(msg):
     """Print and return message for consistency."""
     print(msg)
@@ -368,11 +379,12 @@ def step_2_consensus_analysis(data_dir, output_dir, session_names, weight_soluti
         print("Skipped.")
         return
     
-    agg_method = ConsolePrompt.choose_option(
+    agg_choice = ConsolePrompt.choose_option(
         "Select aggregation method:",
         ["SUM (default)", "GEO", "HAR"],
         default_idx=0
-    ).split()[0]
+    )
+    agg_method = map_aggregation_label(agg_choice)
     
     mc_iters = ConsolePrompt.get_integer("MC Iterations", default=1000)
     
@@ -446,11 +458,12 @@ def step_3_dominance_analysis(data_dir, output_dir, session_names, weight_soluti
         print("Skipped.")
         return
     
-    agg_method = ConsolePrompt.choose_option(
+    agg_choice = ConsolePrompt.choose_option(
         "Select aggregation method:",
         ["SUM (default)", "GEO", "HAR"],
         default_idx=0
-    ).split()[0]
+    )
+    agg_method = map_aggregation_label(agg_choice)
     
     mc_iters = ConsolePrompt.get_integer("MC Iterations", default=1000)
     
@@ -518,7 +531,7 @@ def step_4_compensation_analysis(data_dir, output_dir, session_names, weight_sol
                 'mc_iterations': mc_iters,
                 'aggregation_method': agg_method,
                 'mc_mode': 'non_strict',
-                'use_random_weights': True,
+                'use_random_weights': False,
                 'opinion_weights': None,
             }
             
@@ -552,11 +565,12 @@ def step_5_uncertainty_analysis(data_dir, output_dir, session_names, weight_solu
         return
     
     print("\nThis step uses the preferred aggregation method from Step 4.")
-    agg_method = ConsolePrompt.choose_option(
+    agg_choice = ConsolePrompt.choose_option(
         "Select aggregation method:",
         ["SUM (default)", "GEO", "HAR"],
         default_idx=0
-    ).split()[0]
+    )
+    agg_method = map_aggregation_label(agg_choice)
     
     mc_iters = ConsolePrompt.get_integer("MC Iterations", default=1000)
     
@@ -623,11 +637,12 @@ def step_6_final_results(data_dir, output_dir, session_names, weight_solutions):
         print("Skipped.")
         return
     
-    agg_method = ConsolePrompt.choose_option(
+    agg_choice = ConsolePrompt.choose_option(
         "Select aggregation method:",
         ["SUM (default)", "GEO", "HAR"],
         default_idx=0
-    ).split()[0]
+    )
+    agg_method = map_aggregation_label(agg_choice)
     
     mc_iters = ConsolePrompt.get_integer("MC Iterations", default=1000)
     

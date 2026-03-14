@@ -31,7 +31,7 @@ import {
   NumberIncrementStepper,
   NumberDecrementStepper,
 } from '@chakra-ui/react'
-import { ExternalLinkIcon } from '@chakra-ui/icons'
+import { DownloadIcon, ExternalLinkIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import PdfModal from '../components/PdfModal'
 
@@ -57,6 +57,19 @@ import {
 } from '../utils/sessionUtils'
 
 const STEP2_COLORS = ['#3182CE', '#E57373', '#C77DFF', '#4DD0E1', '#38A169', '#D69E2E']
+const PHASE1_METHOD_OPTIONS = [
+  { value: 'constraint_dominated_ea', label: 'Constraint-dominated evolutionary search (CDS)' },
+  { value: 'differential_evolution', label: 'Differential Evolution (legacy)' },
+]
+const WEIGHT_SAMPLING_OPTIONS = [
+  { value: 'lhs_simplex', label: 'Latin Hypercube + simplex map' },
+  { value: 'dirichlet', label: 'Direct Dirichlet sampling' },
+  { value: 'sobol_simplex', label: 'Sobol low-discrepancy + simplex map' },
+  { value: 'ball_walk', label: 'Ball walk from feasible anchor' },
+  { value: 'adaptive_dirichlet', label: 'Adaptive Dirichlet search' },
+  { value: 'multistart_optimization', label: 'Multi-start optimization' },
+  { value: 'extreme_points', label: 'Extreme-point search' },
+]
 
 // ============================================================================
 // MAIN COMPONENT
@@ -97,6 +110,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   // Weight space plot state
   const [selectedWeightSession, setSelectedWeightSession] = useState('')
   const [weightSpaceData, setWeightSpaceData] = useState(null)
+  const [useNonLinearModel, setUseNonLinearModel] = useState(true)
+  const [phase1Method, setPhase1Method] = useState('constraint_dominated_ea')
+  const [weightSamplingMethod, setWeightSamplingMethod] = useState('lhs_simplex')
+  const [phase3TolerancePct, setPhase3TolerancePct] = useState(1)
 
   // Step 2 results state
   const [step2Results, setStep2Results] = useState(null)
@@ -104,6 +121,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [step3Results, setStep3Results] = useState(null)
   const [step4Results, setStep4Results] = useState(null)
   const [step6Results, setStep6Results] = useState(null)
+  const [exportingDataZip, setExportingDataZip] = useState(false)
   // PDF Modal states
   const { isOpen: isUncertaintiesOpen, onOpen: onUncertaintiesOpen, onClose: onUncertaintiesClose } = useDisclosure()
   const { isOpen: isMcModesOpen, onOpen: onMcModesOpen, onClose: onMcModesClose } = useDisclosure()
@@ -111,6 +129,15 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   // Derived state
   const weightsComputed = workflowStatus?.weights?.computed === true
   const weightsTimestamp = workflowStatus?.weights?.timestamp
+  const persistedPhase1Method = workflowStatus?.weights?.phase1_method || 'constraint_dominated_ea'
+  const persistedPhase1MethodLabel = PHASE1_METHOD_OPTIONS.find(
+    (option) => option.value === persistedPhase1Method
+  )?.label || persistedPhase1Method
+  const persistedWeightMethod = workflowStatus?.weights?.method || 'lhs_simplex'
+  const persistedWeightMethodLabel = WEIGHT_SAMPLING_OPTIONS.find(
+    (option) => option.value === persistedWeightMethod
+  )?.label || persistedWeightMethod
+  const persistedPhase3TolerancePct = Number(workflowStatus?.weights?.phase3_tolerance_pct ?? 1)
 
   // ============================================================================
   // LOAD DATA
@@ -174,6 +201,20 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       console.error('Error fetching step 6 results:', error)
     }
   }, [studySessionId])
+
+  const fetchWeightSpace = useCallback(async (sessionId) => {
+    if (!sessionId || !studySessionId) return
+    try {
+      const response = await axios.get(
+        `${API_URL}/study-session/${studySessionId}/weight-space/${sessionId}`
+      )
+      setWeightSpaceData(response.data.weight_solutions || response.data.weight_space)
+    } catch (error) {
+      console.error('Error fetching weight space:', error)
+      setWeightSpaceData(null)
+    }
+  }, [studySessionId])
+
   useEffect(() => {
     const fetchSessions = async () => {
       if (!studySessionId) return
@@ -208,6 +249,23 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     fetchWorkflowStatus()
   }, [studySessionId, toast, fetchWorkflowStatus])
 
+  useEffect(() => {
+    if (workflowStatus?.weights?.phase1_method) {
+      setPhase1Method(workflowStatus.weights.phase1_method)
+    }
+    if (workflowStatus?.weights?.method) {
+      setWeightSamplingMethod(workflowStatus.weights.method)
+    }
+    if (workflowStatus?.weights?.phase3_tolerance_pct !== undefined) {
+      const pct = Number(workflowStatus.weights.phase3_tolerance_pct)
+      setPhase3TolerancePct(Number.isFinite(pct) ? pct : 1)
+    }
+  }, [
+    workflowStatus?.weights?.phase1_method,
+    workflowStatus?.weights?.method,
+    workflowStatus?.weights?.phase3_tolerance_pct,
+  ])
+
   // Fetch step 2 results when step 2 is completed
   useEffect(() => {
     if (workflowStatus?.steps?.['2']?.completed) {
@@ -241,7 +299,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   // ============================================================================
   // TASK POLLING
   // ============================================================================
-  const startPolling = useCallback((taskId, stepName) => {
+  const startPolling = useCallback((taskId, stepName, stepNumber = null) => {
     if (pollRef.current) clearInterval(pollRef.current)
 
     pollRef.current = setInterval(async () => {
@@ -256,7 +314,28 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           pollRef.current = null
           setRunningStep(null)
           setActiveTaskId(null)
-          fetchWorkflowStatus()
+          
+          // Fetch workflow status first
+          await fetchWorkflowStatus()
+          
+          // Then fetch the step results for the completed step
+          if (stepNumber === 2) {
+            await fetchStep2Results()
+          } else if (stepNumber === 3) {
+            await fetchStep3Results()
+          } else if (stepNumber === 4) {
+            await fetchStep4Results()
+          } else if (stepNumber === 5) {
+            await fetchStep5Results()
+          } else if (stepNumber === 6) {
+            await fetchStep6Results()
+          } else if (stepNumber === null && stepName.includes('Weights')) {
+            // If weights were computed and we have a selected weight session, refetch its weight space
+            if (selectedWeightSession) {
+              await fetchWeightSpace(selectedWeightSession)
+            }
+          }
+          
           toast({ title: `${stepName} completed`, status: 'success', duration: 3000 })
         } else if (task.status === 'failed') {
           clearInterval(pollRef.current)
@@ -280,7 +359,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         console.error('Polling error:', error)
       }
     }, 2000)
-  }, [fetchWorkflowStatus, toast])
+  }, [fetchWorkflowStatus, fetchStep2Results, fetchStep3Results, fetchStep4Results, fetchStep5Results, fetchStep6Results, fetchWeightSpace, selectedWeightSession, toast])
 
   // Check for active/running tasks on mount (called after startPolling is defined)
   const checkForActiveTask = useCallback(async () => {
@@ -299,12 +378,12 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         
         if (taskType === 'compute_weights') {
           setRunningStep('weights')
-          startPolling(activeTask.task_id, 'Compute Weights')
+          startPolling(activeTask.task_id, 'Compute Weights', null)
         } else if (taskType === 'run_step') {
           const stepNumber = params.step_number
           const stepName = params.step_name || `Step ${stepNumber}`
           setRunningStep(stepName)
-          startPolling(activeTask.task_id, stepName)
+          startPolling(activeTask.task_id, stepName, stepNumber)
         }
       }
     } catch (error) {
@@ -361,11 +440,17 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     try {
       const response = await axios.post(
         `${API_URL}/study-session/${studySessionId}/compute-weights`,
-        { selected_session_ids: selectedSessions }
+        {
+          selected_session_ids: selectedSessions,
+          use_non_linear_model: useNonLinearModel,
+          phase1_method: phase1Method,
+          weight_sampling_method: weightSamplingMethod,
+          phase3_tolerance_pct: phase3TolerancePct,
+        }
       )
       const taskId = response.data.task_id
       setActiveTaskId(taskId)
-      startPolling(taskId, 'Compute Weights')
+      startPolling(taskId, 'Compute Weights', null)
     } catch (error) {
       setRunningStep(null)
       toast({
@@ -409,12 +494,22 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     const stepConfigs = {
       2: { mc_mode: 'strict', aggregation_method: consensusAggregation, use_random_weights: false },
       3: { mc_mode: 'non_strict', aggregation_method: dominanceAggregation, use_random_weights: true },
-      4: { mc_mode: 'non_strict', aggregation_method: 'weighted_sum', use_random_weights: true },
+      4: { mc_mode: 'non_strict', aggregation_method: 'weighted_sum', use_random_weights: false },
       5: { mc_mode: 'strict', aggregation_method: uncertaintyAggregation, use_random_weights: false },
       6: { mc_mode: 'non_strict', aggregation_method: resultsAggregation, use_random_weights: false },
     }
 
     const config = { ...stepConfigs[stepNumber], ...overrides }
+
+    // Clear previous results for this step so they don't linger during the new run
+    const stepResultClearers = {
+      2: () => setStep2Results(null),
+      3: () => setStep3Results(null),
+      4: () => setStep4Results(null),
+      5: () => setStep5Results(null),
+      6: () => setStep6Results(null),
+    }
+    stepResultClearers[stepNumber]?.()
 
     setRunningStep(stepName)
     setConsoleOutput(`Submitting Step ${stepNumber} task...\n`)
@@ -433,7 +528,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       )
       const taskId = response.data.task_id
       setActiveTaskId(taskId)
-      startPolling(taskId, stepName)
+      startPolling(taskId, stepName, stepNumber)
     } catch (error) {
       setRunningStep(null)
       toast({
@@ -469,19 +564,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   // ============================================================================
   // WEIGHT SPACE PLOT
   // ============================================================================
-  const fetchWeightSpace = useCallback(async (sessionId) => {
-    if (!sessionId || !studySessionId) return
-    try {
-      const response = await axios.get(
-        `${API_URL}/study-session/${studySessionId}/weight-space/${sessionId}`
-      )
-      setWeightSpaceData(response.data.weight_solutions || response.data.weight_space)
-    } catch (error) {
-      console.error('Error fetching weight space:', error)
-      setWeightSpaceData(null)
-    }
-  }, [studySessionId])
-
   useEffect(() => {
     if (selectedWeightSession) {
       fetchWeightSpace(selectedWeightSession)
@@ -519,7 +601,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   }
 
   const updateMcIterations = (step, value) => {
-    const v = Math.max(100, Math.min(5000, parseInt(value) || 1000))
+    const maxAllowed = step === 6 ? 10000 : 5000
+    const v = Math.max(100, Math.min(maxAllowed, parseInt(value) || 1000))
     setMcIterations((prev) => ({ ...prev, [step]: v }))
   }
 
@@ -675,8 +758,14 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     if (!sessionDoc || comparisons.length === 0 || weightSamples.length === 0) return { data: [], comparisons: [] }
 
     const valueFunctionMap = sessionDoc?.value_functions?.criteria || {}
+    const criteriaMetaMap = Object.fromEntries(
+      (criteria || [])
+        .filter((criterion) => criterion?.criterion_name)
+        .map((criterion) => [criterion.criterion_name, criterion])
+    )
     const allDataPoints = []
     const comparisonLabels = []
+    const COMPARISON_BAND = 0.7
 
     comparisons.forEach((comparison, idx) => {
       const referenceCriterion = comparison?.reference_criterion
@@ -685,8 +774,15 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
       if (!referenceCriterion || !adjustedCriterion || !Number.isFinite(comparisonValue)) return
 
+      const adjustedCriterionMeta = criteriaMetaMap?.[adjustedCriterion]
+      const isQualitativeAdjusted = Boolean(adjustedCriterionMeta?.is_qualitative)
       const adjustedVFPoints = valueFunctionMap?.[adjustedCriterion]?.points
-      const vfValue = interpolateValueFunction(adjustedVFPoints, comparisonValue)
+
+      // Qualitative indicators are modeled with identity VF in computation: vf(x)=x.
+      // Ignore any stale stored VF points to keep consistency with worker constraints.
+      const vfValue = isQualitativeAdjusted
+        ? comparisonValue
+        : interpolateValueFunction(adjustedVFPoints, comparisonValue)
       const declaredRatio = Number.isFinite(vfValue) && vfValue > 0 ? (1 / vfValue) : null
 
       const computedRatios = weightSamples
@@ -707,23 +803,77 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       allDataPoints.push({
         comparison: comparisonLabel,
         yIndex: idx,
+        yPlot: idx,
         value: Number(declaredRatio.toFixed(4)),
-        type: 'declared'
+        type: 'declared',
       })
 
-      // Add all computed ratios as individual points
-      computedRatios.forEach((ratio) => {
+      // Add each computed ratio as an individual plotted point.
+      // A tiny deterministic vertical spread avoids exact point overlap.
+      const totalComputed = computedRatios.length
+      computedRatios.forEach((ratio, solutionIndex) => {
+        const localOffset = totalComputed === 1
+          ? 0
+          : ((solutionIndex / (totalComputed - 1)) - 0.5) * COMPARISON_BAND
+
         allDataPoints.push({
           comparison: comparisonLabel,
           yIndex: idx,
+          yPlot: idx + localOffset,
           value: Number(ratio.toFixed(4)),
-          type: 'computed'
+          type: 'computed',
+          solutionIndex,
         })
       })
     })
 
     return { data: allDataPoints, comparisons: comparisonLabels }
   }
+
+  const triggerDownloadFromBlob = (blob, filename) => {
+    const objectUrl = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.URL.revokeObjectURL(objectUrl)
+  }
+
+  const handleExportWorkflowDataZip = async () => {
+    if (!studySessionId) return
+
+    setExportingDataZip(true)
+    try {
+      const response = await axios.get(
+        `${API_URL}/study-session/${studySessionId}/workflow-export/data`,
+        { responseType: 'blob' }
+      )
+
+      const disposition = response.headers['content-disposition'] || ''
+      const filenameMatch = disposition.match(/filename="?([^";]+)"?/i)
+      const filename = filenameMatch?.[1] || 'upmavt_data.zip'
+      triggerDownloadFromBlob(response.data, filename)
+
+      toast({
+        title: 'Data ZIP exported',
+        description: 'The Run UP-MAVT data bundle was downloaded.',
+        status: 'success',
+        duration: 3500,
+      })
+    } catch (error) {
+      toast({
+        title: 'Unable to export data ZIP',
+        description: error.response?.data?.error || error.message,
+        status: 'error',
+        duration: 5000,
+      })
+    } finally {
+      setExportingDataZip(false)
+    }
+  }
+
   // ============================================================================
   // RENDER
   // ============================================================================
@@ -909,19 +1059,20 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   description={
                     <VStack spacing={2} align="stretch">
                       <Text>
-                        The PILE-BWT method computes weights by solving an optimization problem, as described in{' '}
+                        Step 1 first finds the minimum attainable constraint violation for the selected sessions, then applies the chosen
+                        Phase 2 method to generate candidate weights and filters them into the stored weight space. This lets you compare
+                        direct simplex sampling, low-discrepancy coverage, feasible-region walks, and optimization-based searches from the same UI.
+                      </Text>
+                      <Text>
+                        The current worker implementation supports multiple candidate-generation strategies so you can test how strongly the
+                        final stored weight space depends on the exploration method rather than on the feasibility filter alone.
+                      </Text>
+                      <Text>
+                        For background on the general workflow, see{' '}
                         <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
                           PLACEHOLDER <ExternalLinkIcon mx="2px" />
                         </Link>
-                        . The process begins with a local solver based on{' '}
-                        <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
-                          PLACEHOLDER <ExternalLinkIcon mx="2px" />
-                        </Link>
-                        {' '}to obtain an initial valid solution. Following this, the Differential Evolution algorithm ({' '}
-                        <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
-                          PLACEHOLDER <ExternalLinkIcon mx="2px" />
-                        </Link>
-                        ) is applied to explore the full range of possible weights, thereby defining the weight space.
+                        .
                       </Text>
                       <Alert status="info" borderRadius="md">
                         <AlertIcon />
@@ -933,8 +1084,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                       <Alert status="warning" borderRadius="md">
                         <AlertIcon />
                         <AlertDescription>
-                          Due to the complexity of the search, this process may take some time. For example, with 15 criteria organized into 4 groups,
-                          the computation typically requires between 15 and 30 minutes <strong>per elicitation</strong>. Your patience is appreciated.
+                          Due to the complexity of the search, this process can take some minutes. Please be patient.
                         </AlertDescription>
                       </Alert>
                     </VStack>
@@ -946,10 +1096,83 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   showConsole={showConsole}
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
+                  parameters={
+                    <VStack spacing={2} align="stretch">
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>Phase 1 method (compute z*)</Text>
+                        <Select
+                          value={phase1Method}
+                          onChange={(e) => setPhase1Method(e.target.value)}
+                          isDisabled={runningStep !== null || !useNonLinearModel}
+                        >
+                          {PHASE1_METHOD_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </Select>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Select how Phase 1 computes the minimum violation bound before Phase 2 sampling starts.
+                        </Text>
+                      </Box>
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>Weight space method</Text>
+                        <Select
+                          value={weightSamplingMethod}
+                          onChange={(e) => setWeightSamplingMethod(e.target.value)}
+                          isDisabled={runningStep !== null || !useNonLinearModel}
+                        >
+                          {WEIGHT_SAMPLING_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </Select>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Applies only to the non-linear model. The linear model still returns the single Phase 1 optimum.
+                        </Text>
+                      </Box>
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>Phase 3 tolerance LIM (%)</Text>
+                        <NumberInput
+                          value={phase3TolerancePct}
+                          min={0}
+                          max={100}
+                          step={0.1}
+                          precision={2}
+                          isDisabled={runningStep !== null || !useNonLinearModel}
+                          onChange={(_, valueAsNumber) => {
+                            if (Number.isFinite(valueAsNumber)) {
+                              const clamped = Math.max(0, Math.min(100, valueAsNumber))
+                              setPhase3TolerancePct(clamped)
+                            }
+                          }}
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Phase 3 filtering uses z_cap = z_star + z_star * LIM. Default is 1%.
+                        </Text>
+                      </Box>
+                      <Checkbox
+                        isChecked={useNonLinearModel}
+                        onChange={(e) => setUseNonLinearModel(e.target.checked)}
+                        isDisabled={runningStep !== null}
+                      >
+                        Use non-linear model
+                      </Checkbox>
+                      <Text fontSize="sm" color="gray.600">
+                        (Non-linear model allows for evaluation of weight space, linear model return a single weight set)
+                      </Text>
+                    </VStack>
+                  }
                   statusInfo={
                     weightsComputed ? (
                       <HStack spacing={3}>
                         <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Weights computed</Badge>
+                        <Badge colorScheme="purple" fontSize="sm" px={2} py={1}>{persistedPhase1MethodLabel}</Badge>
+                        <Badge colorScheme="blue" fontSize="sm" px={2} py={1}>{persistedWeightMethodLabel}</Badge>
+                        <Badge colorScheme="orange" fontSize="sm" px={2} py={1}>LIM {persistedPhase3TolerancePct}%</Badge>
                         <Text fontSize="sm" color="gray.500">{formatTimestamp(weightsTimestamp)}</Text>
                         <Button size="xs" colorScheme="orange" variant="outline" onClick={handleResetWeights}>
                           Reset Weights
@@ -997,12 +1220,18 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                 tick={{ fontSize: 10 }}
                               />
                               <YAxis
-                                type="category"
-                                dataKey="comparison"
+                                type="number"
+                                dataKey="yPlot"
                                 name="Comparison"
                                 width={240}
                                 tick={{ fontSize: 10 }}
                                 interval={0}
+                                domain={[
+                                  -0.5,
+                                  Math.max(0, step1ConsistencyComparisons.length - 1) + 0.5,
+                                ]}
+                                ticks={step1ConsistencyComparisons.map((_, idx) => idx)}
+                                tickFormatter={(value) => step1ConsistencyComparisons[Math.round(value)] || ''}
                               />
                               <RechartsTooltip
                                 cursor={{ strokeDasharray: '3 3' }}
@@ -1015,6 +1244,11 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                       <Text fontSize="xs" color={payload[0].color}>
                                         {payload[0].name}: {Number(data.value).toFixed(4)}
                                       </Text>
+                                      {data.type === 'computed' && Number.isInteger(data.solutionIndex) && (
+                                        <Text fontSize="xs" color="gray.600">
+                                          Solution #{data.solutionIndex + 1}
+                                        </Text>
+                                      )}
                                     </Box>
                                   )
                                 }}
@@ -1526,7 +1760,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                         <NumberInput
                           value={mcIterations[6]}
                           min={100}
-                          max={5000}
+                          max={10000}
                           step={100}
                           onChange={(_, val) => updateMcIterations(6, val)}
                           isDisabled={runningStep !== null}
@@ -1552,6 +1786,25 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                       <Text color="gray.500">Run Step 6 to display the final ranking heatmap.</Text>
                     </Box>
                   )}
+
+                  <Divider my={4} />
+                  <VStack spacing={3} align="stretch">
+                    <Text color="gray.600" fontSize="sm">
+                      Download the complete workflow data ZIP after Step 6 is completed.
+                    </Text>
+                    <Button
+                      leftIcon={<DownloadIcon />}
+                      colorScheme="blue"
+                      variant="solid"
+                      onClick={handleExportWorkflowDataZip}
+                      isLoading={exportingDataZip}
+                      loadingText="Preparing Data ZIP"
+                      isDisabled={!getStepStatus(6)?.completed}
+                      alignSelf="flex-start"
+                    >
+                      Download Data ZIP
+                    </Button>
+                  </VStack>
                 </StepSection>
               </TabPanel>
             </TabPanels>
@@ -1850,11 +2103,12 @@ function StepSection({
   statusInfo,
   children,
 }) {
-  const consoleEndRef = useRef(null)
+  const consoleBodyRef = useRef(null)
 
   useEffect(() => {
-    if (showConsole && consoleEndRef.current) {
-      consoleEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    if (showConsole && consoleBodyRef.current) {
+      // Keep the console scrolled to the latest output without moving the page viewport.
+      consoleBodyRef.current.scrollTop = consoleBodyRef.current.scrollHeight
     }
   }, [consoleOutput, showConsole])
 
@@ -1906,6 +2160,7 @@ function StepSection({
       {showConsole && (
         <Box bg="gray.900" p={4} borderRadius="md" color="green.300" fontFamily="monospace" fontSize="sm">
           <Box
+            ref={consoleBodyRef}
             maxH="350px"
             overflowY="auto"
             whiteSpace="pre-wrap"
@@ -1914,7 +2169,6 @@ function StepSection({
             fontSize="xs"
           >
             {consoleOutput || 'No output yet...'}
-            <div ref={consoleEndRef} />
           </Box>
         </Box>
       )}

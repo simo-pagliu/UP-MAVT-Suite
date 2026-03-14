@@ -1,4 +1,4 @@
-import { AddIcon, DeleteIcon } from '@chakra-ui/icons'
+import { AddIcon, DeleteIcon, SettingsIcon } from '@chakra-ui/icons'
 import { useRef, forwardRef, useImperativeHandle } from 'react'
 import {
   AlertDialog,
@@ -14,6 +14,7 @@ import {
   Input,
   FormControl,
   FormLabel,
+  Textarea,
   useToast,
   Table,
   Thead,
@@ -43,6 +44,8 @@ import { API_URL } from '../config'
 
 function InputPage({ studySessionId }, ref) {
   const [name, setName] = useState('')
+  const [metadataDefaults, setMetadataDefaults] = useState({ title: '', description: '' })
+  const [metadataFormKey, setMetadataFormKey] = useState(0)
   const [criteria, setCriteria] = useState([])
   const [originalCriteria, setOriginalCriteria] = useState([])
   const [loading, setLoading] = useState(false)
@@ -51,6 +54,7 @@ function InputPage({ studySessionId }, ref) {
   const [isEditing, setIsEditing] = useState(false)
   const [hasExistingSessions, setHasExistingSessions] = useState(false)
   const [hasModifiedInput, setHasModifiedInput] = useState(false)
+  const [savingMetadata, setSavingMetadata] = useState(false)
   
   // Distribution modal state
   const { isOpen: isDistModalOpen, onOpen: onDistModalOpen, onClose: onDistModalClose } = useDisclosure()
@@ -63,6 +67,8 @@ function InputPage({ studySessionId }, ref) {
   
   const toast = useToast()
   const fileInputRef = useRef(null)
+  const studyTitleRef = useRef(null)
+  const studyDescriptionRef = useRef(null)
 
   const parseCsvLine = (line) => {
     const values = []
@@ -88,6 +94,11 @@ function InputPage({ studySessionId }, ref) {
     values.push(current.trim())
     return values
   }
+
+  const parseBooleanCell = (value) => {
+    const normalized = String(value || '').trim().toLowerCase()
+    return normalized === 'true' || normalized === '1' || normalized === 'yes'
+  }
   
   useImperativeHandle(ref, () => ({
     async saveBeforeNavigate() {
@@ -103,6 +114,7 @@ function InputPage({ studySessionId }, ref) {
       group: c.group || '',
       description: c.description || '',
       is_qualitative: c.is_qualitative || false,
+      use_mid_splitting: c.use_mid_splitting !== undefined ? c.use_mid_splitting : true,
       use_custom_min_max: c.use_custom_min_max || false,
       min_value: c.min_value || '',
       max_value: c.max_value || '',
@@ -118,6 +130,8 @@ function InputPage({ studySessionId }, ref) {
   useEffect(() => {
     if (!studySessionId) {
       setName('')
+      setMetadataDefaults({ title: '', description: '' })
+      setMetadataFormKey((prev) => prev + 1)
       setCriteria([])
       setOriginalCriteria([])
       setIsExistingStudySession(false)
@@ -133,6 +147,11 @@ function InputPage({ studySessionId }, ref) {
         if (study.code) {
           setName(study.code)
         }
+        setMetadataDefaults({
+          title: study.title || '',
+          description: study.description || '',
+        })
+        setMetadataFormKey((prev) => prev + 1)
         if (study.criteria && Array.isArray(study.criteria)) {
           const normalized = normalizeCriteria(study.criteria)
           setCriteria(normalized)
@@ -178,6 +197,83 @@ function InputPage({ studySessionId }, ref) {
     setHasModifiedInput(false)
   }
 
+  const detectCriteriaChanges = (oldCriteria, newCriteria) => {
+    // Returns { affectedCriteria: [...criterion_names], affectedGroups: [...group_names] }
+    const affectedCriteria = []
+    const affectedGroups = new Set()
+    
+    // Create maps by name
+    const oldMap = new Map(oldCriteria.map(c => [c.criterion_name, c]))
+    const newMap = new Map(newCriteria.map(c => [c.criterion_name, c]))
+    
+    // Check for removed criteria
+    for (const oldCrit of oldCriteria) {
+      if (!newMap.has(oldCrit.criterion_name)) {
+        affectedCriteria.push(oldCrit.criterion_name)
+        if (oldCrit.group) affectedGroups.add(oldCrit.group)
+      }
+    }
+    
+    // Check for added or changed criteria
+    for (const newCrit of newCriteria) {
+      const oldCrit = oldMap.get(newCrit.criterion_name)
+      
+      if (!oldCrit) {
+        // New criterion - no need to reset anything
+        continue
+      }
+      
+      // Check for "dangerous" changes that affect data
+      let hasDataChange = false
+      
+      // Check if group changed
+      if (oldCrit.group !== newCrit.group) {
+        hasDataChange = true
+        if (oldCrit.group) affectedGroups.add(oldCrit.group)
+        if (newCrit.group) affectedGroups.add(newCrit.group)
+      }
+      
+      // Check if qualitative flag changed
+      if (oldCrit.is_qualitative !== newCrit.is_qualitative) {
+        hasDataChange = true
+      }
+      
+      // Check if min/max changed
+      if (oldCrit.min_value !== newCrit.min_value || oldCrit.max_value !== newCrit.max_value) {
+        hasDataChange = true
+      }
+      
+      if (oldCrit.use_custom_min_max !== newCrit.use_custom_min_max) {
+        hasDataChange = true
+      }
+      
+      // Check if alternatives changed (count, names, or values)
+      const oldAlts = oldCrit.alternatives || []
+      const newAlts = newCrit.alternatives || []
+      
+      if (oldAlts.length !== newAlts.length) {
+        hasDataChange = true
+      } else {
+        for (let i = 0; i < oldAlts.length; i++) {
+          if (oldAlts[i].name !== newAlts[i].name || oldAlts[i].value !== newAlts[i].value) {
+            hasDataChange = true
+            break
+          }
+        }
+      }
+      
+      if (hasDataChange) {
+        affectedCriteria.push(newCrit.criterion_name)
+        if (newCrit.group) affectedGroups.add(newCrit.group)
+      }
+    }
+    
+    return {
+      affectedCriteria,
+      affectedGroups: Array.from(affectedGroups)
+    }
+  }
+
   const handleFileUpload = (event) => {
     const file = event.target.files?.[0]
     if (!file) return
@@ -188,10 +284,10 @@ function InputPage({ studySessionId }, ref) {
       if (typeof text !== 'string') return
 
       const lines = text.trim().split(/\r?\n/).filter(Boolean)
-      if (lines.length < 3) {
+      if (lines.length < 8) {
         toast({
-          title: 'Error',
-          description: 'CSV must have at least criterion names, one alternative, and units',
+          title: 'Request failed',
+          description: 'CSV must include header, group, description, is_qi, vf_method, min, max, alternatives, and unit rows',
           status: 'error',
           duration: 3000,
           isClosable: true,
@@ -208,7 +304,7 @@ function InputPage({ studySessionId }, ref) {
       
       if (criterionNames.length === 0) {
         toast({
-          title: 'Error',
+          title: 'Request failed',
           description: 'No criteria columns found',
           status: 'error',
           duration: 3000,
@@ -217,73 +313,48 @@ function InputPage({ studySessionId }, ref) {
         return
       }
 
-      // Optional second row: groups
-      let groups = Array(criterionNames.length).fill('')
-      let descriptions = Array(criterionNames.length).fill('')
-      let alternativesStartIndex = 1
-      if (rows[1] && rows[1][0] && rows[1][0].toLowerCase() === 'group') {
-        groups = rows[1].slice(1)
-        alternativesStartIndex = 2
-        if (groups.length !== criterionNames.length) {
+      const expectedRows = [
+        { index: 1, label: 'group' },
+        { index: 2, label: 'description' },
+        { index: 3, label: 'is_qi' },
+        { index: 4, label: 'vf_method' },
+        { index: 5, label: 'min' },
+        { index: 6, label: 'max' },
+      ]
+
+      for (const expected of expectedRows) {
+        const rowLabel = (rows[expected.index]?.[0] || '').toLowerCase()
+        if (rowLabel !== expected.label) {
           toast({
-            title: 'Error',
-            description: 'Number of groups must match number of criteria',
+            title: 'Request failed',
+            description: `Invalid CSV format: expected row ${expected.index + 1} to start with "${expected.label}"`,
             status: 'error',
-            duration: 3000,
+            duration: 4000,
             isClosable: true,
           })
           return
         }
       }
 
-      // Optional third row: descriptions
-      if (rows[alternativesStartIndex] && rows[alternativesStartIndex][0] && rows[alternativesStartIndex][0].toLowerCase() === 'description') {
-        descriptions = rows[alternativesStartIndex].slice(1)
-        alternativesStartIndex += 1
-        if (descriptions.length !== criterionNames.length) {
-          toast({
-            title: 'Error',
-            description: 'Number of descriptions must match number of criteria',
-            status: 'error',
-            duration: 3000,
-            isClosable: true,
-          })
-          return
-        }
-      }
+      const groups = rows[1].slice(1)
+      const descriptions = rows[2].slice(1)
+      const qiFlags = rows[3].slice(1)
+      const vfMethodFlags = rows[4].slice(1)
+      const minValues = rows[5].slice(1)
+      const maxValues = rows[6].slice(1)
+      const alternativesStartIndex = 7
 
-      // Optional Min row
-      let minValues = Array(criterionNames.length).fill('')
-      if (rows[alternativesStartIndex] && rows[alternativesStartIndex][0] && rows[alternativesStartIndex][0].toLowerCase() === 'min') {
-        minValues = rows[alternativesStartIndex].slice(1)
-        alternativesStartIndex += 1
-        if (minValues.length !== criterionNames.length) {
-          toast({
-            title: 'Error',
-            description: 'Number of min values must match number of criteria',
-            status: 'error',
-            duration: 3000,
-            isClosable: true,
-          })
-          return
-        }
-      }
-
-      // Optional Max row
-      let maxValues = Array(criterionNames.length).fill('')
-      if (rows[alternativesStartIndex] && rows[alternativesStartIndex][0] && rows[alternativesStartIndex][0].toLowerCase() === 'max') {
-        maxValues = rows[alternativesStartIndex].slice(1)
-        alternativesStartIndex += 1
-        if (maxValues.length !== criterionNames.length) {
-          toast({
-            title: 'Error',
-            description: 'Number of max values must match number of criteria',
-            status: 'error',
-            duration: 3000,
-            isClosable: true,
-          })
-          return
-        }
+      const rowLengthsValid = [groups, descriptions, qiFlags, vfMethodFlags, minValues, maxValues]
+        .every((row) => row.length === criterionNames.length)
+      if (!rowLengthsValid) {
+        toast({
+          title: 'Request failed',
+          description: 'All metadata rows must have the same number of values as criteria columns',
+          status: 'error',
+          duration: 4000,
+          isClosable: true,
+        })
+        return
       }
 
       // Last row: units (first cell should be "Unit")
@@ -292,7 +363,7 @@ function InputPage({ studySessionId }, ref) {
       
       if (units.length !== criterionNames.length) {
         toast({
-          title: 'Error',
+          title: 'Request failed',
           description: 'Number of units must match number of criteria',
           status: 'error',
           duration: 3000,
@@ -306,7 +377,7 @@ function InputPage({ studySessionId }, ref) {
       
       if (alternativeRows.length === 0) {
         toast({
-          title: 'Error',
+          title: 'Request failed',
           description: 'No alternatives found',
           status: 'error',
           duration: 3000,
@@ -321,13 +392,16 @@ function InputPage({ studySessionId }, ref) {
           name: row[0],
           value: row[idx + 1] || '' // This can be a distribution string
         }))
+        const isQi = parseBooleanCell(qiFlags[idx])
+        const useMidSplitting = parseBooleanCell(vfMethodFlags[idx])
         const hasCustomMinMax = (minValues[idx] && minValues[idx] !== '') || (maxValues[idx] && maxValues[idx] !== '')
         return {
           criterion_name: name,
           group: groups[idx] || '',
           description: descriptions[idx] || '',
           unit: units[idx],
-          is_qualitative: false,
+          is_qualitative: isQi,
+          use_mid_splitting: useMidSplitting,
           use_custom_min_max: hasCustomMinMax,
           min_value: minValues[idx] || '',
           max_value: maxValues[idx] || '',
@@ -348,7 +422,7 @@ function InputPage({ studySessionId }, ref) {
 
     reader.onerror = () => {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: 'Could not read the file',
         status: 'error',
         duration: 3000,
@@ -416,7 +490,7 @@ function InputPage({ studySessionId }, ref) {
           })
         } catch (error) {
           toast({
-            title: 'Error',
+            title: 'Request failed',
             description: error.response?.data?.error || 'Failed to save distribution',
             status: 'error',
             duration: 3000,
@@ -450,7 +524,7 @@ function InputPage({ studySessionId }, ref) {
   const handleAddAlternative = () => {
     if (criteria.length === 0) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: 'Upload a CSV first to define criteria',
         status: 'error',
         duration: 3000,
@@ -468,7 +542,7 @@ function InputPage({ studySessionId }, ref) {
   const handleAddCriterion = () => {
     if (criteria.length === 0) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: 'Upload a CSV first to define initial structure',
         status: 'error',
         duration: 3000,
@@ -483,6 +557,7 @@ function InputPage({ studySessionId }, ref) {
       group: '',
       description: '',
       is_qualitative: false,
+      use_mid_splitting: true,
       unit: '',
       alternatives: Array(alternativeCount).fill(null).map((_, idx) => ({
         name: criteria[0].alternatives[idx].name,
@@ -504,7 +579,7 @@ function InputPage({ studySessionId }, ref) {
   const downloadCSV = () => {
     if (criteria.length === 0) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: 'No data to download',
         status: 'error',
         duration: 3000,
@@ -517,7 +592,7 @@ function InputPage({ studySessionId }, ref) {
     downloadCSVFile(csvContent, `input_${name || 'criteria'}.csv`)
     
     toast({
-      title: 'Success',
+      title: 'Completed',
       description: 'CSV file downloaded',
       status: 'success',
       duration: 2000,
@@ -528,7 +603,7 @@ function InputPage({ studySessionId }, ref) {
   const handleSave = async () => {
     if (criteria.length === 0) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: 'Please upload a CSV',
         status: 'error',
         duration: 3000,
@@ -543,7 +618,7 @@ function InputPage({ studySessionId }, ref) {
     )
     if (hasEmptyCriteria) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: 'All criteria must have a name and unit',
         status: 'error',
         duration: 3000,
@@ -564,7 +639,7 @@ function InputPage({ studySessionId }, ref) {
     })
     if (hasEmptyAlternatives) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: 'All alternatives must have names. Non-qualitative criteria must have values.',
         status: 'error',
         duration: 3000,
@@ -576,9 +651,18 @@ function InputPage({ studySessionId }, ref) {
     setLoading(true)
     try {
       if (isExistingStudySession && studySessionId) {
-        // If there are existing sessions and input was modified, reset them
+        // If there are existing sessions and input was modified, selectively reset affected data
         if (hasExistingSessions && hasModifiedInput) {
-          await axios.post(`${API_URL}/study-session/${studySessionId}/reset-sessions`)
+          const changes = detectCriteriaChanges(originalCriteria, criteria)
+          
+          if (changes.affectedCriteria.length > 0 || changes.affectedGroups.length > 0) {
+            // Selective reset: only reset affected criteria and groups
+            await axios.post(`${API_URL}/study-session/${studySessionId}/selective-reset`, {
+              criteria: changes.affectedCriteria,
+              groups: changes.affectedGroups
+            })
+          }
+          // If no affected criteria/groups, don't reset anything
         }
         
         await axios.put(`${API_URL}/study-session/${studySessionId}/input`, { criteria })
@@ -595,7 +679,7 @@ function InputPage({ studySessionId }, ref) {
         setHasExistingSessions(sessions.length > 0)
         
         toast({
-          title: 'Success',
+          title: 'Completed',
           description: hasExistingSessions && hasModifiedInput
             ? 'Input saved and elicitation sessions reset'
             : 'Input saved successfully',
@@ -615,7 +699,7 @@ function InputPage({ studySessionId }, ref) {
     } catch (error) {
       console.error('Save error:', error)
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || error.message || 'Failed to save input',
         status: 'error',
         duration: 5000,
@@ -623,6 +707,39 @@ function InputPage({ studySessionId }, ref) {
       })
     } finally {
       setLoading(false)
+    }
+  }
+
+  const handleSaveStudyMetadata = async () => {
+    if (!studySessionId) return
+    setSavingMetadata(true)
+    try {
+      const title = studyTitleRef.current?.value ?? ''
+      const description = studyDescriptionRef.current?.value ?? ''
+      await axios.patch(`${API_URL}/study-session/${studySessionId}`, {
+        title,
+        description,
+      })
+
+      // Keep defaults in sync with saved values without introducing per-keystroke re-renders.
+      setMetadataDefaults({ title, description })
+      toast({
+        title: 'Completed',
+        description: 'Case study details saved',
+        status: 'success',
+        duration: 2500,
+        isClosable: true,
+      })
+    } catch (error) {
+      toast({
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to save case study details',
+        status: 'error',
+        duration: 4000,
+        isClosable: true,
+      })
+    } finally {
+      setSavingMetadata(false)
     }
   }
 
@@ -640,6 +757,38 @@ function InputPage({ studySessionId }, ref) {
 
         {studySessionId && (
           <>
+            <VStack align="stretch" spacing={3}>
+              <Heading as="h2" size="sm">Case Study Details</Heading>
+              <FormControl>
+                <FormLabel mb={1}>Title</FormLabel>
+                <Input
+                  key={`title-${metadataFormKey}`}
+                  ref={studyTitleRef}
+                  defaultValue={metadataDefaults.title}
+                  placeholder="Enter case study title"
+                />
+              </FormControl>
+              <FormControl>
+                <FormLabel mb={1}>Description</FormLabel>
+                <Textarea
+                  key={`description-${metadataFormKey}`}
+                  ref={studyDescriptionRef}
+                  defaultValue={metadataDefaults.description}
+                  placeholder="Enter a short description of this case study"
+                  rows={4}
+                />
+              </FormControl>
+              <HStack justify="flex-end">
+                <Button
+                  colorScheme="blue"
+                  onClick={handleSaveStudyMetadata}
+                  isLoading={savingMetadata}
+                >
+                  Save Details
+                </Button>
+              </HStack>
+            </VStack>
+
             <Divider />
 
             <VStack align="stretch" spacing={4}>
@@ -793,6 +942,14 @@ function InputPage({ studySessionId }, ref) {
                           >
                             <Text fontSize="xs">Custom Min/Max</Text>
                           </Checkbox>
+                          <Checkbox
+                            isChecked={criterion.use_mid_splitting}
+                            onChange={(e) => handleCellChange(idx, 'use_mid_splitting', e.target.checked)}
+                            isDisabled={isLocked || criterion.is_qualitative}
+                            size="sm"
+                          >
+                            <Text fontSize="xs">Mid-value splitting</Text>
+                          </Checkbox>
                           {criterion.use_custom_min_max && (
                             <>
                               <Input
@@ -901,7 +1058,7 @@ function InputPage({ studySessionId }, ref) {
                                   color="blue.600"
                                   flexShrink={0}
                                 >
-                                  ⚙
+                                  <SettingsIcon boxSize={3} />
                                 </Box>
                               </HStack>
                             )}

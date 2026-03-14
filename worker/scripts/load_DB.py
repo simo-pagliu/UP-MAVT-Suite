@@ -10,6 +10,50 @@ standardized Python dictionaries/lists that the core modules expect.
 """
 
 from bson.objectid import ObjectId
+from bisect import bisect_right
+
+
+def _build_piecewise_linear_function(points):
+    """Build a piecewise-linear function with endpoint clamping.
+
+    Interpolates only between the two neighboring points that bracket x.
+    """
+    parsed_points = []
+    for point in points:
+        if not isinstance(point, dict) or 'x' not in point or 'y' not in point:
+            continue
+        parsed_points.append((float(point['x']), float(point['y'])))
+
+    if len(parsed_points) < 2:
+        return None
+
+    sorted_points = sorted(parsed_points, key=lambda pair: pair[0])
+    x_values = [pair[0] for pair in sorted_points]
+    y_values = [pair[1] for pair in sorted_points]
+
+    def piecewise_function(raw_x):
+        x_value = float(raw_x)
+
+        if x_value <= x_values[0]:
+            return y_values[0]
+        if x_value >= x_values[-1]:
+            return y_values[-1]
+
+        left_index = bisect_right(x_values, x_value) - 1
+        right_index = left_index + 1
+
+        x_left = x_values[left_index]
+        y_left = y_values[left_index]
+        x_right = x_values[right_index]
+        y_right = y_values[right_index]
+
+        if x_right == x_left:
+            return y_right
+
+        interpolation_ratio = (x_value - x_left) / (x_right - x_left)
+        return y_left + interpolation_ratio * (y_right - y_left)
+
+    return piecewise_function
 
 
 def load_input_data(db, study_session_id):
@@ -212,7 +256,15 @@ def load_step_results(db, study_session_id, step_number):
     return study.get(field)
 
 
-def save_computed_weights(db, study_session_id, weight_solutions):
+def save_computed_weights(
+    db,
+    study_session_id,
+    weight_solutions,
+    phase1_method='constraint_dominated_ea',
+    method='lhs_simplex',
+    use_non_linear_model=True,
+    phase3_tolerance_pct=1.0,
+):
     """Save computed weight solutions to the study session.
     
     Parameters
@@ -223,6 +275,14 @@ def save_computed_weights(db, study_session_id, weight_solutions):
         Study session ID.
     weight_solutions : dict
         {session_id: [list of weight dicts], ...}
+    phase1_method : str
+        Phase 1 optimization method used to compute z_star.
+    method : str
+        Phase 2 sampling/search method used to generate the candidates.
+    use_non_linear_model : bool
+        Whether the non-linear weight model was used.
+    phase3_tolerance_pct : float
+        Percentage LIM used for Phase 3 filtering.
     
     Returns
     -------
@@ -232,6 +292,10 @@ def save_computed_weights(db, study_session_id, weight_solutions):
     
     result_doc = {
         'timestamp': datetime.now(timezone.utc),
+        'phase1_method': phase1_method,
+        'method': method,
+        'use_non_linear_model': bool(use_non_linear_model),
+        'phase3_tolerance_pct': float(phase3_tolerance_pct),
         'weight_solutions': weight_solutions,
     }
     
@@ -293,13 +357,10 @@ def build_value_functions_from_session(session_doc, criteria, return_confidence=
     -------
     dict or tuple
         If return_confidence=False:
-            Mapping criterion_name -> scipy interp1d function
+            Mapping criterion_name -> piecewise-linear callable
         If return_confidence=True:
             (vf_dict, confidence_dict)
     """
-    from scipy.interpolate import interp1d
-    import numpy as np
-    
     vf_dict = {}
     confidence_dict = {}
     
@@ -318,32 +379,12 @@ def build_value_functions_from_session(session_doc, criteria, return_confidence=
         points = []
         
         if criterion.get('is_qualitative'):
-            # Generate qualitative value function points
-            if qualitative_indicators and name in qualitative_indicators:
-                qi_data = qualitative_indicators[name]
-                ranking = qi_data.get('ranking', {})
-                values = qi_data.get('values', {})
-                is_increasing = qi_data.get('isIncreasing', True)
-                
-                if ranking and values:
-                    unique_ranks = sorted(set(ranking.values()))
-                    if unique_ranks:
-                        total_points = len(unique_ranks) + 2
-                        points.append({'x': 0, 'y': 0 if is_increasing else 1})
-                        
-                        for idx, rank in enumerate(reversed(unique_ranks)):
-                            x_pos = idx + 1
-                            x_normalized = x_pos / (total_points - 1)
-                            y_value = values.get(rank, values.get(str(rank), x_normalized))
-                            points.append({'x': x_normalized, 'y': y_value})
-                        
-                        points.append({'x': 1, 'y': 1 if is_increasing else 0})
-            
-            if return_confidence and qualitative_indicators and name in qualitative_indicators:
-                qual_data = qualitative_indicators[name]
-                confidences_dict = qual_data.get('confidences', {})
-                confidence_dict[name] = {int(k) if isinstance(k, str) and k.isdigit() else k: int(v) 
-                                        for k, v in confidences_dict.items()}
+            # For weight computation and UP-MAVT, qualitative criteria use identity function: vf(x) = x
+            # The uncertainty is encoded in the alternative values themselves (x ± error%)
+            # So the VF has no error: confidence = 4
+            points = [{'x': 0, 'y': 0}, {'x': 1, 'y': 1}]
+            if return_confidence:
+                confidence_dict[name] = 4  # No error in VF, uncertainty is in alternative values
         else:
             # Quantitative criterion
             cfg = criteria_map.get(name, {})
@@ -356,21 +397,10 @@ def build_value_functions_from_session(session_doc, criteria, return_confidence=
         if not points or len(points) < 2:
             continue
         
-        x_vals = [float(p['x']) for p in points if 'x' in p and 'y' in p]
-        y_vals = [float(p['y']) for p in points if 'x' in p and 'y' in p]
-        
-        if len(x_vals) < 2:
+        piecewise_function = _build_piecewise_linear_function(points)
+        if piecewise_function is None:
             continue
-        
-        min_y, max_y = min(y_vals), max(y_vals)
-        interp_func = interp1d(
-            x_vals,
-            y_vals,
-            kind='linear',
-            fill_value=(min_y, max_y),
-            bounds_error=False,
-        )
-        vf_dict[name] = interp_func
+        vf_dict[name] = piecewise_function
     
     if return_confidence:
         return vf_dict, confidence_dict
@@ -451,8 +481,17 @@ def build_alternatives_with_qualitative(input_doc, qualitative_indicators=None):
             value = alt.get('value', '')
             alternatives[alt_name][crit_name] = str(value) if value is not None else ''
     
-    # Substitute qualitative values with x-positions
+    # Substitute qualitative values with x-positions and encode uncertainty
     if qualitative_indicators and isinstance(qualitative_indicators, dict):
+        # Confidence to error percentage mapping
+        confidence_errors = {
+            0: 10.0,
+            1: 7.5,
+            2: 5.0,
+            3: 2.5,
+            4: 0.0,
+        }
+        
         for criterion in criteria:
             if not criterion.get('is_qualitative'):
                 continue
@@ -463,17 +502,35 @@ def build_alternatives_with_qualitative(input_doc, qualitative_indicators=None):
             
             qi_data = qualitative_indicators.get(crit_name, {})
             ranking = qi_data.get('ranking', {})
+            values = qi_data.get('values', {})
+            confidences = qi_data.get('confidences', {})
             
-            if not ranking:
+            if not ranking or not values:
                 continue
             
             for alt_name in alternatives.keys():
                 if alt_name in ranking:
                     rank = ranking[alt_name]
-                    unique_ranks = sorted(set(ranking.values()))
-                    if unique_ranks:
-                        rank_idx = unique_ranks.index(rank) if rank in unique_ranks else 0
-                        x_pos = (rank_idx + 1) / (len(unique_ranks) + 1)
+                    
+                    # Use the actual value from the QI data, not recalculated from rank
+                    rank_key = str(rank) if not isinstance(rank, str) else rank
+                    x_pos = values.get(rank_key, values.get(int(rank_key) if rank_key.isdigit() else rank))
+                    
+                    if x_pos is None:
+                        continue
+                    
+                    x_pos = float(x_pos)
+                    
+                    # Get confidence for this rank and encode uncertainty
+                    conf_key = str(rank) if not isinstance(rank, str) else rank
+                    confidence = confidences.get(conf_key, confidences.get(int(conf_key) if conf_key.isdigit() else conf_key, 4))
+                    error_pct = confidence_errors.get(int(confidence), 0.0)
+                    
+                    if error_pct > 0:
+                        # Format as "x_pos ± error_pct%"
+                        alternatives[alt_name][crit_name] = f"{x_pos} ± {error_pct}%"
+                    else:
+                        # No uncertainty, just store the x_pos
                         alternatives[alt_name][crit_name] = x_pos
     
     return alternatives, criteria_names

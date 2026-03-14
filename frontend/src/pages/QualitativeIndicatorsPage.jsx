@@ -25,10 +25,11 @@ import {
   FormControl,
   FormLabel,
 } from '@chakra-ui/react'
-import { ArrowBackIcon, ArrowForwardIcon, CheckCircleIcon, QuestionIcon } from '@chakra-ui/icons'
+import { ArrowBackIcon, ArrowForwardIcon, CheckCircleIcon, QuestionIcon, LockIcon, AddIcon } from '@chakra-ui/icons'
 import axios from 'axios'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { API_URL } from '../config'
+import QuestionPrompt from '../components/QuestionPrompt'
 
 const clamp = (v, min, max) => {
   const num = Number.isFinite(v) ? v : min
@@ -42,6 +43,8 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
   const [tiers, setTiers] = useState([])
   const [draggedItem, setDraggedItem] = useState(null)
   const [dragSource, setDragSource] = useState(null)
+  const [isDragging, setIsDragging] = useState(false)
+  const [hoverZone, setHoverZone] = useState(null) // 'top', 'bottom', or tier index
 
   useEffect(() => {
     // Initialize with previous ranking if available, otherwise each alternative in its own tier
@@ -81,6 +84,12 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
   const handleDragStart = (tierIdx, itemIdx) => {
     setDraggedItem(alternatives[alternatives.findIndex(a => a === tiers[tierIdx][itemIdx].name)])
     setDragSource({ tierIdx, itemIdx })
+    setIsDragging(true)
+  }
+
+  const handleDragEnd = () => {
+    setIsDragging(false)
+    setHoverZone(null)
   }
 
   const handleDragOver = (e) => {
@@ -118,6 +127,7 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
 
     setDraggedItem(null)
     setDragSource(null)
+    setHoverZone(null)
   }
 
   const handleDropNewTop = () => {
@@ -139,6 +149,7 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
 
     setDraggedItem(null)
     setDragSource(null)
+    setHoverZone(null)
   }
 
   const handleDropNewBottom = () => {
@@ -158,6 +169,52 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
 
     setDraggedItem(null)
     setDragSource(null)
+    setHoverZone(null)
+  }
+
+  const handleDropBetween = (afterTierIdx) => {
+    if (!draggedItem || !dragSource) return
+
+    setTiers((prev) => {
+      const newTiers = prev.map(t => [...t])
+      
+      // Remove from source
+      const sourceTierIdx = dragSource.tierIdx
+      const sourceTierSize = newTiers[sourceTierIdx].length
+      newTiers[sourceTierIdx].splice(dragSource.itemIdx, 1)
+      const sourceTierWasRemoved = newTiers[sourceTierIdx].length === 0
+
+      // If the source tier had a single item, dropping on the immediately-adjacent
+      // between-tier slots should be a no-op (no effective rank change).
+      if (sourceTierSize === 1 && (afterTierIdx === sourceTierIdx - 1 || afterTierIdx === sourceTierIdx)) {
+        return prev
+      }
+      
+      const filteredTiers = newTiers.filter((tier) => tier.length > 0)
+
+      // Insert after the target tier in original coordinates.
+      let insertIdx = afterTierIdx + 1
+
+      // If the source tier disappeared before this insertion boundary,
+      // the filtered array is shorter by one at that point.
+      if (sourceTierWasRemoved && sourceTierIdx <= afterTierIdx) {
+        insertIdx -= 1
+      }
+
+      insertIdx = clamp(insertIdx, 0, filteredTiers.length)
+      
+      // Insert new tier at the calculated position
+      filteredTiers.splice(insertIdx, 0, [{ name: draggedItem, rank: insertIdx }])
+      
+      // Re-index all tiers
+      return filteredTiers.map((tier, idx) => 
+        tier.map(item => ({ ...item, rank: idx }))
+      )
+    })
+
+    setDraggedItem(null)
+    setDragSource(null)
+    setHoverZone(null)
   }
 
   const handleNextPhase = () => {
@@ -174,69 +231,138 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
     <VStack spacing={6} align="stretch">
       <Box>
         <Heading size="md" mb={3}>Step 1: Rank the Alternatives</Heading>
-        <Text fontSize="sm" color="gray.600">Drag alternatives to organize them by preference. Alternatives in the same tier have equal rank. Drop above the first tier or below the last tier to create new ranks.</Text>
+        <QuestionPrompt mb={0}>Drag alternatives to organize them by preference. Alternatives in the same tier have equal rank. Drop on + to add a new tier.</QuestionPrompt>
       </Box>
 
-      <VStack spacing={2} align="stretch">
-        {/* Drop zone for new tier at top */}
-        <Box 
-          minH="40px" 
-          border="2px dashed" 
-          borderColor="blue.200" 
-          borderRadius="md" 
-          p={2} 
-          onDragOver={handleDragOver} 
-          onDrop={handleDropNewTop}
-          bg="blue.50"
-          display="flex"
-          alignItems="center"
-          justifyContent="center"
-        >
-          <Text fontSize="xs" color="blue.600" fontWeight="medium">Drop here to create best rank</Text>
+      <VStack spacing={6} align="stretch">
+        {/* Top + button */}
+        <Box h="20px" display="flex" alignItems="center" pl="8px" mb={-4}>
+          <Box
+            w="24px"
+            h="24px"
+            borderRadius="full"
+            border="2px solid"
+            borderColor={isDragging ? (hoverZone === 'top' ? "blue.500" : "blue.300") : "blue.200"}
+            bg={isDragging ? (hoverZone === 'top' ? "blue.200" : "blue.50") : "white"}
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            opacity={isDragging ? 1 : 0.4}
+            transition="all 0.2s"
+            transform={hoverZone === 'top' ? "scale(1.1)" : "scale(1)"}
+            cursor={isDragging ? "copy" : "default"}
+            onDragOver={handleDragOver}
+            onDrop={handleDropNewTop}
+            onMouseEnter={() => setHoverZone('top')}
+            onMouseLeave={() => setHoverZone(null)}
+          >
+            <AddIcon boxSize="10px" color="blue.500" />
+          </Box>
         </Box>
 
         {tiers.map((tier, tierIdx) => (
-          <Box key={tierIdx} minH="60px" border="2px dashed" borderColor="gray.300" borderRadius="md" p={3} onDragOver={handleDragOver} onDrop={() => handleDrop(tierIdx)}>
-            <HStack spacing={2} wrap="wrap">
-              {tier.length === 0 ? (
-                <Text fontSize="sm" color="gray.400">Drop here for rank {tierIdx}</Text>
-              ) : (
-                tier.map((item, itemIdx) => (
+          <Box key={tierIdx}>
+            <HStack spacing={2} align="stretch">
+              {/* Left spacing column with circle between tiers */}
+              <Box w="40px" position="relative" display="flex" alignItems="center" justifyContent="center" flexShrink={0}>
+                {tierIdx < tiers.length - 1 && (
                   <Box
-                    key={`${tierIdx}-${itemIdx}`}
-                    bg="blue.50"
-                    border="1px solid"
-                    borderColor="blue.200"
-                    px={3}
-                    py={2}
-                    borderRadius="md"
-                    draggable
-                    onDragStart={() => handleDragStart(tierIdx, itemIdx)}
-                    cursor="move"
+                    position="absolute"
+                    bottom="-24px"
+                    left="8px"
+                    w="24px"
+                    h="24px"
+                    borderRadius="full"
+                    border="2px solid"
+                    borderColor={isDragging ? (hoverZone === tierIdx ? "blue.500" : "blue.300") : "blue.200"}
+                    bg={isDragging ? (hoverZone === tierIdx ? "blue.200" : "blue.50") : "white"}
+                    display="flex"
+                    alignItems="center"
+                    justifyContent="center"
+                    opacity={isDragging ? 1 : 0.4}
+                    transition="all 0.2s"
+                    transform={hoverZone === tierIdx ? "scale(1.1)" : "scale(1)"}
+                    cursor={isDragging ? "copy" : "default"}
+                    onDragOver={handleDragOver}
+                    onDrop={() => handleDropBetween(tierIdx)}
+                    onMouseEnter={() => setHoverZone(tierIdx)}
+                    onMouseLeave={() => setHoverZone(null)}
                   >
-                    <Text fontSize="sm" fontWeight="medium">{item.name}</Text>
+                    <AddIcon boxSize="10px" color="blue.500" />
                   </Box>
-                ))
-              )}
+                )}
+              </Box>
+              
+              {/* Tier box */}
+              <Box 
+                flex="1"
+                minH="60px" 
+                border="2px dashed" 
+                borderColor="gray.300" 
+                borderRadius="md" 
+                p={3} 
+                onDragOver={handleDragOver} 
+                onDrop={() => handleDrop(tierIdx)}
+                bg="white"
+                _hover={{ bg: "gray.50", borderColor: "gray.400" }}
+                transition="all 0.2s"
+              >
+                <HStack spacing={2} wrap="wrap">
+                  {tier.length === 0 ? (
+                    <Text fontSize="sm" color="gray.400">Drop here for rank {tierIdx}</Text>
+                  ) : (
+                    tier.map((item, itemIdx) => (
+                      <Box
+                        key={`${tierIdx}-${itemIdx}`}
+                        bg="blue.50"
+                        border="1px solid"
+                        borderColor="blue.200"
+                        px={3}
+                        py={2}
+                        borderRadius="md"
+                        draggable
+                        onDragStart={() => handleDragStart(tierIdx, itemIdx)}
+                        onDragEnd={handleDragEnd}
+                        cursor="move"
+                        _hover={{ bg: "blue.100", transform: "translateY(-1px)", shadow: "sm" }}
+                        transition="all 0.2s"
+                      >
+                        <Text fontSize="sm" fontWeight="medium">{item.name}</Text>
+                      </Box>
+                    ))
+                  )}
+                </HStack>
+              </Box>
             </HStack>
+            
+            {/* Spacing between tiers */}
+            {tierIdx < tiers.length - 1 && <Box h="1px" />}
           </Box>
         ))}
 
-        {/* Drop zone for new tier at bottom */}
-        <Box 
-          minH="40px" 
-          border="2px dashed" 
-          borderColor="blue.200" 
-          borderRadius="md" 
-          p={2} 
-          onDragOver={handleDragOver} 
-          onDrop={handleDropNewBottom}
-          bg="blue.50"
-          display="flex"
-          alignItems="center"
-          justifyContent="center"
-        >
-          <Text fontSize="xs" color="blue.600" fontWeight="medium">Drop here to create worst rank</Text>
+        {/* Bottom + button */}
+        <Box h="20px" display="flex" alignItems="center" pl="8px" mt={-4}>
+          <Box
+            w="24px"
+            h="24px"
+            borderRadius="full"
+            border="2px solid"
+            borderColor={isDragging ? (hoverZone === 'bottom' ? "blue.500" : "blue.300") : "blue.200"}
+            bg={isDragging ? (hoverZone === 'bottom' ? "blue.200" : "blue.50") : "white"}
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            opacity={isDragging ? 1 : 0.4}
+            transition="all 0.2s"
+            transform={hoverZone === 'bottom' ? "scale(1.1)" : "scale(1)"}
+            cursor={isDragging ? "copy" : "default"}
+            onDragOver={handleDragOver}
+            onDrop={handleDropNewBottom}
+            onMouseEnter={() => setHoverZone('bottom')}
+            onMouseLeave={() => setHoverZone(null)}
+          >
+            <AddIcon boxSize="10px" color="blue.500" />
+          </Box>
         </Box>
       </VStack>
     </VStack>
@@ -572,7 +698,7 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
     <VStack spacing={6} align="stretch">
       <Box>
         <Heading size="md">Step 2: Adjust Value Function</Heading>
-        <Text fontSize="sm" color="gray.600">Use sliders to adjust utility values for each rank. Use the toggle to switch between increasing and decreasing functions.</Text>
+        <QuestionPrompt mb={0}>Use sliders to adjust utility values for each rank. Use the toggle to switch between increasing and decreasing functions.</QuestionPrompt>
       </Box>
 
       <HStack spacing={4} wrap="wrap">
@@ -677,13 +803,14 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
   )
 }
 
-function QualitativeIndicatorsPage({ sessionId }) {
+function QualitativeIndicatorsPage({ sessionId, onPageChange }) {
   const [criteria, setCriteria] = useState([])
   const [qualitativeData, setQualitativeData] = useState({})
   const [activeIndicatorIdx, setActiveIndicatorIdx] = useState(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [isSessionLocked, setIsSessionLocked] = useState(false)
+  const [isBwtLockActive, setIsBwtLockActive] = useState(false)
   const [phase, setPhase] = useState('ranking') // 'ranking' or 'adjustment'
   const [currentRanking, setCurrentRanking] = useState(null)
   const [savedValues, setSavedValues] = useState(null)
@@ -793,13 +920,16 @@ function QualitativeIndicatorsPage({ sessionId }) {
         setLoading(true)
         const response = await axios.get(`${API_URL}/session/${sessionId}`)
         const session = response.data
-        setIsSessionLocked(session?.session_locked || false)
+        const practitionerLock = session?.session_locked || false
+        const bwtLock = Boolean(session?.bwt?.qi_vf_lock_active)
+        setIsSessionLocked(practitionerLock || bwtLock)
+        setIsBwtLockActive(bwtLock)
         setCriteria(session?.criteria || [])
         setQualitativeData(session?.qualitative_indicators || {})
       } catch (error) {
         console.error('Failed to fetch session:', error)
         toast({
-          title: 'Error',
+          title: 'Request failed',
           description: 'Failed to load session',
           status: 'error',
           duration: 3000,
@@ -901,7 +1031,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
       setPhase('ranking')
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to save',
         status: 'error',
         duration: 3000,
@@ -916,6 +1046,10 @@ function QualitativeIndicatorsPage({ sessionId }) {
   const handlePhase2CompleteFromTop = (data) => {
     handlePhase2Complete(data)
   }
+
+  const handleTierRankingChange = useCallback((ranking) => {
+    setCurrentRanking(ranking)
+  }, [])
 
   const handlePhase2Complete = async (data) => {
     if (isSessionLocked) {
@@ -946,7 +1080,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
 
       setQualitativeData(updatedData)
       toast({
-        title: 'Success',
+        title: 'Completed',
         description: `Saved ${activeIndicator.criterion_name}`,
         status: 'success',
         duration: 2000,
@@ -969,7 +1103,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
       }
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: error.response?.data?.error || 'Failed to save',
         status: 'error',
         duration: 3000,
@@ -1016,7 +1150,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
         loadIndicatorData(idx, qualitativeCriteria[idx].criterion_name, updatedData)
       } catch (error) {
         toast({
-          title: 'Error',
+          title: 'Request failed',
           description: error.response?.data?.error || 'Failed to save',
           status: 'error',
           duration: 3000,
@@ -1117,9 +1251,25 @@ function QualitativeIndicatorsPage({ sessionId }) {
       >
           {isSessionLocked && (
             <Box bg="yellow.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="yellow.400" mb={4}>
-              <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
-                🔒 Session is locked. Changes are disabled.
-              </Text>
+              <HStack spacing={2} align="flex-start">
+                <LockIcon color="yellow.800" />
+                <VStack align="start" spacing={2} flex={1}>
+                  <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
+                    {isBwtLockActive
+                      ? 'Qualitative Indicators are locked while weight elicitation is active.'
+                      : 'Qualitative Indicators are locked by the practitioner.'}
+                  </Text>
+                  {isBwtLockActive ? (
+                    <Button size="xs" variant="outline" onClick={() => onPageChange?.('pile')}>
+                      Go to Weights to unlock
+                    </Button>
+                  ) : (
+                    <Text fontSize="xs" color="yellow.800">
+                      Ask the practitioner/admin to unlock this session.
+                    </Text>
+                  )}
+                </VStack>
+              </HStack>
             </Box>
           )}
 
@@ -1143,77 +1293,8 @@ function QualitativeIndicatorsPage({ sessionId }) {
 
               <VStack spacing={6} align="stretch">
                 <Box>
-                  <HStack justify="space-between">
-                    <Box>
-                      <Heading size="lg">{activeIndicator.criterion_name}</Heading>
-                      <Text fontSize="sm" color="gray.600" mt={1}>{activeIndicator.description}</Text>
-                    </Box>
-                    <HStack spacing={2}>
-                      {phase === 'ranking' ? (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            leftIcon={<ArrowBackIcon />}
-                            onClick={() => {
-                              if (activeIndicatorIdx > 0) {
-                                const newIdx = activeIndicatorIdx - 1
-                                setActiveIndicatorIdx(newIdx)
-                                loadIndicatorData(newIdx, qualitativeCriteria[newIdx].criterion_name)
-                              }
-                            }}
-                            isDisabled={activeIndicatorIdx === 0}
-                          >
-                            Previous
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            rightIcon={<ArrowForwardIcon />}
-                            onClick={() => {
-                              if (!currentRanking) return
-                              // Ranking complete: go to adjustment for the current indicator
-                              const savedData = qualitativeData[activeIndicator.criterion_name]
-                              if (savedData && hasRankingOrderChanged(savedData.ranking, currentRanking)) {
-                                setSavedValues(null)
-                                setSavedIsIncreasing(null)
-                              }
-                              setPhase('adjustment')
-                            }}
-                            isDisabled={!currentRanking}
-                          >
-                            Next
-                          </Button>
-                        </>
-                      ) : (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            leftIcon={<ArrowBackIcon />}
-                            onClick={handlePhase2Back}
-                          >
-                            Back
-                          </Button>
-                          <Button
-                            size="sm"
-                            colorScheme="blue"
-                            rightIcon={<CheckCircleIcon />}
-                            onClick={() => {
-                              handlePhase2Complete({
-                                ranking: currentRanking,
-                                values: currentAdjustedValues,
-                                isIncreasing: currentIsIncreasing,
-                              })
-                            }}
-                            isLoading={saving}
-                          >
-                            Confirm
-                          </Button>
-                        </>
-                      )}
-                    </HStack>
-                  </HStack>
+                  <Heading size="lg">{activeIndicator.criterion_name}</Heading>
+                  <Text fontSize="sm" color="gray.600" mt={1}>{activeIndicator.description}</Text>
                 </Box>
 
                 {phase === 'ranking' ? (
@@ -1223,10 +1304,7 @@ function QualitativeIndicatorsPage({ sessionId }) {
                     onComplete={handlePhase1Complete}
                     isDisabled={isSessionLocked}
                     initialRanking={currentRanking}
-                    onRankingChange={(ranking) => {
-                      // Update current ranking as user drags alternatives
-                      setCurrentRanking(ranking)
-                    }}
+                    onRankingChange={handleTierRankingChange}
                   />
                 ) : (
                   <SliderPhase
@@ -1250,6 +1328,71 @@ function QualitativeIndicatorsPage({ sessionId }) {
                     }}
                   />
                 )}
+
+                <HStack spacing={2} justify="flex-end">
+                  {phase === 'ranking' ? (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        leftIcon={<ArrowBackIcon />}
+                        onClick={() => {
+                          if (activeIndicatorIdx > 0) {
+                            const newIdx = activeIndicatorIdx - 1
+                            setActiveIndicatorIdx(newIdx)
+                            loadIndicatorData(newIdx, qualitativeCriteria[newIdx].criterion_name)
+                          }
+                        }}
+                        isDisabled={activeIndicatorIdx === 0}
+                      >
+                        Previous
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        rightIcon={<ArrowForwardIcon />}
+                        onClick={() => {
+                          if (!currentRanking) return
+                          const savedData = qualitativeData[activeIndicator.criterion_name]
+                          if (savedData && hasRankingOrderChanged(savedData.ranking, currentRanking)) {
+                            setSavedValues(null)
+                            setSavedIsIncreasing(null)
+                          }
+                          setPhase('adjustment')
+                        }}
+                        isDisabled={!currentRanking}
+                      >
+                        Next
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        leftIcon={<ArrowBackIcon />}
+                        onClick={handlePhase2Back}
+                      >
+                        Back
+                      </Button>
+                      <Button
+                        size="sm"
+                        colorScheme="blue"
+                        rightIcon={<CheckCircleIcon />}
+                        onClick={() => {
+                          handlePhase2Complete({
+                            ranking: currentRanking,
+                            values: currentAdjustedValues,
+                            isIncreasing: currentIsIncreasing,
+                          })
+                        }}
+                        isLoading={saving}
+                      >
+                        Confirm
+                      </Button>
+                    </>
+                  )}
+                </HStack>
               </VStack>
             </>
           )}

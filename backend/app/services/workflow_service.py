@@ -7,6 +7,9 @@ task state and exporting results.
 
 import csv
 import io
+import json
+import re
+import zipfile
 from datetime import datetime, timezone
 
 from app.repositories import StudySessionRepository, SessionRepository, TaskRepository
@@ -28,7 +31,15 @@ class WorkflowService:
         self._tasks = TaskRepository(db)
         self._session_svc = SessionService(db)
 
-    def create_compute_weights_task(self, study_session_id, selected_session_ids):
+    def create_compute_weights_task(
+        self,
+        study_session_id,
+        selected_session_ids,
+        use_non_linear_model=True,
+        phase1_method='constraint_dominated_ea',
+        weight_sampling_method='lhs_simplex',
+        phase3_tolerance_pct=1.0,
+    ):
         """Enqueue a background task to compute weights for the selected sessions.
 
         Any existing pending or running ``compute_weights`` tasks for the same
@@ -38,6 +49,14 @@ class WorkflowService:
             study_session_id: The parent study session's ``_id``.
             selected_session_ids (list): The ``_id`` values of the elicitation
                 sessions to include.
+            use_non_linear_model (bool): Whether to use the non-linear
+                weight model for constraint violation.
+            phase1_method (str): Phase 1 method used to compute the
+                minimum violation bound.
+            weight_sampling_method (str): Phase 2 candidate generation method
+                used by the worker.
+            phase3_tolerance_pct (float): Phase 3 filtering tolerance percentage
+                LIM used in z_cap = z_star + z_star*LIM.
 
         Returns:
             str: The ``_id`` of the newly created task as a hex string.
@@ -58,6 +77,10 @@ class WorkflowService:
             'params': {
                 'study_session_id': study_session_id,
                 'selected_session_ids': selected_session_ids,
+                'use_non_linear_model': bool(use_non_linear_model),
+                'phase1_method': phase1_method,
+                'weight_sampling_method': weight_sampling_method,
+                'phase3_tolerance_pct': float(phase3_tolerance_pct),
             },
             'console_output': '',
             'created_at': datetime.now(timezone.utc),
@@ -77,7 +100,7 @@ class WorkflowService:
             step_number (int): The UP-MAVT step to run (2–6).
             selected_session_ids (list): The elicitation session IDs to include.
             mc_iterations (int): Number of Monte-Carlo iterations (clamped to
-                [100, 5000]).
+                [100, 5000] for steps 2-5, [100, 10000] for step 6).
             aggregation_method (str): Aggregation method shortcode or full
                 name (``'SUM'``/``'weighted_sum'``, ``'GEO'``/``'geometric_mean'``,
                 ``'HAR'``/``'harmonic_mean'``).
@@ -101,7 +124,8 @@ class WorkflowService:
             raise ValidationError('No sessions selected')
 
         try:
-            mc_iterations = max(100, min(5000, int(mc_iterations)))
+            upper = 10000 if step_number == 6 else 5000
+            mc_iterations = max(100, min(upper, int(mc_iterations)))
         except (TypeError, ValueError):
             mc_iterations = 1000
 
@@ -295,6 +319,10 @@ class WorkflowService:
                 'computed': True,
                 'timestamp': ts.isoformat() if ts else None,
                 'session_count': len(ws) if isinstance(ws, dict) else 0,
+                'phase1_method': computed_weights.get('phase1_method', 'constraint_dominated_ea'),
+                'method': computed_weights.get('method', 'lhs_simplex'),
+                'use_non_linear_model': computed_weights.get('use_non_linear_model', True),
+                'phase3_tolerance_pct': computed_weights.get('phase3_tolerance_pct', 1.0),
             }
         steps_status = {}
         for step_num in [2, 3, 4, 5, 6]:
@@ -342,7 +370,13 @@ class WorkflowService:
         data = ws.get(session_id, [])
         if not data:
             raise NotFoundError('Weight space not found for this session')
-        return data
+        return {
+            'weight_space': data,
+            'phase1_method': cw.get('phase1_method', 'constraint_dominated_ea'),
+            'method': cw.get('method', 'lhs_simplex'),
+            'use_non_linear_model': cw.get('use_non_linear_model', True),
+            'phase3_tolerance_pct': cw.get('phase3_tolerance_pct', 1.0),
+        }
 
     def get_step_results(self, study_session_id, step_number):
         """Return the stored results for a specific UP-MAVT step.
@@ -493,3 +527,156 @@ class WorkflowService:
         session_doc = self._sessions.find_by_id(session_id)
         session_name = session_doc.get('name') if isinstance(session_doc, dict) else session_id
         return output.getvalue().encode(), f'weight_solutions_{session_name}.csv', 'text/csv'
+
+    @staticmethod
+    def _safe_filename(value):
+        sanitized = re.sub(r'[^a-zA-Z0-9._-]+', '_', str(value or '')).strip('._')
+        return sanitized or 'unnamed'
+
+    @staticmethod
+    def _json_bytes(data):
+        return json.dumps(data, ensure_ascii=False, indent=2, default=str).encode('utf-8')
+
+    @staticmethod
+    def _rows_to_csv(headers, rows):
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(headers)
+        for row in rows:
+            writer.writerow(row)
+        return output.getvalue()
+
+    @staticmethod
+    def _build_rank_probability_matrix(results):
+        alternatives = results.get('alternative_names') if isinstance(results, dict) else None
+        rows = results.get('aggregated_results') if isinstance(results, dict) else None
+        if not isinstance(alternatives, list) or not alternatives or not isinstance(rows, list) or not rows:
+            return None
+
+        alt_count = len(alternatives)
+        rank_counts = [[0 for _ in range(alt_count)] for _ in range(alt_count)]
+
+        for score_row in rows:
+            if not isinstance(score_row, list) or len(score_row) < alt_count:
+                continue
+            ranked = sorted(
+                [{
+                    'alt_index': idx,
+                    'score': float(score_row[idx]) if score_row[idx] is not None else 0.0,
+                } for idx in range(alt_count)],
+                key=lambda item: (-item['score'], item['alt_index'])
+            )
+            for rank_idx, entry in enumerate(ranked):
+                rank_counts[rank_idx][entry['alt_index']] += 1
+
+        total_iterations = len(rows)
+        if total_iterations <= 0:
+            return None
+
+        probabilities = [
+            [count / total_iterations for count in rank_row]
+            for rank_row in rank_counts
+        ]
+
+        return {
+            'alternatives': alternatives,
+            'probabilities': probabilities,
+            'iterations': total_iterations,
+        }
+
+    def _write_rank_probability_csv(self, zf, path, matrix):
+        headers = ['rank', *matrix['alternatives']]
+        rows = []
+        for rank_idx, rank_row in enumerate(matrix['probabilities']):
+            rows.append([rank_idx + 1, *[round(float(prob), 6) for prob in rank_row]])
+        zf.writestr(path, self._rows_to_csv(headers, rows))
+
+    def _write_strict_results_long_csv(self, zf, path, step_results):
+        alternatives = step_results.get('alternative_names') if isinstance(step_results, dict) else None
+        by_elicitation = step_results.get('results_by_elicitation') if isinstance(step_results, dict) else None
+        if not isinstance(alternatives, list) or not alternatives or not isinstance(by_elicitation, dict):
+            return
+
+        headers = ['elicitation', 'iteration', 'alternative', 'score']
+        rows = []
+        for elicitation_key, iteration_rows in sorted(by_elicitation.items(), key=lambda item: str(item[0])):
+            if not isinstance(iteration_rows, list):
+                continue
+            for iteration_idx, score_row in enumerate(iteration_rows):
+                if not isinstance(score_row, list):
+                    continue
+                for alt_idx, alt_name in enumerate(alternatives):
+                    if alt_idx >= len(score_row):
+                        continue
+                    rows.append([elicitation_key, iteration_idx, alt_name, score_row[alt_idx]])
+
+        if rows:
+            zf.writestr(path, self._rows_to_csv(headers, rows))
+
+    def export_workflow_data_zip(self, study_session_id):
+        study = self._studies.find_by_id(study_session_id)
+        if not study:
+            raise NotFoundError('Study session not found')
+
+        study_code = self._safe_filename(study.get('code', study_session_id))
+        bundle_name = f'upmavt_data_{study_code}.zip'
+
+        session_docs = self._sessions.find_by_study_session_id(study_session_id)
+        session_map = {
+            str(doc.get('_id')): {
+                'id': str(doc.get('_id')),
+                'name': doc.get('name'),
+                'session_locked': bool(doc.get('session_locked')),
+            }
+            for doc in session_docs if isinstance(doc, dict)
+        }
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            metadata = {
+                'study_session_id': str(study.get('_id')),
+                'study_code': study.get('code'),
+                'exported_at': datetime.now(timezone.utc).isoformat(),
+                'session_count': len(session_map),
+                'sessions': list(session_map.values()),
+            }
+            zf.writestr('metadata.json', self._json_bytes(metadata))
+
+            computed_weights = study.get('computed_weights')
+            if computed_weights:
+                zf.writestr('weights/computed_weights.json', self._json_bytes(computed_weights))
+
+            for step_number in [2, 3, 4, 5, 6]:
+                step_results = study.get(f'step_{step_number}_results')
+                if not step_results:
+                    continue
+
+                zf.writestr(f'steps/step_{step_number}_results.json', self._json_bytes(step_results))
+
+                if step_number in [2, 5]:
+                    self._write_strict_results_long_csv(
+                        zf,
+                        f'steps/step_{step_number}_strict_long.csv',
+                        step_results,
+                    )
+                elif step_number in [3, 6]:
+                    matrix = self._build_rank_probability_matrix(step_results)
+                    if matrix:
+                        self._write_rank_probability_csv(
+                            zf,
+                            f'steps/step_{step_number}_rank_probabilities.csv',
+                            matrix,
+                        )
+                elif step_number == 4 and isinstance(step_results.get('results_by_aggregation'), dict):
+                    for agg_name, agg_results in step_results['results_by_aggregation'].items():
+                        matrix = self._build_rank_probability_matrix(agg_results if isinstance(agg_results, dict) else {})
+                        if matrix:
+                            safe_agg = self._safe_filename(agg_name)
+                            self._write_rank_probability_csv(
+                                zf,
+                                f'steps/step_4_rank_probabilities_{safe_agg}.csv',
+                                matrix,
+                            )
+
+        buf.seek(0)
+        return buf, bundle_name, 'application/zip'

@@ -294,9 +294,14 @@ class SessionService:
             return []
         input_id = self._sessions._to_oid(session.get('input_id'))
         if input_id:
-            input_doc = self._inputs.find_by_id(input_id)
-            if isinstance(input_doc, dict) and isinstance(input_doc.get('criteria'), list):
-                return input_doc.get('criteria')
+            try:
+                input_doc = self._inputs.find_by_id(input_id)
+                if isinstance(input_doc, dict):
+                    criteria = input_doc.get('criteria')
+                    if isinstance(criteria, list):
+                        return criteria
+            except Exception as e:
+                print(f"Warning: Could not fetch input document {input_id}: {e}")
         return session.get('criteria', [])
 
     def _serialize_session(self, session):
@@ -604,8 +609,9 @@ class SessionService:
     def toggle_session_lock(self, session_id):
         """Toggle the session-lock flag on a session.
 
-        When session-locked, all data fields (qualitative indicators, value
-        functions, BWT) become read-only.
+        When session-locked, qualitative indicators and value functions become
+        read-only. PILE-BWT remains editable so users can continue weight
+        elicitation.
 
         Args:
             session_id: The session's ``_id`` (string or ObjectId).
@@ -637,8 +643,11 @@ class SessionService:
         session = self._sessions.find_by_id(session_id)
         if not session:
             raise NotFoundError('Session not found')
+        # Check both practitioner lock and BWT user lock
         if session.get('session_locked', False):
             raise LockedError('Session is locked')
+        if (session.get('bwt') or {}).get('qi_vf_lock_active', False):
+            raise LockedError('QI/VF are locked by PILE-BWT')
         criteria = self.resolve_session_criteria(session)
         normalized = self.normalize_qualitative_indicators(criteria, value)
         self._sessions.update(session_id, {'qualitative_indicators': normalized})
@@ -658,8 +667,11 @@ class SessionService:
         session = self._sessions.find_by_id(session_id)
         if not session:
             raise NotFoundError('Session not found')
+        # Check both practitioner lock and BWT user lock
         if session.get('session_locked', False):
             raise LockedError('Session is locked')
+        if (session.get('bwt') or {}).get('qi_vf_lock_active', False):
+            raise LockedError('QI/VF are locked by PILE-BWT')
         self._sessions.update(session_id, {'value_functions': value})
 
     def update_bwt(self, session_id, value):
@@ -671,11 +683,12 @@ class SessionService:
 
         Raises:
             NotFoundError: When the session does not exist.
-            LockedError: When the session is locked.
+            LockedError: When the session is locked by practitioner.
         """
         session = self._sessions.find_by_id(session_id)
         if not session:
             raise NotFoundError('Session not found')
+        # Only check practitioner lock (session_locked), not BWT user lock
         if session.get('session_locked', False):
             raise LockedError('Session is locked')
         self._sessions.update(session_id, {'bwt': value})

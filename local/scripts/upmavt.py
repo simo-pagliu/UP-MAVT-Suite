@@ -9,7 +9,8 @@ Simone Pagliuca, 2025-2026
 import numpy as np
 from scipy.interpolate import interp1d
 import sys
-from weight_space_definition import (
+import re
+from .weight_space_definition import (
     build_constraint_structure,
 )
 
@@ -44,23 +45,19 @@ def weight_sampler(weight_solutions, criteria, constraint_data=None, use_random_
     dict
         Mapping criterion_name -> sampled weight.
     """
-    if use_random_weights:
+    if use_random_weights and (not isinstance(weight_solutions, list) or len(weight_solutions) == 0):
         # Dirichlet distribution: uniform random weights
         n = len(criteria)
         raw = np.random.dirichlet(np.ones(n))
         return {crit: raw[i] for i, crit in enumerate(criteria)}
 
     if not isinstance(weight_solutions, list) or len(weight_solutions) == 0:
-        # Fallback: equal weights if no solutions are available
-        n = max(1, len(criteria))
-        return {crit: 1.0 / n for crit in criteria}
-
+        raise ValueError("No precomputed weight solutions available")
     selected = weight_solutions[np.random.randint(len(weight_solutions))]
     if not isinstance(selected, dict):
-        n = max(1, len(criteria))
-        return {crit: 1.0 / n for crit in criteria}
+        raise ValueError("Selected weight solution is not a valid mapping")
 
-    return {crit: float(selected.get(crit, 0.0)) for crit in criteria}
+    return {crit: float(selected[crit]) for crit in criteria}
 
 
 # ============================================================================
@@ -88,6 +85,13 @@ def sample_from_distribution(dist_str):
         a, b = float(parts[0].strip()), float(parts[1].strip())
         return np.random.uniform(a, b)
 
+    # Triangular distribution: TRI(a, b, c)
+    if dist_str.startswith('TRI('):
+        parts = dist_str[4:-1].split(',')
+        if len(parts) >= 3:
+            a, b, c = float(parts[0].strip()), float(parts[1].strip()), float(parts[2].strip())
+            return np.random.triangular(a, b, c)
+
     # Percentage or absolute margin: 50 ± 5% or 50 ± 5
     if '±' in dist_str:
         parts = dist_str.split('±')
@@ -99,6 +103,37 @@ def sample_from_distribution(dist_str):
         else:
             margin = float(margin_str)
         return np.random.uniform(base - margin, base + margin)
+
+    # Histogram-like distribution: (a-b: p%, c-d: q%, ...)
+    if dist_str.startswith('(') and dist_str.endswith(')'):
+        inner = dist_str[1:-1].strip()
+        if inner:
+            ranges = []
+            probs = []
+            parts = [p.strip() for p in inner.split(',') if p.strip()]
+            for part in parts:
+                match = re.match(
+                    r'^([-+]?\d+(?:\.\d+)?)\s*-\s*([-+]?\d+(?:\.\d+)?)\s*:\s*([-+]?\d+(?:\.\d+)?)%$',
+                    part,
+                )
+                if not match:
+                    ranges = []
+                    probs = []
+                    break
+                a = float(match.group(1))
+                b = float(match.group(2))
+                p = float(match.group(3))
+                low, high = (a, b) if a <= b else (b, a)
+                ranges.append((low, high))
+                probs.append(max(0.0, p))
+
+            if ranges:
+                total = sum(probs)
+                if total > 0:
+                    p_norm = [p / total for p in probs]
+                    idx = int(np.random.choice(len(ranges), p=p_norm))
+                    low, high = ranges[idx]
+                    return np.random.uniform(low, high)
 
     # Trapezoidal: TRAP(a, b, c, d[, min_prob])
     if dist_str.startswith('TRAP('):
@@ -149,8 +184,8 @@ def sample_from_distribution(dist_str):
     # Fallback
     try:
         return float(dist_str.replace('{', '').replace('}', ''))
-    except Exception:
-        return 0.0
+    except Exception as exc:
+        raise ValueError(f"Unsupported or invalid distribution format: {dist_str}") from exc
 
 
 # ============================================================================
@@ -179,9 +214,11 @@ def harmonic_mean(intermediate_results):
     for weight, value in intermediate_results:
         if value > 0:
             denom += weight / value
+        else:
+            return 0.001  # Avoid zero or negative values in harmonic mean
     if denom > 0:
         return 1.0 / denom
-    return 0.0
+    return 0.001  # Avoid zero
 
 
 # ============================================================================
@@ -189,11 +226,13 @@ def harmonic_mean(intermediate_results):
 # ============================================================================
 def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_lists,
                          weight_elicit_idx, vf_elicit_idx, sampled_weights,
-                         aggregation_func, qualitative_indicators=None):
+                         aggregation_func):
     """Evaluate single alternative using MAVT.
     
-    For quantitative criteria: sample raw value -> apply VF -> add confidence error
-    For qualitative criteria: use normalized x position -> add confidence error per rank
+    Sample from alternative value distribution -> apply VF -> apply confidence error
+    
+    For qualitative criteria: uncertainty is already encoded in alternative values (x ± error%),
+    and VF is identity (y=x) with confidence=4 (no additional error).
     """
     confidence_errors = {
         0: 0.10,
@@ -207,48 +246,28 @@ def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_list
 
     for crit in criteria:
         if crit in alt_data:
+            # Sample from distribution (handles both deterministic values and distributions)
             raw_value = sample_from_distribution(alt_data[crit])
 
             vf = vf_lists[vf_elicit_idx].get(crit)
-            confidence_info = confidence_lists[vf_elicit_idx].get(crit)
+            confidence = confidence_lists[vf_elicit_idx].get(crit, 4)
             
-            if vf is None and isinstance(confidence_info, dict):
-                # Qualitative criterion: use normalized position with per-rank confidence
-                normalized_value = float(raw_value)  # raw_value is already x_normalized
-                
-                # Get the rank for this alternative from qualitative_indicators
-                qi_info = qualitative_indicators[crit]
-                ranking = qi_info['ranking']
-                rank = ranking[alt_name]
-                # Get confidence for this rank from confidence_info dict
-                confidence = confidence_info[rank]
-                
-                # Apply confidence error margin
-                error_pct = confidence_errors[confidence]
-                if error_pct > 0:
-                    error_margin = normalized_value * error_pct
-                    normalized_value = np.random.uniform(
-                        normalized_value - error_margin,
-                        normalized_value + error_margin
-                    )
-                    normalized_value = np.clip(normalized_value, 0.0, 1.0)
-            elif vf is not None and isinstance(confidence_info, int):
-                # Quantitative criterion: traditional VF + single confidence
-                normalized_value = float(vf(raw_value))
-                confidence = confidence_info
-                
-                error_pct = confidence_errors[confidence]
-                if error_pct > 0:
-                    error_margin = normalized_value * error_pct
-                    normalized_value = np.random.uniform(
-                        normalized_value - error_margin,
-                        normalized_value + error_margin
-                    )
-                    normalized_value = np.clip(normalized_value, 0.0, 1.0)
-            else:
-                continue
+            # Apply value function
+            normalized_value = float(vf(raw_value))
+            
+            # Apply confidence error margin
+            error_pct = confidence_errors.get(confidence, 0.0)
+            if error_pct > 0:
+                error_margin = normalized_value * error_pct
+                normalized_value = np.random.uniform(
+                    normalized_value - error_margin,
+                    normalized_value + error_margin
+                )
+            normalized_value = np.clip(normalized_value, 0.001, 1.0)
 
-            w = sampled_weights.get(crit, 1.0 / len(criteria))
+            if crit not in sampled_weights:
+                raise KeyError(f"Missing weight for criterion '{crit}' in sampled_weights")
+            w = float(sampled_weights[crit])
             intermediate_results.append((w, normalized_value))
 
     score = aggregation_func(intermediate_results)
@@ -261,7 +280,7 @@ def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_list
 def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
                     confidence_lists, constraint_data_list, aggregation_method,
                     opinion_weights, num_iterations, mc_mode, use_random_weights=False,
-                    qualitative_indicators=None, print_fn=None):
+                    print_fn=None):
     """Run MC simulation.
 
     Parameters
@@ -307,7 +326,23 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
 
         for iteration in range(num_iterations):
             if iteration % 100 == 0:
-                print_fn(f"  Iteration {iteration}/{num_iterations}")
+                n_so_far = iteration  # samples collected before this iteration
+                if n_so_far > 1:
+                    # Average MC_std across elicitations for each alternative
+                    mc_std_parts = []
+                    for alt_name in alternatives.keys():
+                        all_scores = []
+                        for elicit_idx in range(num_elicitations):
+                            all_scores.extend(results[elicit_idx][alt_name])
+                        if len(all_scores) > 1:
+                            arr = np.array(all_scores)
+                            n = len(arr)
+                            mc_std = np.sqrt(1 / (n * (n - 1)) * (np.sum(arr ** 2) - 1 / n * np.sum(arr) ** 2))
+                            mc_std_parts.append(f"{alt_name}={mc_std:.4f}")
+                    std_str = ', '.join(mc_std_parts)
+                    print_fn(f"  Iteration {iteration}/{num_iterations}  MC_std = {std_str}")
+                else:
+                    print_fn(f"  Iteration {iteration}/{num_iterations}")
                 sys.stdout.flush()
             for elicit_idx in range(num_elicitations):
                 sampled_weights = weight_sampler(
@@ -318,8 +353,7 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
                 for alt_name, alt_data in alternatives.items():
                     score = evaluate_alternative(
                         alt_name, alt_data, criteria, vf_lists, confidence_lists,
-                        elicit_idx, elicit_idx, sampled_weights, agg_func,
-                        qualitative_indicators=qualitative_indicators
+                        elicit_idx, elicit_idx, sampled_weights, agg_func
                     )
                     results[elicit_idx][alt_name].append(score)
     else:
@@ -328,7 +362,19 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
 
         for iteration in range(num_iterations):
             if iteration % 100 == 0:
-                print_fn(f"  Iteration {iteration}/{num_iterations}")
+                n_so_far = iteration
+                if n_so_far > 1:
+                    mc_std_parts = []
+                    for alt_name in alternatives.keys():
+                        if len(results[alt_name]) > 1:
+                            arr = np.array(results[alt_name])
+                            n = len(arr)
+                            mc_std = np.sqrt(1 / (n * (n - 1)) * (np.sum(arr ** 2) - 1 / n * np.sum(arr) ** 2))
+                            mc_std_parts.append(f"{alt_name}={mc_std:.4f}")
+                    std_str = ', '.join(mc_std_parts)
+                    print_fn(f"  Iteration {iteration}/{num_iterations}  MC_std = {std_str}")
+                else:
+                    print_fn(f"  Iteration {iteration}/{num_iterations}")
                 sys.stdout.flush()
             weight_elicit_idx = np.random.choice(num_elicitations, p=opinion_weights)
             sampled_weights = weight_sampler(
@@ -341,8 +387,7 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
             for alt_name, alt_data in alternatives.items():
                 score = evaluate_alternative(
                     alt_name, alt_data, criteria, vf_lists, confidence_lists,
-                    weight_elicit_idx, vf_elicit_idx, sampled_weights, agg_func,
-                    qualitative_indicators=qualitative_indicators
+                    weight_elicit_idx, vf_elicit_idx, sampled_weights, agg_func
                 )
                 results[alt_name].append(score)
 
@@ -479,7 +524,7 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
         alternatives, criteria_names, weight_solutions_list, vf_lists,
         confidence_lists, constraint_data_list, aggregation_method,
         opinion_weights, mc_iterations, mc_mode, use_random_weights=use_random_weights,
-        qualitative_indicators=None, print_fn=print_fn,
+        print_fn=print_fn,
     )
     print_fn("✓ Simulation complete")
 

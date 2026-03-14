@@ -60,6 +60,20 @@ class TestCreateComputeWeightsTask:
         assert isinstance(task_id, str)
         assert len(task_id) == 24
 
+    def test_persists_selected_sampling_method(self, mock_db, wf_svc, study_id, session_id):
+        task_id = wf_svc.create_compute_weights_task(
+            study_id,
+            [session_id],
+            use_non_linear_model=True,
+            phase1_method='differential_evolution',
+            weight_sampling_method='dirichlet',
+            phase3_tolerance_pct=2.5,
+        )
+        task = mock_db.tasks.find_one({'_id': ObjectId(task_id)})
+        assert task['params']['phase1_method'] == 'differential_evolution'
+        assert task['params']['weight_sampling_method'] == 'dirichlet'
+        assert task['params']['phase3_tolerance_pct'] == 2.5
+
     def test_no_sessions_raises(self, wf_svc, study_id):
         with pytest.raises(ValidationError, match='No sessions selected'):
             wf_svc.create_compute_weights_task(study_id, [])
@@ -244,6 +258,7 @@ class TestGetWorkflowStatus:
         status = wf_svc.get_workflow_status(study_with_weights)
         assert status['weights']['computed'] is True
         assert status['weights']['session_count'] >= 1
+        assert status['weights']['method'] == 'lhs_simplex'
 
     def test_not_found_raises(self, wf_svc):
         with pytest.raises(NotFoundError):
@@ -257,7 +272,9 @@ class TestGetWorkflowStatus:
 class TestGetWeightSpace:
     def test_returns_weight_data(self, wf_svc, study_with_weights, session_id):
         data = wf_svc.get_weight_space(study_with_weights, session_id)
-        assert isinstance(data, list)
+        assert isinstance(data, dict)
+        assert data['method'] == 'lhs_simplex'
+        assert isinstance(data['weight_space'], list)
 
     def test_not_computed_raises(self, wf_svc, study_id, session_id):
         with pytest.raises(NotFoundError, match='not computed yet'):

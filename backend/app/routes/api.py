@@ -21,6 +21,20 @@ def _send(content, filename, mimetype):
 
 
 # --------------------------------------------------------------------------- #
+# Health Check
+# --------------------------------------------------------------------------- #
+@bp.route('/health', methods=['GET'])
+def health_check():
+    """Health check endpoint to verify backend and database connectivity."""
+    try:
+        # Try to perform a simple database operation
+        current_app.db.command('ping')
+        return jsonify({'status': 'ok', 'database': 'connected'}), 200
+    except Exception as e:
+        return jsonify({'status': 'error', 'database': 'disconnected', 'error': str(e)}), 503
+
+
+# --------------------------------------------------------------------------- #
 # Admin
 # --------------------------------------------------------------------------- #
 @bp.route('/admin/login', methods=['POST'])
@@ -29,7 +43,9 @@ def admin_login():
     password = data.get('password')
     if not password:
         return jsonify({'success': False, 'error': 'Password is required'}), 400
-    admin_password = os.getenv('ADMIN_PASSWORD', 'admin123')
+    admin_password = os.getenv('ADMIN_PASSWORD')
+    if not admin_password:
+        return jsonify({'success': False, 'error': 'ADMIN_PASSWORD is not configured on the server'}), 500
     if hmac.compare_digest(str(password), str(admin_password)):
         return jsonify({'success': True}), 200
     return jsonify({'success': False, 'error': 'Invalid password'}), 401
@@ -109,8 +125,16 @@ def update_qualitative(session_id):
     value = data.get('value')
     if value is None:
         return jsonify({'error': 'Value is required'}), 400
-    SessionService(current_app.db).update_qualitative(session_id, value)
-    return jsonify({'status': 'updated'}), 200
+    try:
+        SessionService(current_app.db).update_qualitative(session_id, value)
+        return jsonify({'status': 'updated'}), 200
+    except ServiceError:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"ERROR in update_qualitative: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'error': f'Internal error: {str(e)}'}), 500
 
 
 @bp.route('/session/<session_id>/value', methods=['PUT'])
@@ -121,8 +145,16 @@ def update_value(session_id):
     value = data.get('value')
     if value is None:
         return jsonify({'error': 'Value is required'}), 400
-    SessionService(current_app.db).update_value_functions(session_id, value)
-    return jsonify({'status': 'updated'}), 200
+    try:
+        SessionService(current_app.db).update_value_functions(session_id, value)
+        return jsonify({'status': 'updated'}), 200
+    except ServiceError:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"ERROR in update_value: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'error': f'Internal error: {str(e)}'}), 500
 
 
 @bp.route('/session/<session_id>/bwt', methods=['PUT'])
@@ -144,8 +176,16 @@ def update_bwt(session_id):
 def create_study_session():
     data = request.json or {}
     svc = StudySessionService(current_app.db)
-    study_session_id = svc.create(data.get('code'))
-    return jsonify({'study_session_id': study_session_id}), 201
+    code = data.get('code')
+    auto_generate = bool(data.get('auto_generate', False))
+    if not code and auto_generate:
+        code = svc.generate_unique_study_code()
+    study_session_id = svc.create(
+        code,
+        title=data.get('title', ''),
+        description=data.get('description', ''),
+    )
+    return jsonify({'study_session_id': study_session_id, 'code': code}), 201
 
 
 @bp.route('/study-sessions', methods=['GET'])
@@ -167,10 +207,22 @@ def get_study_session(study_session_id):
 def update_study_session(study_session_id):
     data = request.json or {}
     svc = StudySessionService(current_app.db)
-    if 'features' in data:
-        result = svc.update_features(study_session_id, data.get('features', {}))
-        return jsonify(result), 200
-    return jsonify(svc.get_by_id(study_session_id)), 200
+    result = None
+    if 'features' in data or 'vf_method' in data:
+        result = svc.update_features(
+            study_session_id,
+            data.get('features', {}),
+            data.get('vf_method'),
+        )
+    if 'title' in data or 'description' in data:
+        result = svc.update_metadata(
+            study_session_id,
+            title=data.get('title') if 'title' in data else None,
+            description=data.get('description') if 'description' in data else None,
+        )
+    if result is None:
+        result = svc.get_by_id(study_session_id)
+    return jsonify(result), 200
 
 
 @bp.route('/study-session/<study_session_id>', methods=['DELETE'])
@@ -198,17 +250,52 @@ def reset_elicitation_sessions(study_session_id):
     return jsonify({'status': 'reset', 'deleted_count': deleted}), 200
 
 
+@bp.route('/study-session/<study_session_id>/selective-reset', methods=['POST'])
+def selective_reset_sessions(study_session_id):
+    data = request.json or {}
+    affected_criteria = data.get('criteria', [])
+    affected_groups = data.get('groups', [])
+    result = StudySessionService(current_app.db).selective_reset_sessions(
+        study_session_id, affected_criteria, affected_groups
+    )
+    return jsonify(result), 200
+
+
 @bp.route('/study-session/<study_session_id>/elicitation-session', methods=['POST'])
 def create_elicitation_session(study_session_id):
     data = request.json or {}
     svc = StudySessionService(current_app.db)
-    session_id = svc.create_elicitation_session(study_session_id, data.get('name'))
-    return jsonify({'session_id': session_id}), 201
+    name = data.get('name')
+    auto_generate = bool(data.get('auto_generate', False))
+    if not name and auto_generate:
+        name = svc.generate_unique_session_code()
+    session_id = svc.create_elicitation_session(study_session_id, name)
+    return jsonify({'session_id': session_id, 'name': name}), 201
 
 
 @bp.route('/study-session/<study_session_id>/elicitation-sessions', methods=['GET'])
 def list_elicitation_sessions(study_session_id):
     return jsonify(StudySessionService(current_app.db).list_elicitation_sessions(study_session_id)), 200
+
+
+@bp.route('/study-session/<study_session_id>/backup/export', methods=['GET'])
+def export_study_backup(study_session_id):
+    content, filename, mime = StudySessionService(current_app.db).export_backup_zip(study_session_id)
+    return _send(content, filename, mime)
+
+
+@bp.route('/study-session/backup/import', methods=['POST'])
+def import_study_backup():
+    upload = request.files.get('file')
+    if upload is None:
+        return jsonify({'error': 'Missing file upload'}), 400
+    zip_bytes = upload.read()
+    if not zip_bytes:
+        return jsonify({'error': 'Uploaded file is empty'}), 400
+
+    on_conflict = request.args.get('on_conflict', 'abort')
+    result = StudySessionService(current_app.db).import_backup_zip(zip_bytes, on_conflict=on_conflict)
+    return jsonify(result), 201
 
 
 # --------------------------------------------------------------------------- #
@@ -250,6 +337,12 @@ def export_input_raw_csv(session_id):
     return _send(content, filename, mime)
 
 
+@bp.route('/session/<session_id>/export-input-data', methods=['GET'])
+def export_input_data_csv(session_id):
+    content, filename, mime = ExportService(current_app.db).export_input_data_csv(session_id)
+    return _send(content, filename, mime)
+
+
 @bp.route('/session/<session_id>/qualitative/export', methods=['GET'])
 def export_qualitative_csv(session_id):
     content, filename, mime = ExportService(current_app.db).export_qualitative_csv(session_id)
@@ -259,6 +352,12 @@ def export_qualitative_csv(session_id):
 @bp.route('/session/<session_id>/pile/export', methods=['GET'])
 def export_pile_csv(session_id):
     content, filename, mime = ExportService(current_app.db).export_pile_csv(session_id)
+    return _send(content, filename, mime)
+
+
+@bp.route('/session/<session_id>/pile/export-debug', methods=['GET'])
+def export_pile_debug_csv(session_id):
+    content, filename, mime = ExportService(current_app.db).export_pile_debug_csv(session_id)
     return _send(content, filename, mime)
 
 
@@ -287,7 +386,14 @@ def export_csv(session_id):
 def compute_weights_endpoint(study_session_id):
     data = request.json or {}
     svc = WorkflowService(current_app.db)
-    task_id = svc.create_compute_weights_task(study_session_id, data.get('selected_session_ids', []))
+    task_id = svc.create_compute_weights_task(
+        study_session_id,
+        data.get('selected_session_ids', []),
+        data.get('use_non_linear_model', True),
+        data.get('phase1_method', 'constraint_dominated_ea'),
+        data.get('weight_sampling_method', 'lhs_simplex'),
+        data.get('phase3_tolerance_pct', 1.0),
+    )
     return jsonify({'task_id': task_id}), 202
 
 
@@ -356,9 +462,15 @@ def get_workflow_status(study_session_id):
 @bp.route('/study-session/<study_session_id>/weight-space/<session_id>', methods=['GET'])
 def get_weight_space(study_session_id, session_id):
     data = WorkflowService(current_app.db).get_weight_space(study_session_id, session_id)
-    return jsonify({'weight_space': data}), 200
+    return jsonify(data), 200
 
 
 @bp.route('/study-session/<study_session_id>/step-results/<int:step_number>', methods=['GET'])
 def get_step_results(study_session_id, step_number):
     return jsonify(WorkflowService(current_app.db).get_step_results(study_session_id, step_number)), 200
+
+
+@bp.route('/study-session/<study_session_id>/workflow-export/data', methods=['GET'])
+def export_workflow_data_zip(study_session_id):
+    content, filename, mime = WorkflowService(current_app.db).export_workflow_data_zip(study_session_id)
+    return _send(content, filename, mime)

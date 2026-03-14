@@ -6,6 +6,11 @@ criteria and feature settings.
 """
 
 from datetime import datetime, timezone
+import io
+import json
+import secrets
+import string
+import zipfile
 from bson.objectid import ObjectId
 
 from app.repositories import SessionRepository, StudySessionRepository, InputRepository
@@ -27,6 +32,31 @@ class StudySessionService:
         self._sessions = SessionRepository(db)
         self._inputs = InputRepository(db)
         self._session_svc = SessionService(db)
+
+    @staticmethod
+    def _normalize_vf_method(vf_method):
+        if vf_method in ('mid-splitting', 'free-edit'):
+            return vf_method
+        return None
+
+    @staticmethod
+    def _generate_code(length=8):
+                alphabet = string.ascii_uppercase + string.digits
+                return ''.join(secrets.choice(alphabet) for _ in range(length))
+
+    def generate_unique_study_code(self, max_attempts=20):
+        for _ in range(max_attempts):
+            candidate = self._generate_code()
+            if not self._studies.find_by_code(candidate):
+                return candidate
+        raise ConflictError('Failed to generate a unique study code')
+
+    def generate_unique_session_code(self, max_attempts=20):
+        for _ in range(max_attempts):
+            candidate = self._generate_code()
+            if not self._sessions.find_by_name(candidate):
+                return candidate
+        raise ConflictError('Failed to generate a unique session code')
 
     @staticmethod
     def _serialize_computed_weights(study):
@@ -78,6 +108,8 @@ class StudySessionService:
         study['_id'] = str(study_id)
         study['input_id'] = self._studies._str_id(study.get('input_id'))
         study['criteria'] = criteria
+        study['title'] = study.get('title', '')
+        study['description'] = study.get('description', '')
         if include_sessions:
             sessions = self._sessions.find_by_study_session_id(study_id)
             for s in sessions:
@@ -88,7 +120,7 @@ class StudySessionService:
             study['sessions'] = sessions
         return study
 
-    def create(self, code):
+    def create(self, code, title='', description=''):
         """Create a new study session with the given practitioner code.
 
         Args:
@@ -110,10 +142,41 @@ class StudySessionService:
             'code': code,
             'input_id': None,
             'features': {'qi': False, 'vf': False, 'bwt': False},
+            'vf_method': 'mid-splitting',
+            'title': str(title or '').strip(),
+            'description': str(description or '').strip(),
             'created_at': datetime.now(timezone.utc),
         }
         inserted_id = self._studies.insert(doc)
         return str(inserted_id)
+
+    def update_metadata(self, study_session_id, title=None, description=None):
+        """Update the title/description metadata of a study session."""
+        study = self._studies.find_by_id(study_session_id)
+        if not study:
+            raise NotFoundError('Study session not found')
+
+        update_doc = {}
+        if title is not None:
+            if not isinstance(title, str):
+                raise ValidationError('Title must be a string')
+            update_doc['title'] = title.strip()
+        if description is not None:
+            if not isinstance(description, str):
+                raise ValidationError('Description must be a string')
+            update_doc['description'] = description.strip()
+
+        if update_doc:
+            self._studies.update(study_session_id, update_doc)
+
+        updated = self._studies.find_by_id(study_session_id)
+        if not updated:
+            raise NotFoundError('Study session not found')
+        updated['_id'] = str(updated['_id'])
+        updated['input_id'] = self._studies._str_id(updated.get('input_id'))
+        updated['title'] = updated.get('title', '')
+        updated['description'] = updated.get('description', '')
+        return updated
 
     def get_by_id(self, study_session_id):
         """Retrieve and serialise a study session by its identifier.
@@ -158,7 +221,7 @@ class StudySessionService:
         studies = self._studies.find_all()
         return [self._serialize_study(s, include_sessions=True) for s in studies]
 
-    def update_features(self, study_session_id, features):
+    def update_features(self, study_session_id, features, vf_method=None):
         """Update the feature flags of a study session.
 
         Only the ``qi``, ``vf``, and ``bwt`` flags are accepted; all values
@@ -168,6 +231,7 @@ class StudySessionService:
             study_session_id: The study session's ``_id``.
             features (dict | None): A dict with any combination of ``'qi'``,
                 ``'vf'``, ``'bwt'`` keys and boolean-coercible values.
+            vf_method (str | None): Optional value-function method.
 
         Returns:
             dict: The updated study session document (partially serialised).
@@ -185,6 +249,9 @@ class StudySessionService:
                 'vf': bool(features.get('vf', False)),
                 'bwt': bool(features.get('bwt', False)),
             }
+        normalized_method = self._normalize_vf_method(vf_method)
+        if normalized_method:
+            update_doc['vf_method'] = normalized_method
         if update_doc:
             self._studies.update(study_session_id, update_doc)
         updated = self._studies.find_by_id(study_session_id)
@@ -285,6 +352,34 @@ class StudySessionService:
         deleted = self._sessions.delete_many_by_study_session_id(study_session_id)
         return deleted
 
+    def selective_reset_sessions(self, study_session_id, affected_criteria, affected_groups):
+        """Selectively reset data for specific criteria and groups across all sessions.
+        
+        This removes:
+        - VF data for affected criteria
+        - BWT groups containing affected criteria
+        - QI data for removed criteria
+        
+        Args:
+            study_session_id: The study session's ``_id``.
+            affected_criteria (list[str]): Criterion names whose data should be reset.
+            affected_groups (list[str]): Group names whose BWT data should be reset.
+            
+        Returns:
+            dict: Summary of reset operations including updated_sessions count.
+            
+        Raises:
+            NotFoundError: When the study session does not exist.
+        """
+        study = self._studies.find_by_id(study_session_id)
+        if not study:
+            raise NotFoundError('Study session not found')
+        
+        result = self._sessions.selective_reset_data(
+            study_session_id, affected_criteria, affected_groups
+        )
+        return result
+
     def create_elicitation_session(self, study_session_id, name):
         """Create a new elicitation session linked to a study session.
 
@@ -370,4 +465,151 @@ class StudySessionService:
             'study_code': study.get('code'),
             'criteria': criteria,
             'sessions': sessions,
+        }
+
+    def export_backup_zip(self, study_session_id):
+        from app.services.export_service import ExportService
+
+        study = self._studies.find_by_id(study_session_id)
+        if not study:
+            raise NotFoundError('Study session not found')
+
+        input_id = self._studies._to_oid(study.get('input_id'))
+        criteria = []
+        if input_id:
+            input_doc = self._inputs.find_by_id(input_id)
+            if isinstance(input_doc, dict):
+                criteria = input_doc.get('criteria', [])
+
+        sessions = self._sessions.find_by_study_session_id(study_session_id)
+
+        metadata = {
+            'version': 1,
+            'exported_at': datetime.now(timezone.utc).isoformat(),
+            'study': {
+                'code': study.get('code'),
+                'title': study.get('title', ''),
+                'description': study.get('description', ''),
+                'features': study.get('features', {'qi': False, 'vf': False, 'bwt': False}),
+                'vf_method': study.get('vf_method', 'mid-splitting'),
+                'created_at': study.get('created_at').isoformat() if study.get('created_at') else None,
+            },
+            'sessions': [
+                {
+                    'name': s.get('name'),
+                    'created_at': s.get('created_at').isoformat() if s.get('created_at') else None,
+                }
+                for s in sessions
+            ],
+        }
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr('metadata.json', json.dumps(metadata, ensure_ascii=False, indent=2))
+            zf.writestr('input/input.json', json.dumps({'criteria': criteria}, ensure_ascii=False, indent=2))
+
+            for session in sessions:
+                session_name = session.get('name', str(session.get('_id')))
+                qualitative = session.get('qualitative_indicators') or {}
+                value_functions = session.get('value_functions') or {}
+                vf_criteria = value_functions.get('criteria', {}) if isinstance(value_functions, dict) else {}
+                bwt = session.get('bwt') or {}
+
+                session_payload = {
+                    'name': session_name,
+                    'qualitative_indicators': session.get('qualitative_indicators'),
+                    'value_functions': session.get('value_functions'),
+                    'bwt': session.get('bwt'),
+                    'locked': bool(session.get('locked', False)),
+                    'session_locked': bool(session.get('session_locked', False)),
+                }
+                zf.writestr(
+                    f'sessions/{session_name}.json',
+                    json.dumps(session_payload, ensure_ascii=False, indent=2),
+                )
+
+                zf.writestr(
+                    f'csv/{session_name}/input_raw_{session_name}.csv',
+                    ExportService.build_input_raw_csv(criteria),
+                )
+                zf.writestr(
+                    f'csv/{session_name}/qualitative_{session_name}.csv',
+                    ExportService.build_qualitative_csv(criteria, qualitative),
+                )
+                zf.writestr(
+                    f'csv/{session_name}/value_functions_{session_name}.csv',
+                    ExportService.build_value_functions_csv(criteria, vf_criteria, qualitative),
+                )
+                zf.writestr(
+                    f'csv/{session_name}/pile_bwt_{session_name}.csv',
+                    ExportService.build_pile_bwt_csv(bwt),
+                )
+
+        buf.seek(0)
+        return buf, f'backup_{study.get("code", study_session_id)}.zip', 'application/zip'
+
+    def import_backup_zip(self, zip_bytes, on_conflict='abort'):
+        if on_conflict not in ('abort', 'regenerate'):
+            raise ValidationError('Invalid on_conflict value')
+
+        try:
+            zip_buf = io.BytesIO(zip_bytes)
+            with zipfile.ZipFile(zip_buf, 'r') as zf:
+                metadata = json.loads(zf.read('metadata.json').decode('utf-8'))
+                input_payload = json.loads(zf.read('input/input.json').decode('utf-8'))
+                session_files = [name for name in zf.namelist() if name.startswith('sessions/') and name.endswith('.json')]
+                session_payloads = [json.loads(zf.read(path).decode('utf-8')) for path in session_files]
+        except KeyError as exc:
+            raise ValidationError(f'Invalid backup ZIP format: missing {exc}') from exc
+        except (zipfile.BadZipFile, json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValidationError('Invalid backup ZIP file') from exc
+
+        requested_study_code = ((metadata.get('study') or {}).get('code') or '').strip()
+        if not requested_study_code:
+            raise ValidationError('Backup metadata missing study code')
+
+        if self._studies.find_by_code(requested_study_code):
+            if on_conflict == 'abort':
+                raise ConflictError('Study code conflict')
+            requested_study_code = self.generate_unique_study_code()
+
+        study_meta = metadata.get('study') or {}
+        study_session_id = self.create(
+            requested_study_code,
+            title=study_meta.get('title', ''),
+            description=study_meta.get('description', ''),
+        )
+
+        self.update_features(
+            study_session_id,
+            study_meta.get('features') or {'qi': False, 'vf': False, 'bwt': False},
+            study_meta.get('vf_method'),
+        )
+        self.update_input(study_session_id, input_payload.get('criteria') or [])
+
+        imported_sessions = []
+        for payload in session_payloads:
+            requested_name = (payload.get('name') or '').strip()
+            if not requested_name:
+                requested_name = self.generate_unique_session_code()
+
+            if self._sessions.find_by_name(requested_name):
+                if on_conflict == 'abort':
+                    raise ConflictError(f'Session code conflict: {requested_name}')
+                requested_name = self.generate_unique_session_code()
+
+            created_session_id = self.create_elicitation_session(study_session_id, requested_name)
+            self._sessions.update(created_session_id, {
+                'qualitative_indicators': payload.get('qualitative_indicators'),
+                'value_functions': payload.get('value_functions'),
+                'bwt': payload.get('bwt'),
+                'locked': bool(payload.get('locked', False)),
+                'session_locked': bool(payload.get('session_locked', False)),
+            })
+            imported_sessions.append(requested_name)
+
+        return {
+            'study_session_id': study_session_id,
+            'code': requested_study_code,
+            'imported_sessions': imported_sessions,
         }

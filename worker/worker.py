@@ -87,9 +87,21 @@ def handle_compute_weights(task):
     params = task.get('params', {})
     study_session_id = params.get('study_session_id')
     selected_session_ids = params.get('selected_session_ids', [])
+    use_non_linear_model = bool(params.get('use_non_linear_model', True))
+    phase1_method = params.get('phase1_method', 'constraint_dominated_ea')
+    weight_sampling_method = params.get('weight_sampling_method', 'lhs_simplex')
+    phase3_tolerance_pct = params.get('phase3_tolerance_pct', 1.0)
+    try:
+        phase3_tolerance_pct = max(0.0, float(phase3_tolerance_pct))
+    except (TypeError, ValueError):
+        phase3_tolerance_pct = 1.0
 
     try:
         logger.log("=" * 60)
+        logger.log(f"Model: {'non-linear' if use_non_linear_model else 'linear'}")
+        logger.log(f"Phase 1 method: {phase1_method}")
+        logger.log(f"Weight sampling method: {weight_sampling_method}")
+        logger.log(f"Phase 3 tolerance LIM (%): {phase3_tolerance_pct}")
         logger.log("COMPUTE WEIGHTS")
         logger.log("=" * 60)
 
@@ -115,7 +127,16 @@ def handle_compute_weights(task):
                 comparisons = build_comparisons_from_session(session_doc)
                 criteria_names = [c['criterion_name'] for c in criteria if 'criterion_name' in c]
                 
-                ws = compute_weights(value_functions, comparisons, criteria_names=criteria_names, print_fn=logger.log)
+                ws = compute_weights(
+                    value_functions,
+                    comparisons,
+                    criteria_names=criteria_names,
+                    print_fn=logger.log,
+                    use_non_linear_model=use_non_linear_model,
+                    phase1_method=phase1_method,
+                    weight_sampling_method=weight_sampling_method,
+                    phase3_tolerance_pct=phase3_tolerance_pct,
+                )
                 weight_solutions[session_id] = ws
 
                 logger.log(f"✓ Session {session_name} completed ({len(ws)} feasible solutions)")
@@ -127,7 +148,15 @@ def handle_compute_weights(task):
             raise ValueError("No weight solutions computed for any session")
 
         # Save results to DB
-        save_computed_weights(db, study_session_id, weight_solutions)
+        save_computed_weights(
+            db,
+            study_session_id,
+            weight_solutions,
+            phase1_method=phase1_method,
+            method=weight_sampling_method,
+            use_non_linear_model=use_non_linear_model,
+            phase3_tolerance_pct=phase3_tolerance_pct,
+        )
 
         logger.log(f"\n✓ All weights computed and saved to database.")
         logger.log(f"  Processed {len(weight_solutions)} elicitation session(s).")
@@ -218,10 +247,13 @@ def handle_run_step(task):
             ws = weight_solutions_data.get(session_id, [])
             weight_solutions_list.append(ws)
         
+        # Extract qualitative indicators
+        qualitative_indicators = session_docs[0].get('qualitative_indicators') if session_docs else None
+        
         # Build alternatives and criteria names
         alternatives, criteria_names = build_alternatives_with_qualitative(
             input_doc if input_doc else {'criteria': criteria},
-            session_docs[0].get('qualitative_indicators') if session_docs else None
+            qualitative_indicators
         )
         
         logger.log(f"  ✓ Loaded {len(alternatives)} alternatives")
@@ -245,7 +277,8 @@ def handle_run_step(task):
                 formatted = run_upmavt(
                     vf_lists, confidence_lists, weight_solutions_list,
                     alternatives, criteria_names,
-                    step_params, print_fn=logger.log
+                    step_params,
+                    print_fn=logger.log
                 )
                 results_by_aggregation[agg_method] = formatted
 
@@ -271,7 +304,8 @@ def handle_run_step(task):
             formatted = run_upmavt(
                 vf_lists, confidence_lists, weight_solutions_list,
                 alternatives, criteria_names,
-                step_params, print_fn=logger.log
+                step_params,
+                print_fn=logger.log
             )
 
             # Save results

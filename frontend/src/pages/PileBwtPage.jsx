@@ -29,7 +29,7 @@ import {
   AlertDialogOverlay,
   useDisclosure,
 } from '@chakra-ui/react'
-import { ChevronLeftIcon, ChevronRightIcon } from '@chakra-ui/icons'
+import { ChevronLeftIcon, ChevronRightIcon, LockIcon, WarningIcon, InfoIcon, CheckCircleIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useMemo, useState, useRef, forwardRef, useImperativeHandle } from 'react'
 import {
@@ -47,6 +47,7 @@ import {
 } from 'recharts'
 import { parseDistribution, computeDistributionBounds } from '../utils/distributionUtils'
 import { API_URL } from '../config'
+import QuestionPrompt from '../components/QuestionPrompt'
 
 function PileBwtPage({ sessionId, onPageChange }, ref) {
   const [criteria, setCriteria] = useState([])
@@ -67,17 +68,23 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   const [sliderTouched, setSliderTouched] = useState(false)
   const [saving, setSaving] = useState(false)
   const [bwtSignature, setBwtSignature] = useState(null)
-  const [criteriaMismatch, setCriteriaMismatch] = useState(false)
-  const [criteriaMismatchAcknowledged, setCriteriaMismatchAcknowledged] = useState(false)
+  const [bwtQiSignature, setBwtQiSignature] = useState(null)
+  const [bwtVfSignature, setBwtVfSignature] = useState(null)
+  const [bwtLockActive, setBwtLockActive] = useState(false)
   const [isSessionLocked, setIsSessionLocked] = useState(false)
   const [qualitativeIncomplete, setQualitativeIncomplete] = useState(false)
+  const criteriaMismatch = false
+  const criteriaMismatchAcknowledged = true
+  const setCriteriaMismatchAcknowledged = () => {}
+  const handleCriteriaMismatchReset = () => {}
   // Consistency checking state
   const [bestToWorstValue, setBestToWorstValue] = useState(null) // Value from BEST-to-WORST comparison
   const [consistencyConstraints, setConsistencyConstraints] = useState({}) // Track constraints for each criterion
   const [isConsistencyError, setIsConsistencyError] = useState(false) // Whether current position violates consistency
-  const { isOpen, onOpen, onClose } = useDisclosure()
+  const { isOpen: isResetOpen, onOpen: onResetOpen, onClose: onResetClose } = useDisclosure()
   const cancelRef = useRef()
   const mainContentRef = useRef(null)
+  const [showUnlockConfirm, setShowUnlockConfirm] = useState(false)
   const toast = useToast()
 
   // Expose save method for navigation
@@ -99,6 +106,82 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       })),
     }))
     return JSON.stringify(normalized)
+  }
+
+  const getObjectSignature = (obj) => JSON.stringify(canonicalizeJson(obj || {}))
+
+  const parseSignature = (signature) => {
+    if (!signature) return null
+    try {
+      return JSON.parse(signature)
+    } catch {
+      return null
+    }
+  }
+
+  const getChangedCriteriaNames = (savedSignature, currentSignature) => {
+    const saved = parseSignature(savedSignature)
+    const current = parseSignature(currentSignature)
+    if (!Array.isArray(saved) || !Array.isArray(current)) return null
+
+    const toMap = (items) => {
+      const map = new Map()
+      items.forEach((item) => {
+        if (!item?.name) return
+        map.set(item.name, JSON.stringify(canonicalizeJson(item)))
+      })
+      return map
+    }
+
+    const savedMap = toMap(saved)
+    const currentMap = toMap(current)
+    const names = new Set([...savedMap.keys(), ...currentMap.keys()])
+    const changed = []
+
+    names.forEach((name) => {
+      if (!savedMap.has(name) || !currentMap.has(name) || savedMap.get(name) !== currentMap.get(name)) {
+        changed.push(name)
+      }
+    })
+
+    return changed
+  }
+
+  const getChangedObjectKeys = (savedSignature, currentSignature) => {
+    const saved = parseSignature(savedSignature)
+    const current = parseSignature(currentSignature)
+    if (!saved || !current || typeof saved !== 'object' || typeof current !== 'object') return null
+
+    const keys = new Set([...Object.keys(saved), ...Object.keys(current)])
+    const changed = []
+    keys.forEach((key) => {
+      const left = JSON.stringify(canonicalizeJson(saved[key]))
+      const right = JSON.stringify(canonicalizeJson(current[key]))
+      if (left !== right) changed.push(key)
+    })
+    return changed
+  }
+
+  const getAffectedGroupsForCriteria = (criterionNames, currentCriteria, previousCriteriaSignature) => {
+    if (!Array.isArray(criterionNames) || criterionNames.length === 0) return []
+
+    const currentGroupMap = new Map((currentCriteria || []).map((c) => [c.criterion_name, c.group || 'Ungrouped']))
+    const previousCriteria = parseSignature(previousCriteriaSignature)
+    const previousGroupMap = new Map(
+      Array.isArray(previousCriteria)
+        ? previousCriteria.map((c) => [c.name, c.group || 'Ungrouped'])
+        : []
+    )
+
+    const groupsSet = new Set()
+    criterionNames.forEach((name) => {
+      const currentGroup = currentGroupMap.get(name)
+      const previousGroup = previousGroupMap.get(name)
+      if (currentGroup) groupsSet.add(currentGroup)
+      if (previousGroup) groupsSet.add(previousGroup)
+    })
+
+    return [...groupsSet]
   }
 
   const canonicalizeJson = (value) => {
@@ -128,6 +211,8 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   }
 
   const criteriaSignature = useMemo(() => getCriteriaSignature(criteria), [criteria])
+  const qiSignature = useMemo(() => getObjectSignature(qualitativeIndicators), [qualitativeIndicators])
+  const vfSignature = useMemo(() => getObjectSignature(valueFunction), [valueFunction])
 
   const getBestWorstByGroupName = (groupName, comps = comparisons) => {
     const groupComps = comps.filter((c) => c.group === groupName && c.type === 'best')
@@ -273,10 +358,18 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
 
         if (session.bwt?.criteria_signature) {
           setBwtSignature(session.bwt.criteria_signature)
+          setBwtQiSignature(session.bwt.qi_signature || null)
+          setBwtVfSignature(session.bwt.vf_signature || null)
+          setBwtLockActive(Boolean(session.bwt.qi_vf_lock_active))
+        } else {
+          setBwtSignature(null)
+          setBwtQiSignature(null)
+          setBwtVfSignature(null)
+          setBwtLockActive(false)
         }
       } catch (error) {
         toast({
-          title: 'Error',
+          title: 'Request failed',
           description: 'Failed to load session data',
           status: 'error',
           isClosable: true,
@@ -293,42 +386,253 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
 
   useEffect(() => {
     if (loading) return
-    const signatureMatch = areSignaturesEquivalent(bwtSignature, criteriaSignature)
-    
-    console.log('BWT Mismatch Check:', {
-      comparisonsLength: comparisons.length,
-      bwtSignature,
-      criteriaSignature,
-      match: signatureMatch
-    })
-    
-    // If there are comparisons but no saved signature (old data), it's a mismatch
-    if (comparisons.length > 0 && !bwtSignature) {
-      console.log('Setting mismatch: comparisons exist but no signature')
-      setCriteriaMismatch(true)
+    if (!comparisons.length) return
+
+    const criteriaMatch = bwtSignature && criteriaSignature
+      ? areSignaturesEquivalent(bwtSignature, criteriaSignature)
+      : false
+    const qiMatch = bwtQiSignature && qiSignature
+      ? areSignaturesEquivalent(bwtQiSignature, qiSignature)
+      : false
+    const vfMatch = bwtVfSignature && vfSignature
+      ? areSignaturesEquivalent(bwtVfSignature, vfSignature)
+      : false
+
+    const hasMismatch =
+      !bwtSignature ||
+      !bwtQiSignature ||
+      !bwtVfSignature ||
+      !criteriaMatch ||
+      !qiMatch ||
+      !vfMatch
+
+    if (!hasMismatch) return
+
+    if (isSessionLocked && !bwtLockActive) {
+      toast({
+        title: 'Session locked by practitioner',
+        description: 'Weight elicitation updates are disabled until the practitioner/admin unlocks the session.',
+        status: 'warning',
+        isClosable: true,
+      })
       return
     }
-    
-    // If there's a saved signature and current signature, compare them
-    if (bwtSignature && criteriaSignature) {
-      if (!signatureMatch) {
-        console.log('Setting mismatch: signatures dont match')
-        setCriteriaMismatch(true)
-      } else {
-        console.log('Clearing mismatch: signatures match')
-        setCriteriaMismatch(false)
-        setCriteriaMismatchAcknowledged(false)
-      }
-    }
-  }, [loading, bwtSignature, criteriaSignature, comparisons.length])
 
-  const buildBwtPayload = (comps) => ({
+    const changedCriteriaFromStructure = getChangedCriteriaNames(bwtSignature, criteriaSignature) || []
+    const changedCriteriaFromQi = getChangedObjectKeys(bwtQiSignature, qiSignature) || []
+    const changedCriteriaFromVf = getChangedObjectKeys(bwtVfSignature, vfSignature) || []
+    const changedCriteriaSet = new Set([
+      ...changedCriteriaFromStructure,
+      ...changedCriteriaFromQi,
+      ...changedCriteriaFromVf,
+    ])
+
+    if (changedCriteriaSet.size === 0) {
+      resetBwtComparisons()
+      return
+    }
+
+    resetBwtComparisonsByCriteria([...changedCriteriaSet])
+  }, [
+    loading,
+    comparisons.length,
+    bwtSignature,
+    bwtQiSignature,
+    bwtVfSignature,
+    criteriaSignature,
+    qiSignature,
+    vfSignature,
+    isSessionLocked,
+    bwtLockActive,
+    criteria,
+    toast,
+  ])
+
+  const buildBwtPayload = (comps, lockActive = bwtLockActive) => ({
     comparisons: comps,
     criteria_signature: criteriaSignature,
+    qi_signature: qiSignature,
+    vf_signature: vfSignature,
+    qi_vf_lock_active: Boolean(lockActive),
   })
+
+  const syncBwtSignatures = () => {
+    setBwtSignature(criteriaSignature)
+    setBwtQiSignature(qiSignature)
+    setBwtVfSignature(vfSignature)
+  }
 
   // Track which group the current pairs belong to
   const [pairsGroupName, setPairsGroupName] = useState(null)
+
+  const resetBwtComparisons = async () => {
+    setSaving(true)
+    try {
+      await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
+        value: buildBwtPayload([]),
+      })
+      setComparisons([])
+      setPairs([])
+      setPairsGroupName(null)
+      setBestCriterion(null)
+      setWorstCriterion(null)
+      setCurrentPairIndex(0)
+      setSelectedGroupIndex(0)
+      setSelectionStep(null)
+      setStep('select-criteria')
+      setBwtSignature(criteriaSignature)
+      setBwtQiSignature(qiSignature)
+      setBwtVfSignature(vfSignature)
+      setBestToWorstValue(null)
+      setConsistencyConstraints({})
+      setIsConsistencyError(false)
+      toast({
+        title: 'Weight elicitation reset',
+        description: 'Outdated comparisons were reset after criteria changes.',
+        status: 'warning',
+        isClosable: true,
+      })
+    } catch (error) {
+      toast({
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to reset weight elicitation data',
+        status: 'error',
+        isClosable: true,
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const resetBwtComparisonsByCriteria = async (criterionNames) => {
+    if (!Array.isArray(criterionNames) || criterionNames.length === 0) {
+      await resetBwtComparisons()
+      return
+    }
+
+    const criterionSet = new Set(criterionNames)
+    
+    // Filter out comparisons where either reference or adjusted criterion was changed
+    const filteredComparisons = comparisons.filter((c) => {
+      // Keep comparison only if NEITHER criterion is in the changed set
+      const involvesChangedCriterion = 
+        criterionSet.has(c.reference_criterion) || 
+        criterionSet.has(c.adjusted_criterion)
+      
+      // Also remove intra-group comparisons since they depend on base group results
+      const isIntraGroup = c.group === 'intra-B' || c.group === 'intra-W'
+      
+      return !involvesChangedCriterion && !isIntraGroup
+    })
+
+    const removedCount = comparisons.length - filteredComparisons.length
+    if (removedCount === 0) {
+      // No comparisons affected, just update signatures
+      setBwtSignature(criteriaSignature)
+      setBwtQiSignature(qiSignature)
+      setBwtVfSignature(vfSignature)
+      return
+    }
+
+    setSaving(true)
+    try {
+      await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
+        value: buildBwtPayload(filteredComparisons),
+      })
+
+      setComparisons(filteredComparisons)
+      setPairs([])
+      setPairsGroupName(null)
+      setBestCriterion(null)
+      setWorstCriterion(null)
+      setCurrentPairIndex(0)
+      setSelectionStep(null)
+      setStep('select-criteria')
+      setBwtSignature(criteriaSignature)
+      setBwtQiSignature(qiSignature)
+      setBwtVfSignature(vfSignature)
+      setBestToWorstValue(null)
+      setConsistencyConstraints({})
+      setIsConsistencyError(false)
+      
+      toast({
+        title: 'Weight elicitation partially reset',
+        description: `Removed ${removedCount} comparison(s) involving: ${criterionNames.join(', ')}`,
+        status: 'warning',
+        isClosable: true,
+      })
+    } catch (error) {
+      toast({
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to reset affected weight elicitation comparisons',
+        status: 'error',
+        isClosable: true,
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const resetBwtComparisonsByGroups = async (groupNames) => {
+    const baseGroups = new Set((groupNames || []).filter(Boolean))
+    if (!baseGroups.size) {
+      await resetBwtComparisons()
+      return
+    }
+
+    // Start with affected base groups
+    const groupsToClear = new Set([...baseGroups])
+    
+    // Only include intra-groups if they have actual comparisons
+    const hasIntraB = comparisons.some(c => c.group === 'intra-B')
+    const hasIntraW = comparisons.some(c => c.group === 'intra-W')
+    if (hasIntraB) groupsToClear.add('intra-B')
+    if (hasIntraW) groupsToClear.add('intra-W')
+
+    const filteredComparisons = comparisons.filter((c) => !groupsToClear.has(c.group))
+
+    setSaving(true)
+    try {
+      await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
+        value: buildBwtPayload(filteredComparisons),
+      })
+
+      setComparisons(filteredComparisons)
+      setPairs([])
+      setPairsGroupName(null)
+      setBestCriterion(null)
+      setWorstCriterion(null)
+      setCurrentPairIndex(0)
+      setSelectionStep(null)
+      setStep('select-criteria')
+      setBwtSignature(criteriaSignature)
+      setBwtQiSignature(qiSignature)
+      setBwtVfSignature(vfSignature)
+      setBestToWorstValue(null)
+      setConsistencyConstraints({})
+      setIsConsistencyError(false)
+      
+      const resetGroups = [...baseGroups]
+      if (hasIntraB) resetGroups.push('intra-B')
+      if (hasIntraW) resetGroups.push('intra-W')
+      
+      toast({
+        title: 'Weight elicitation partially reset',
+        description: `Reset groups: ${resetGroups.join(', ')} after QI/VF changes.`,
+        status: 'warning',
+        isClosable: true,
+      })
+    } catch (error) {
+      toast({
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to reset affected weight elicitation groups',
+        status: 'error',
+        isClosable: true,
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
 
   useEffect(() => {
     if (!loading && allGroups.length > 0 && selectedGroupIndex !== null) {
@@ -414,6 +718,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             (c) =>
               c.reference_criterion === targetPair.reference.criterion_name &&
               c.adjusted_criterion === targetPair.adjusted.criterion_name &&
+              c.type === targetPair.type &&
               c.group === groupName
           )
           setSliderValue(existing ? existing.data_value : getWorstDataValue(targetPair.adjusted))
@@ -434,49 +739,50 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   }, [sliderValue, currentPairIndex, pairs, comparisons, bestToWorstValue])
 
   const ensureSessionUnlocked = () => {
-    if (!isSessionLocked) return true
-    toast({
-      title: 'Session locked',
-      description: 'This session is locked. You cannot modify BWT data.',
-      status: 'warning',
-      isClosable: true,
-    })
-    return false
+    if (isSessionLocked && !bwtLockActive) {
+      toast({
+        title: 'Session locked by practitioner',
+        description: 'Weight elicitation editing is disabled. Ask the practitioner/admin to unlock.',
+        status: 'warning',
+        isClosable: true,
+      })
+      return false
+    }
+
+    if (!bwtLockActive) {
+      toast({
+        title: 'Lock required',
+        description: 'Please lock QI/VF from the banner above before editing weight elicitation.',
+        status: 'info',
+        isClosable: true,
+      })
+      return false
+    }
+
+    return true
   }
 
-  const handleCriteriaMismatchReset = async () => {
-    if (!ensureSessionUnlocked()) return
+  const handleUnlockForModification = async () => {
+    setShowUnlockConfirm(false)
     setSaving(true)
     try {
+      // Just save BWT with lock flag off - don't touch session_locked (practitioner lock)
       await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
-        value: buildBwtPayload([]),
+        value: buildBwtPayload(comparisons, false),
       })
-      setComparisons([])
-      setPairs([])
-      setPairsGroupName(null)
-      setBestCriterion(null)
-      setWorstCriterion(null)
-      setCurrentPairIndex(0)
-      setSelectedGroupIndex(0)
+      setBwtLockActive(false)
       setSelectionStep(null)
       setStep('select-criteria')
-      setCriteriaMismatch(false)
-      setCriteriaMismatchAcknowledged(false)
-      setBwtSignature(criteriaSignature)
-      // Reset consistency tracking
-      setBestToWorstValue(null)
-      setConsistencyConstraints({})
-      setIsConsistencyError(false)
       toast({
-        title: 'BWT reset',
-        description: 'Please redo the elicitation process.',
-        status: 'success',
+        title: 'Unlocked',
+        description: 'QI/VF can now be edited. Existing BWT comparisons were kept.',
+        status: 'warning',
         isClosable: true,
       })
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error.response?.data?.error || 'Failed to reset BWT',
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to unlock session',
         status: 'error',
         isClosable: true,
       })
@@ -547,7 +853,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       })
     } catch (error) {
       toast({
-        title: 'Error',
+        title: 'Request failed',
         description: 'Failed to reset group',
         status: 'error',
         isClosable: true,
@@ -561,6 +867,17 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     if (criterion?.is_qualitative) {
       return { min: 0, max: 1 }
     }
+    
+    // Check if custom min/max values are provided
+    if (criterion.use_custom_min_max) {
+      const minVal = Number(criterion.min_value)
+      const maxVal = Number(criterion.max_value)
+      if (Number.isFinite(minVal) && Number.isFinite(maxVal) && minVal < maxVal) {
+        return { min: minVal, max: maxVal }
+      }
+    }
+    
+    // Fall back to computing from alternatives data
     const alternatives = criterion.alternatives || []
     const bounds = []
     
@@ -692,71 +1009,159 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     return sorted[sorted.length - 1].x
   }
 
+  // Build ranking induced by BEST comparisons (lower VF means better criterion)
+  const getBestComparisonRanking = (comps = comparisons) => {
+    const groupName = allGroups[selectedGroupIndex]?.name
+    if (!groupName) return {}
+
+    const ranking = {}
+    pairs.forEach((pair) => {
+      if (pair?.type !== 'best') return
+      const comp = comps.find(
+        (c) =>
+          c.reference_criterion === pair.reference.criterion_name &&
+          c.adjusted_criterion === pair.adjusted.criterion_name &&
+          c.type === 'best' &&
+          c.group === groupName
+      )
+      if (!comp) return
+      ranking[pair.reference.criterion_name] = interpolateVF(pair.adjusted.criterion_name, comp.data_value)
+    })
+
+    return ranking
+  }
+
+  // For WORST comparisons, compute VF bounds implied by BEST-ranking consistency
+  // Returns bounds on current VF value: lowerBound <= currentVF <= upperBound
+  const getWorstConsistencyBounds = (pairIndex, comps = comparisons) => {
+    const pair = pairs[pairIndex]
+    if (!pair || pair.type !== 'worst') return { lowerBound: null, upperBound: null }
+
+    const groupName = allGroups[selectedGroupIndex]?.name
+    if (!groupName) return { lowerBound: null, upperBound: null }
+
+    const ranking = getBestComparisonRanking(comps)
+    const currentCriterion = pair.adjusted.criterion_name
+    const currentRank = ranking[currentCriterion]
+    if (currentRank === undefined || currentRank === null) return { lowerBound: null, upperBound: null }
+
+    const epsilon = 1e-10
+    // Global rule: all WORST comparisons must stay above BEST-to-WORST VF
+    let lowerBound = bestToWorstValue
+    let upperBound = null
+
+    // Compare with already-answered WORST comparisons and enforce same ordering as BEST phase
+    // Use nearest rank neighbors to keep ordinal consistency without over-constraining from distant criteria.
+    const previousWorst = []
+    for (let i = 0; i < pairIndex; i++) {
+      if (pairs[i]?.type !== 'worst') continue
+
+      const prevPair = pairs[i]
+      const prevComp = comps.find(
+        (c) =>
+          c.reference_criterion === prevPair.reference.criterion_name &&
+          c.adjusted_criterion === prevPair.adjusted.criterion_name &&
+          c.type === 'worst' &&
+          c.group === groupName
+      )
+      if (!prevComp) continue
+
+      const prevCriterion = prevPair.adjusted.criterion_name
+      const prevRank = ranking[prevCriterion]
+      if (prevRank === undefined || prevRank === null) continue
+
+      previousWorst.push({
+        rank: prevRank,
+        vf: interpolateVF(prevCriterion, prevComp.data_value),
+      })
+    }
+
+    // In BEST phase, larger rank value means better criterion.
+    // For WORST phase, better criteria need less compensation (smaller VF),
+    // while worse criteria need more compensation (larger VF).
+    const nearestBetter = previousWorst
+      .filter((item) => item.rank > currentRank + epsilon)
+      .sort((a, b) => a.rank - b.rank)[0]
+
+    const nearestWorse = previousWorst
+      .filter((item) => item.rank < currentRank - epsilon)
+      .sort((a, b) => b.rank - a.rank)[0]
+
+    if (nearestBetter) {
+      // Better criterion needs LESS compensation => current must be >= neighbor VF
+      lowerBound = lowerBound === null ? nearestBetter.vf : Math.max(lowerBound, nearestBetter.vf)
+    }
+
+    if (nearestWorse) {
+      // Worse criterion needs MORE compensation => current must be <= neighbor VF
+      upperBound = upperBound === null ? nearestWorse.vf : Math.min(upperBound, nearestWorse.vf)
+    }
+
+    const equalRank = previousWorst.find((item) => Math.abs(item.rank - currentRank) <= epsilon)
+    if (equalRank) {
+      lowerBound = lowerBound === null ? equalRank.vf : Math.max(lowerBound, equalRank.vf)
+      upperBound = upperBound === null ? equalRank.vf : Math.min(upperBound, equalRank.vf)
+    }
+
+    return { lowerBound, upperBound }
+  }
+
   // Get consistency threshold for the current pair
-  // Returns the minimum value function value required for consistency
+  // Returns a VF lower bound for BEST, and rank-implied VF bounds for WORST
   const getConsistencyThreshold = (pairIndex, comps = comparisons) => {
     if (pairIndex === 0 && pairs[pairIndex]?.type === 'best') {
       // First comparison (BEST-to-WORST) has no constraint
-      return null
+      return { lowerBound: null, upperBound: null }
     }
 
     const pair = pairs[pairIndex]
-    if (!pair) return null
+    if (!pair) return { lowerBound: null, upperBound: null }
 
     if (pair.type === 'best') {
       // Phase 2: BEST-to-OTHERS - must be >= bestToWorstValue
-      return bestToWorstValue
+      return { lowerBound: bestToWorstValue, upperBound: null }
     } else {
-      // Phase 3: OTHERS-to-WORST - ordinal consistency
-      // Must be >= the maximum of all previous OTHERS-to-WORST comparisons
-      const groupName = allGroups[selectedGroupIndex]?.name
-      if (!groupName) return null
-      
-      // Find all previous OTHERS-to-WORST comparisons in this group
-      const previousWorstComps = []
-      for (let i = 0; i < pairIndex; i++) {
-        if (pairs[i]?.type === 'worst') {
-          const comp = comps.find(
-            (c) =>
-              c.reference_criterion === pairs[i].reference.criterion_name &&
-              c.adjusted_criterion === pairs[i].adjusted.criterion_name &&
-              c.type === 'worst' &&
-              c.group === groupName
-          )
-          if (comp) {
-            const vfValue = interpolateVF(pairs[i].adjusted.criterion_name, comp.data_value)
-            previousWorstComps.push(vfValue)
-          }
-        }
-      }
-      
-      if (previousWorstComps.length > 0) {
-        // Must be >= the maximum of previous OTHERS-to-WORST
-        return Math.max(...previousWorstComps)
-      } else {
-        // First OTHERS-to-WORST comparison: must be >= bestToWorstValue
-        return bestToWorstValue
-      }
+      // Phase 3: OTHERS-to-WORST - must preserve ranking learned in BEST phase
+      return getWorstConsistencyBounds(pairIndex, comps)
     }
   }
 
   // Check if current slider value is consistent
   const checkConsistency = (pairIndex, dataValue, comps = comparisons) => {
     const pair = pairs[pairIndex]
-    if (!pair) return { isConsistent: true, threshold: null, thresholdDataValue: null }
+    if (!pair) return { isConsistent: true, threshold: null, thresholdDataValue: null, thresholdKind: null }
 
     const currentVFValue = interpolateVF(pair.adjusted.criterion_name, dataValue)
-    const threshold = getConsistencyThreshold(pairIndex, comps)
+    const { lowerBound, upperBound } = getConsistencyThreshold(pairIndex, comps)
 
-    if (threshold === null) {
+    if (lowerBound === null && upperBound === null) {
       // No constraint
-      return { isConsistent: true, threshold: null, thresholdDataValue: null }
+      return { isConsistent: true, threshold: null, thresholdDataValue: null, thresholdKind: null }
     }
 
-    const isConsistent = currentVFValue >= threshold - 1e-10 // Small epsilon for floating point
-    const thresholdDataValue = inverseValueFunction(pair.adjusted.criterion_name, threshold)
+    const epsilon = 1e-10
+    const violatesLower = lowerBound !== null && currentVFValue < lowerBound - epsilon
+    const violatesUpper = upperBound !== null && currentVFValue > upperBound + epsilon
+    const isConsistent = !violatesLower && !violatesUpper
 
-    return { isConsistent, threshold, thresholdDataValue }
+    let threshold = null
+    let thresholdKind = null
+    if (violatesLower) {
+      threshold = lowerBound
+      thresholdKind = 'lower'
+    } else if (violatesUpper) {
+      threshold = upperBound
+      thresholdKind = 'upper'
+    } else {
+      threshold = lowerBound !== null ? lowerBound : upperBound
+      thresholdKind = lowerBound !== null ? 'lower' : 'upper'
+    }
+
+    const thresholdDataValue = threshold === null
+      ? null
+      : inverseValueFunction(pair.adjusted.criterion_name, threshold)
+
+    return { isConsistent, threshold, thresholdDataValue, thresholdKind }
   }
 
   const getBarChartData = (groupCriteria) => {
@@ -773,8 +1178,56 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     })
   }
 
-  const handleSelectCriteria = () => {
+  const handleSelectCriteria = async () => {
+    if (isSessionLocked && !bwtLockActive) {
+      toast({
+        title: 'Session locked by practitioner',
+        description: 'Weight elicitation editing is disabled. Ask the practitioner/admin to unlock.',
+        status: 'warning',
+        isClosable: true,
+      })
+      return
+    }
+
+    if (!bwtLockActive) {
+      toast({
+        title: 'Lock required',
+        description: 'Please lock QI/VF from the banner above before starting weight elicitation.',
+        status: 'info',
+        isClosable: true,
+      })
+      return
+    }
+
     setSelectionStep('select-best')
+  }
+
+  const handleLockForBwt = async () => {
+    setSaving(true)
+    try {
+      // Save BWT with lock flag - this is a USER lock that only blocks QI/VF
+      // Don't call lock-session endpoint (that's for practitioner lock)
+      await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
+        value: buildBwtPayload(comparisons, true),
+      })
+      setBwtLockActive(true)
+      syncBwtSignatures()
+      toast({
+        title: 'QI/VF locked',
+        description: 'You can now start weight elicitation.',
+        status: 'success',
+        isClosable: true,
+      })
+    } catch (error) {
+      toast({
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to lock QI/VF',
+        status: 'error',
+        isClosable: true,
+      })
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleBestSelected = () => {
@@ -816,7 +1269,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     setCurrentPairIndex(0)
     setSelectionStep(null)
     setStep('evaluate-pairs')
-    setSliderValue(getDataRange(bestCriterion).min)
+    setSliderValue(getWorstDataValue(bestCriterion))
   }
 
   const upsertComparisonForPair = (pairIndex, value = sliderValue, comps = comparisons) => {
@@ -833,6 +1286,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     const filtered = comps.filter(
       (c) => !(c.reference_criterion === pair.reference.criterion_name &&
         c.adjusted_criterion === pair.adjusted.criterion_name &&
+        c.type === pair.type &&
         c.group === allGroups[selectedGroupIndex].name)
     )
     return [...filtered, newComparison]
@@ -861,19 +1315,20 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
           value: buildBwtPayload(updatedComparisons),
         })
+        syncBwtSignatures()
         setComparisons(updatedComparisons)
         setCurrentPairIndex(currentPairIndex + 1)
         setSliderTouched(false)
         setIsConsistencyError(false)
         const nextComp = getComparisonForPair(currentPairIndex + 1, updatedComparisons)
-        setSliderValue(nextComp ? nextComp.data_value : getDataRange(pairs[currentPairIndex + 1].adjusted).min)
+        setSliderValue(nextComp ? nextComp.data_value : getWorstDataValue(pairs[currentPairIndex + 1].adjusted))
         // Scroll to top
         if (mainContentRef.current) {
           mainContentRef.current.scrollTop = 0
         }
       } catch (error) {
         toast({
-          title: 'Error',
+          title: 'Request failed',
           description: error.response?.data?.error || 'Failed to save comparison',
           status: 'error',
           isClosable: true,
@@ -901,11 +1356,12 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
           await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
             value: buildBwtPayload(updated),
           })
+          syncBwtSignatures()
           setComparisons(updated)
           latestComparisons = updated
         } catch (error) {
           toast({
-            title: 'Error',
+            title: 'Request failed',
             description: error.response?.data?.error || 'Failed to save comparison',
             status: 'error',
             isClosable: true,
@@ -921,7 +1377,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       setSliderTouched(false)
       setIsConsistencyError(false)
       const prevComp = getComparisonForPair(currentPairIndex - 1, latestComparisons)
-      setSliderValue(prevComp ? prevComp.data_value : getDataRange(pairs[currentPairIndex - 1].adjusted).min)
+      setSliderValue(prevComp ? prevComp.data_value : getWorstDataValue(pairs[currentPairIndex - 1].adjusted))
       // Scroll to top
       if (mainContentRef.current) {
         mainContentRef.current.scrollTop = 0
@@ -936,6 +1392,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       await axios.put(`${API_URL}/session/${sessionId}/bwt`, {
         value: buildBwtPayload(comps),
       })
+      syncBwtSignatures()
       setComparisons(comps)
       toast({
         title: 'Saved',
@@ -946,8 +1403,8 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       })
     } catch (error) {
       toast({
-        title: 'Error',
-        description: error.response?.data?.error || 'Failed to save BWT data',
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to save weight elicitation data',
         status: 'error',
         isClosable: true,
       })
@@ -964,6 +1421,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     return comps.find(
       (c) => c.reference_criterion === pair.reference.criterion_name &&
         c.adjusted_criterion === pair.adjusted.criterion_name &&
+        c.type === pair.type &&
         c.group === groupName
     )
   }
@@ -991,7 +1449,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
           <VStack spacing={4} textAlign="center" maxW="500px">
             <Heading size="lg" color="orange.600">Qualitative Indicators Required</Heading>
             <Text color="gray.700" fontSize="md">
-              You must complete the elicitation of all qualitative indicators before proceeding with the PILE-BWT analysis.
+              You must complete the elicitation of all qualitative indicators before proceeding with weight elicitation.
             </Text>
             <Button
               colorScheme="blue"
@@ -1024,9 +1482,9 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               <Alert status="error" borderRadius="md" textAlign="left" w="100%">
                 <AlertIcon />
                 <Box flex="1">
-                  <AlertTitle>BWT invalid</AlertTitle>
+                  <AlertTitle>Weight elicitation invalid</AlertTitle>
                   <AlertDescription>
-                    The criteria have changed since the last elicitation. Please reset and redo the BWT process.
+                    The criteria have changed since the last elicitation. Please reset and redo weight elicitation.
                   </AlertDescription>
                 </Box>
                 <HStack spacing={2} ml={4}>
@@ -1045,7 +1503,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                     onClick={handleCriteriaMismatchReset}
                     isLoading={saving}
                   >
-                    Reset BWT
+                    Reset weight elicitation
                   </Button>
                 </HStack>
               </Alert>
@@ -1063,6 +1521,14 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       // Show selection pages for best/worst
       if (selectionStep === 'select-best' || selectionStep === 'select-worst') {
         const selectedGroup = allGroups[selectedGroupIndex]
+        if (!selectedGroup) {
+          return (
+            <VStack spacing={6} align="stretch">
+              <Text color="gray.500">No group selected or available</Text>
+            </VStack>
+          )
+        }
+        
         const isSelectingBest = selectionStep === 'select-best'
         const question = isSelectingBest
           ? 'If all these indicators were at their worst performance point, which one would you increase first?'
@@ -1077,9 +1543,9 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               <Alert status="error" borderRadius="md">
                 <AlertIcon />
                 <Box flex="1">
-                  <AlertTitle>BWT invalid</AlertTitle>
+                  <AlertTitle>Weight elicitation invalid</AlertTitle>
                   <AlertDescription>
-                    The criteria have changed since the last elicitation. Please reset and redo the BWT process.
+                    The criteria have changed since the last elicitation. Please reset and redo weight elicitation.
                   </AlertDescription>
                 </Box>
                 <HStack spacing={2} ml={4}>
@@ -1098,7 +1564,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                     onClick={handleCriteriaMismatchReset}
                     isLoading={saving}
                   >
-                    Reset BWT
+                    Reset weight elicitation
                   </Button>
                 </HStack>
               </Alert>
@@ -1111,11 +1577,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               </Badge>
             </Box>
 
-            <Box bg="blue.50" p={4} borderRadius="md" borderLeft="4px" borderLeftColor="blue.400">
-              <Text fontSize="md" color="blue.900" fontWeight="medium">
-                {question}
-              </Text>
-            </Box>
+            <QuestionPrompt>{question}</QuestionPrompt>
 
             <HStack align="stretch" spacing={4} flex={1}>
               {/* Left: Bar Chart with Min/Max Labels */}
@@ -1301,15 +1763,23 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
 
       // Initial screen to start selection
       const selectedGroup = allGroups[selectedGroupIndex]
+      if (!selectedGroup) {
+        return (
+          <VStack spacing={6} align="stretch">
+            <Text color="gray.500">No group selected or available</Text>
+          </VStack>
+        )
+      }
+      
       return (
         <VStack spacing={6} align="stretch">
           {criteriaMismatch && (
             <Alert status="error" borderRadius="md">
               <AlertIcon />
               <Box flex="1">
-                <AlertTitle>BWT invalid</AlertTitle>
+                <AlertTitle>Weight elicitation invalid</AlertTitle>
                 <AlertDescription>
-                  The criteria have changed since the last elicitation. Please reset and redo the BWT process.
+                  The criteria have changed since the last elicitation. Please reset and redo weight elicitation.
                 </AlertDescription>
               </Box>
               <HStack spacing={2} ml={4}>
@@ -1328,7 +1798,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                   onClick={handleCriteriaMismatchReset}
                   isLoading={saving}
                 >
-                  Reset BWT
+                  Reset weight elicitation
                 </Button>
               </HStack>
             </Alert>
@@ -1339,11 +1809,10 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               Group {selectedGroupIndex + 1} of {allGroups.length}: {selectedGroup.name}
             </Badge>
           </Box>
-          <Text fontSize="md" color="gray.700">
+          <QuestionPrompt>
             Let's start by identifying the best and worst performing criteria in this group. 
             You'll be asked to identify which criterion you'd improve first and which you'd improve last.
-          </Text>
-          <Divider />
+          </QuestionPrompt>
 
           <Box pt={4} display="flex" gap={4} justifyContent="flex-end">
             <Button 
@@ -1376,6 +1845,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       const comparison = getComparisonForPair(currentPairIndex)
       const isAllComplete = isGroupComplete(selectedGroupIndex)
       const currentVFValue = interpolateVF(pair.adjusted.criterion_name, sliderValue)
+      const isAdjustedIncreasing = isVFIncreasing(pair.adjusted.criterion_name)
 
       const plot1Data = groupCriteria.map((crit) => {
         const isReference = crit.criterion_name === pair.reference.criterion_name
@@ -1411,9 +1881,9 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             <Alert status="error" borderRadius="md">
               <AlertIcon />
               <Box flex="1">
-                <AlertTitle>BWT invalid</AlertTitle>
+                <AlertTitle>Weight elicitation invalid</AlertTitle>
                 <AlertDescription>
-                  The criteria have changed since the last elicitation. Please reset and redo the BWT process.
+                  The criteria have changed since the last elicitation. Please reset and redo weight elicitation.
                 </AlertDescription>
               </Box>
               <HStack spacing={2} ml={4}>
@@ -1432,7 +1902,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                   onClick={handleCriteriaMismatchReset}
                   isLoading={saving}
                 >
-                  Reset BWT
+                  Reset weight elicitation
                 </Button>
               </HStack>
             </Alert>
@@ -1446,19 +1916,208 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             </Badge>
           </Box>
 
-          <Box border="1px" borderColor="gray.200" borderRadius="md" p={4} bg="gray.50">
-            <Text fontSize="sm" color="gray.700" mb={2}>
-              On the left, you see the baseline: all criteria are at their worst, except for {' '}
-              <strong>{pair.reference.criterion_name}</strong>, which is at its best.
-              <br />
-              On the right, the compensated scenario: how much must {' '}
-              <strong>{pair.adjusted.criterion_name}</strong> improve to compensate the total loss of {' '}
-              <strong>{pair.reference.criterion_name}</strong>?
-            </Text>
-            <Text fontSize="sm" color="gray.600">
-              Adjust the slider to affect the compensated scenario.
-            </Text>
+          <VStack spacing={1} align="stretch">
+            <QuestionPrompt mb={0}>
+              On the left, all criteria are at their worst except <strong>{pair.reference.criterion_name}</strong>, which is at its best.
+            </QuestionPrompt>
+            <QuestionPrompt mb={0}>
+              On the right, decide how much <strong>{pair.adjusted.criterion_name}</strong> must improve to compensate the loss of <strong>{pair.reference.criterion_name}</strong>.
+            </QuestionPrompt>
+          </VStack>
+
+          <Box border="1px" borderColor="gray.200" borderRadius="md" p={4} bg="white">
+            <Slider
+              min={adjustedRange.min}
+              max={adjustedRange.max}
+              step={(adjustedRange.max - adjustedRange.min) / 100}
+              value={sliderValue}
+              isReversed={!isAdjustedIncreasing}
+              onChange={(value) => {
+                setSliderValue(value)
+                setSliderTouched(true)
+              }}
+            >
+              <SliderTrack bg="gray.200" h="8px" borderRadius="md" border="1px solid" borderColor="gray.300">
+                {/* Red zone indicator for inconsistent region */}
+                {isConsistencyError && (
+                  <Box
+                    position="absolute"
+                    left="0"
+                    top="0"
+                    bottom="0"
+                    bg="rgba(220, 38, 38, 0.3)"
+                    borderRadius="md"
+                    pointerEvents="none"
+                    style={{
+                      width: `${
+                        ((Math.min(sliderValue, checkConsistency(currentPairIndex, sliderValue, comparisons).thresholdDataValue || adjustedRange.min) - adjustedRange.min) / (adjustedRange.max - adjustedRange.min)) * 100
+                      }%`,
+                    }}
+                  />
+                )}
+                <SliderFilledTrack bg={isConsistencyError ? 'red.500' : 'blue.500'} />
+              </SliderTrack>
+              <SliderThumb w="20px" h="20px" bg="blue.500" borderRadius="full" border="2px solid white" boxShadow="0 2px 4px rgba(0,0,0,0.2)" />
+            </Slider>
+            <HStack spacing={2} mt={3} fontSize="sm" color="gray.600" justify="space-between">
+              <Text>{(isAdjustedIncreasing ? adjustedRange.min : adjustedRange.max).toFixed(2)}</Text>
+              <HStack spacing={3}>
+                <FormLabel mb={0} fontWeight="semibold">
+                  "{pair.adjusted.criterion_name}" [{pair.adjusted.unit}]: <strong>{sliderInputValue}</strong>
+                </FormLabel>
+                <NumberInput
+                  value={sliderInputValue}
+                  min={adjustedRange.min}
+                  max={adjustedRange.max}
+                  step={(adjustedRange.max - adjustedRange.min) / 100}
+                  precision={2}
+                  onChange={(valueString) => {
+                    setSliderInputValue(valueString)
+                    setSliderTouched(true)
+                  }}
+                  size="sm"
+                  w="100px"
+                  variant="unstyled"
+                >
+                  <NumberInputField
+                    textAlign="center"
+                    fontWeight="bold"
+                    fontSize="md"
+                    px={2}
+                    py={1}
+                    border="1px solid"
+                    borderColor="gray.300"
+                    borderRadius="md"
+                    bg="white"
+                    _focus={{ borderColor: 'blue.400', boxShadow: '0 0 0 1px #63b3ed' }}
+                    onBlur={() => {
+                      const parsed = Number(sliderInputValue)
+                      if (Number.isFinite(parsed)) {
+                        const clamped = Math.min(adjustedRange.max, Math.max(adjustedRange.min, parsed))
+                        setSliderValue(clamped)
+                        setSliderInputValue(clamped.toFixed(2))
+                        setSliderTouched(true)
+                      } else {
+                        setSliderInputValue(Number.isFinite(sliderValue) ? sliderValue.toFixed(2) : adjustedRange.min.toFixed(2))
+                      }
+                    }}
+                  />
+                </NumberInput>
+              </HStack>
+              <Text>{(isAdjustedIncreasing ? adjustedRange.max : adjustedRange.min).toFixed(2)}</Text>
+            </HStack>
           </Box>
+
+          <HStack spacing={4} justify="flex-end" pt={2}>
+            <Button
+              leftIcon={<ChevronLeftIcon />}
+              isDisabled={currentPairIndex === 0}
+              onClick={handlePrevPair}
+              size="md"
+            >
+              Back
+            </Button>
+            <Button 
+              colorScheme="blue" 
+              rightIcon={<ChevronRightIcon />} 
+              onClick={async () => {
+                if (currentPairIndex === pairs.length - 1) {
+                  // Capture the value from the first (BEST-to-WORST) comparison if not already captured
+                  if (currentPairIndex === 0 && pairs[0]?.type === 'best' && bestToWorstValue === null) {
+                    const vfValue = interpolateVF(pairs[0].adjusted.criterion_name, sliderValue)
+                    setBestToWorstValue(vfValue)
+                  }
+
+                  // Don't save if there's a consistency error
+                  if (!isConsistencyError) {
+                    const updatedComparisons = upsertComparisonForPair(currentPairIndex, sliderValue)
+                    await handleSaveAll(updatedComparisons)
+                  }
+                  
+                  if (selectedGroupIndex < allGroups.length - 1) {
+                    // Move to next group
+                    setSelectedGroupIndex(selectedGroupIndex + 1)
+                    setBestCriterion(null)
+                    setWorstCriterion(null)
+                    setPairs([])
+                    setPairsGroupName(null)
+                    setStep('select-criteria')
+                    // Reset consistency tracking for new group
+                    setBestToWorstValue(null)
+                    setConsistencyConstraints({})
+                    setIsConsistencyError(false)
+                    if (mainContentRef.current) {
+                      mainContentRef.current.scrollTop = 0
+                    }
+                  } else {
+                    // Last group - go to recap
+                    if (onPageChange) {
+                      onPageChange('recap')
+                    }
+                  }
+                } else {
+                  // Not on last pair - just go to next
+                  await handleNextPair()
+                }
+              }} 
+              isDisabled={!sliderTouched || isConsistencyError}
+              isLoading={saving}
+              size="md"
+            >
+              {currentPairIndex === pairs.length - 1 
+                ? (selectedGroupIndex === allGroups.length - 1 ? 'Complete & Go to Recap' : 'Next Group') 
+                : 'Next'}
+            </Button>
+          </HStack>
+
+          {/* Error tooltip for consistency violation */}
+          {isConsistencyError && (
+            <Box
+              bg="red.50"
+              border="2px"
+              borderColor="red.400"
+              borderRadius="md"
+              p={3}
+            >
+              <HStack spacing={2} alignItems="flex-start">
+                <WarningIcon color="red.600" boxSize={5} mt={0.5} />
+                <VStack align="start" spacing={1} flex={1}>
+                  <Text fontWeight="bold" color="red.700" fontSize="sm">
+                    Inconsistent judgment
+                  </Text>
+                  {(() => {
+                    const pair = pairs[currentPairIndex]
+                    const { thresholdDataValue, thresholdKind } = checkConsistency(currentPairIndex, sliderValue, comparisons)
+                    const isIncreasing = isVFIncreasing(pair.adjusted.criterion_name)
+                    // lower VF bound means VF must be >= threshold
+                    // upper VF bound means VF must be <= threshold
+                    const adjective = thresholdKind === 'upper'
+                      ? (isIncreasing ? 'at most' : 'at least')
+                      : (isIncreasing ? 'at least' : 'at most')
+                    
+                    if (pair?.type === 'best') {
+                      return (
+                        <Text color="red.600" fontSize="sm">
+                          Must adjust <strong>{pair.adjusted.criterion_name}</strong> to {adjective} {' '}
+                          <strong>{thresholdDataValue?.toFixed(2)}</strong> {pair.adjusted.unit}{' '}
+                          to be consistent with <strong>{bestCriterion.criterion_name}</strong>-<strong>{worstCriterion.criterion_name}</strong> comparison
+                        </Text>
+                      )
+                    } else {
+                      // OTHERS-to-WORST
+                      return (
+                        <Text color="red.600" fontSize="sm">
+                          Must adjust <strong>{pair.adjusted.criterion_name}</strong> to {adjective} {' '}
+                          <strong>{thresholdDataValue?.toFixed(2)}</strong> {pair.adjusted.unit}{' '}
+                          to maintain consistency with previous comparisons
+                        </Text>
+                      )
+                    }
+                  })()}
+                </VStack>
+              </HStack>
+            </Box>
+          )}
 
           <HStack spacing={4} align="stretch">
             <Box border="1px" borderColor="gray.200" borderRadius="md" p={3} flex={1} bg="white">
@@ -1531,199 +2190,6 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             </Box>
           </HStack>
 
-          <Box>
-            <HStack justify="space-between" align="center" spacing={3} mb={2}>
-              <HStack spacing={3}>
-                <FormLabel mb={0} fontWeight="bold" fontSize="md">
-                  Adjust "{pair.adjusted.criterion_name}" [{pair.adjusted.unit}]:
-                </FormLabel>
-                <NumberInput
-                  value={sliderInputValue}
-                  min={adjustedRange.min}
-                  max={adjustedRange.max}
-                  step={(adjustedRange.max - adjustedRange.min) / 100}
-                  precision={2}
-                  onChange={(valueString) => {
-                    setSliderInputValue(valueString)
-                  }}
-                  size="md"
-                  maxW="160px"
-                  variant="unstyled"
-                >
-                  <NumberInputField
-                    textAlign="left"
-                    fontWeight="bold"
-                    fontSize="md"
-                    lineHeight="1.2"
-                    px={2}
-                    py={1}
-                    height="auto"
-                    mt="1px"
-                    border="1px solid"
-                    borderColor="gray.300"
-                    borderRadius="md"
-                    bg="white"
-                    _focus={{ borderColor: 'blue.400', boxShadow: '0 0 0 1px #63b3ed' }}
-                    onBlur={() => {
-                      const parsed = Number(sliderInputValue)
-                      if (Number.isFinite(parsed)) {
-                        const clamped = Math.min(adjustedRange.max, Math.max(adjustedRange.min, parsed))
-                        setSliderValue(clamped)
-                        setSliderInputValue(clamped.toFixed(2))
-                      } else {
-                        setSliderInputValue(Number.isFinite(sliderValue) ? sliderValue.toFixed(2) : adjustedRange.min.toFixed(2))
-                      }
-                    }}
-                  />
-                </NumberInput>
-              </HStack>
-              <HStack spacing={4}>
-                <Button
-                  leftIcon={<ChevronLeftIcon />}
-                  isDisabled={currentPairIndex === 0}
-                  onClick={handlePrevPair}
-                  size="md"
-                >
-                  Previous
-                </Button>
-                <Button 
-                  colorScheme="blue" 
-                  rightIcon={<ChevronRightIcon />} 
-                  onClick={async () => {
-                    if (currentPairIndex === pairs.length - 1) {
-                      // Capture the value from the first (BEST-to-WORST) comparison if not already captured
-                      if (currentPairIndex === 0 && pairs[0]?.type === 'best' && bestToWorstValue === null) {
-                        const vfValue = interpolateVF(pairs[0].adjusted.criterion_name, sliderValue)
-                        setBestToWorstValue(vfValue)
-                      }
-
-                      // Don't save if there's a consistency error
-                      if (!isConsistencyError) {
-                        const updatedComparisons = upsertComparisonForPair(currentPairIndex, sliderValue)
-                        await handleSaveAll(updatedComparisons)
-                      }
-                      
-                      if (selectedGroupIndex < allGroups.length - 1) {
-                        // Move to next group
-                        setSelectedGroupIndex(selectedGroupIndex + 1)
-                        setBestCriterion(null)
-                        setWorstCriterion(null)
-                        setPairs([])
-                        setPairsGroupName(null)
-                        setStep('select-criteria')
-                        // Reset consistency tracking for new group
-                        setBestToWorstValue(null)
-                        setConsistencyConstraints({})
-                        setIsConsistencyError(false)
-                        if (mainContentRef.current) {
-                          mainContentRef.current.scrollTop = 0
-                        }
-                      } else {
-                        // Last group - go to recap
-                        if (onPageChange) {
-                          onPageChange('recap')
-                        }
-                      }
-                    } else {
-                      // Not on last pair - just go to next
-                      await handleNextPair()
-                    }
-                  }} 
-                  isDisabled={!sliderTouched || isConsistencyError}
-                  isLoading={saving}
-                  size="md"
-                >
-                  {currentPairIndex === pairs.length - 1 
-                    ? (selectedGroupIndex === allGroups.length - 1 ? 'Complete & Go to Recap' : 'Next Group') 
-                    : 'Next'}
-                </Button>
-              </HStack>
-            </HStack>
-            <Slider
-              min={adjustedRange.min}
-              max={adjustedRange.max}
-              step={(adjustedRange.max - adjustedRange.min) / 100}
-              value={sliderValue}
-              onChange={(value) => {
-                setSliderValue(value)
-                setSliderTouched(true)
-              }}
-            >
-              <SliderTrack bg="gray.200">
-                {/* Red zone indicator for inconsistent region */}
-                {isConsistencyError && (
-                  <Box
-                    position="absolute"
-                    left="0"
-                    top="0"
-                    bottom="0"
-                    bg="rgba(220, 38, 38, 0.3)"
-                    borderRadius="full"
-                    pointerEvents="none"
-                    style={{
-                      width: `${
-                        ((Math.min(sliderValue, checkConsistency(currentPairIndex, sliderValue, comparisons).thresholdDataValue || adjustedRange.min) - adjustedRange.min) / (adjustedRange.max - adjustedRange.min)) * 100
-                      }%`,
-                    }}
-                  />
-                )}
-                <SliderFilledTrack bg={isConsistencyError ? 'red.500' : 'blue.500'} />
-              </SliderTrack>
-              <SliderThumb />
-            </Slider>
-            <HStack spacing={2} mt={2} fontSize="sm" color="gray.600">
-              <Text>{adjustedRange.min.toFixed(2)}</Text>
-              <Box flex={1} />
-              <Text>{adjustedRange.max.toFixed(2)}</Text>
-            </HStack>
-            
-            {/* Error tooltip for consistency violation */}
-            {isConsistencyError && (
-              <Box
-                bg="red.50"
-                border="2px"
-                borderColor="red.400"
-                borderRadius="md"
-                p={3}
-                mt={2}
-              >
-                <HStack spacing={2} alignItems="flex-start">
-                  <Box color="red.600" fontSize="lg">⚠️</Box>
-                  <VStack align="start" spacing={1} flex={1}>
-                    <Text fontWeight="bold" color="red.700" fontSize="sm">
-                      Inconsistent judgment
-                    </Text>
-                    {(() => {
-                      const pair = pairs[currentPairIndex]
-                      const { threshold, thresholdDataValue } = checkConsistency(currentPairIndex, sliderValue, comparisons)
-                      const isIncreasing = isVFIncreasing(pair.adjusted.criterion_name)
-                      const adjective = isIncreasing ? 'at least' : 'at most'
-                      
-                      if (pair?.type === 'best') {
-                        return (
-                          <Text color="red.600" fontSize="sm">
-                            Must adjust <strong>{pair.adjusted.criterion_name}</strong> to {adjective} {' '}
-                            <strong>{thresholdDataValue?.toFixed(2)}</strong> {pair.adjusted.unit}{' '}
-                            to be consistent with <strong>{bestCriterion.criterion_name}</strong>-<strong>{worstCriterion.criterion_name}</strong> comparison
-                          </Text>
-                        )
-                      } else {
-                        // OTHERS-to-WORST
-                        return (
-                          <Text color="red.600" fontSize="sm">
-                            Must adjust <strong>{pair.adjusted.criterion_name}</strong> to {adjective} {' '}
-                            <strong>{thresholdDataValue?.toFixed(2)}</strong> {pair.adjusted.unit}{' '}
-                            to maintain consistency with previous comparisons
-                          </Text>
-                        )
-                      }
-                    })()}
-                  </VStack>
-                </HStack>
-              </Box>
-            )}
-          </Box>
-
           <Box border="1px" borderColor="gray.200" borderRadius="md" p={4}>
             <Heading size="sm" mb={2} textAlign="center">Value Function: {pair.adjusted.criterion_name}</Heading>
             {vfData.length > 0 ? (
@@ -1780,7 +2246,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         <VStack spacing={4} align="stretch" mb={6}>
           <Heading size="md">Weights</Heading>
           <Text fontSize="sm" color="gray.600">
-            Apply the PILE-BWT method, perform pairwise comparisons to determine the weights of each criteria.
+            Perform pairwise comparisons to determine criterion weights.
           </Text>
         </VStack>
         <VStack spacing={3} align="stretch">
@@ -1877,7 +2343,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                                   latestComparisons = updated
                                 } catch (error) {
                                   toast({
-                                    title: 'Error',
+                                    title: 'Request failed',
                                     description: 'Failed to save comparison',
                                     status: 'error',
                                     isClosable: true,
@@ -1892,7 +2358,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                               setCurrentPairIndex(pairIdx)
                               setIsConsistencyError(false)
                               const targetComp = getComparisonForPair(pairIdx, latestComparisons)
-                              setSliderValue(targetComp ? targetComp.data_value : getDataRange(pairs[pairIdx].adjusted).min)
+                              setSliderValue(targetComp ? targetComp.data_value : getWorstDataValue(pairs[pairIdx].adjusted))
                               // Scroll to top
                               if (mainContentRef.current) {
                                 mainContentRef.current.scrollTop = 0
@@ -1924,7 +2390,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             <Button
               colorScheme="red"
               size="sm"
-              onClick={onOpen}
+              onClick={onResetOpen}
               variant="outline"
               isDisabled={isSessionLocked}
               width="100%"
@@ -1937,9 +2403,9 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
 
       {/* Reset Group Confirmation Dialog */}
       <AlertDialog
-        isOpen={isOpen}
+        isOpen={isResetOpen}
         leastDestructiveRef={cancelRef}
-        onClose={onClose}
+        onClose={onResetClose}
       >
         <AlertDialogOverlay>
           <AlertDialogContent>
@@ -1952,14 +2418,14 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             </AlertDialogBody>
 
             <AlertDialogFooter>
-              <Button ref={cancelRef} onClick={onClose}>
+              <Button ref={cancelRef} onClick={onResetClose}>
                 Cancel
               </Button>
               <Button 
                 colorScheme="red" 
                 onClick={() => {
                   handleResetGroup()
-                  onClose()
+                  onResetClose()
                 }} 
                 ml={3}
                 isLoading={saving}
@@ -1980,13 +2446,64 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         maxH="100vh"
         overflowY="auto"
       >
-        {isSessionLocked && (
-          <Box bg="yellow.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="yellow.400" mb={4}>
-            <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
-              🔒 Session is locked. Editing is disabled.
-            </Text>
+        {/* Persistent lock status banner */}
+        {!bwtLockActive && !isSessionLocked ? (
+          <Box bg="blue.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="blue.400" mb={4}>
+            <HStack spacing={2} align="flex-start">
+              <InfoIcon color="blue.600" />
+              <VStack align="start" spacing={2} flex={1}>
+                <Text fontSize="sm" color="blue.800" fontWeight="semibold">
+                  To work on weight elicitation, you need to lock QI and VF pages. Weight elicitation remains editable while locked.
+                </Text>
+                <Button size="xs" colorScheme="blue" onClick={handleLockForBwt} isLoading={saving}>
+                  Lock QI/VF to continue
+                </Button>
+              </VStack>
+            </HStack>
           </Box>
-        )}
+        ) : bwtLockActive ? (
+          <Box bg="green.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="green.400" mb={4}>
+            <HStack spacing={2} align="flex-start">
+              <CheckCircleIcon color="green.600" />
+              <VStack align="start" spacing={2} flex={1}>
+                <Text fontSize="sm" color="green.800" fontWeight="semibold">
+                  QI and VF are locked. You can now work on weight elicitation.
+                </Text>
+                {!showUnlockConfirm ? (
+                  <Button size="xs" variant="outline" colorScheme="green" onClick={() => setShowUnlockConfirm(true)} isLoading={saving}>
+                    Unlock for QI/VF edits
+                  </Button>
+                ) : (
+                  <HStack spacing={2}>
+                    <Text fontSize="xs" color="green.800">
+                      This will re-enable QI and VF editing. Continue?
+                    </Text>
+                    <Button size="xs" colorScheme="green" onClick={handleUnlockForModification} isLoading={saving}>
+                      Yes, unlock
+                    </Button>
+                    <Button size="xs" variant="ghost" onClick={() => setShowUnlockConfirm(false)}>
+                      Cancel
+                    </Button>
+                  </HStack>
+                )}
+              </VStack>
+            </HStack>
+          </Box>
+        ) : isSessionLocked ? (
+          <Box bg="red.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="red.400" mb={4}>
+            <HStack spacing={2} align="flex-start">
+              <WarningIcon color="red.600" />
+              <VStack align="start" spacing={1} flex={1}>
+                <Text fontSize="sm" color="red.800" fontWeight="semibold">
+                  This session is locked by the practitioner. Weight elicitation editing is disabled.
+                </Text>
+                <Text fontSize="xs" color="red.700">
+                  Ask the practitioner/admin to unlock this session.
+                </Text>
+              </VStack>
+            </HStack>
+          </Box>
+        ) : null}
         {qualitativeIncomplete && (
           <Alert
             status="warning"
@@ -2001,7 +2518,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               <Box>
                 <AlertTitle>Qualitative Indicators Required</AlertTitle>
                 <AlertDescription>
-                  Please complete the elicitation of all qualitative indicators before proceeding with the PILE-BWT analysis.
+                  Please complete the elicitation of all qualitative indicators before proceeding with weight elicitation.
                 </AlertDescription>
               </Box>
             </HStack>

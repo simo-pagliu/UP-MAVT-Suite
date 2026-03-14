@@ -11,6 +11,7 @@ import {
 
 function RecapPage({ sessionId, onNavigate }) {
   const [sessionData, setSessionData] = useState(null)
+  const [studyData, setStudyData] = useState(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -19,9 +20,22 @@ function RecapPage({ sessionId, onNavigate }) {
       setLoading(true)
       try {
         const response = await axios.get(`${API_URL}/session/${sessionId}`)
-        setSessionData(response.data)
+        const session = response.data
+        setSessionData(session)
+        const studySessionId = session?.study_session_id
+        if (studySessionId) {
+          try {
+            const studyResponse = await axios.get(`${API_URL}/study-session/${studySessionId}`)
+            setStudyData(studyResponse.data)
+          } catch {
+            setStudyData(null)
+          }
+        } else {
+          setStudyData(null)
+        }
       } catch {
         setSessionData(null)
+        setStudyData(null)
       } finally {
         setLoading(false)
       }
@@ -44,18 +58,19 @@ function RecapPage({ sessionId, onNavigate }) {
     }
   }, [criteria, qualitativeIndicators, valueFunctions, bwt])
 
+  const getStatusLabel = (isComplete) => (isComplete ? 'Complete' : 'Missing required criteria')
+
   const missing = []
-  if (!completion.input) missing.push({ key: 'input', label: 'Input Definition', page: 'session-access' })
   if (!completion.qualitative) missing.push({ key: 'qualitative', label: 'Qualitative Indicators', page: 'qualitative' })
   if (!completion.valueFunctions) missing.push({ key: 'value', label: 'Value Functions', page: 'value' })
-  if (!completion.pileBwt) missing.push({ key: 'pile', label: 'PILE-BWT', page: 'pile' })
+  if (!completion.pileBwt) missing.push({ key: 'pile', label: 'Weights', page: 'pile' })
 
   const isAllComplete = missing.length === 0
 
   return (
     <Box bg="white" p={6} borderRadius="lg" boxShadow="sm">
       <VStack spacing={6} align="stretch">
-        <Heading as="h1" size="lg">Recap</Heading>
+        <Heading as="h1" size="lg">Overview</Heading>
 
         {loading && <Text color="gray.600">Checking completion...</Text>}
 
@@ -85,14 +100,25 @@ function RecapPage({ sessionId, onNavigate }) {
 
         {!loading && (
           <>
+            {(studyData?.title || studyData?.description) && (
+              <>
+                <Divider />
+                <VStack align="stretch" spacing={2}>
+                  <Text fontWeight="semibold">Case Study</Text>
+                  {studyData?.title && <Text><strong>Title:</strong> {studyData.title}</Text>}
+                  {studyData?.description && <Text><strong>Description:</strong> {studyData.description}</Text>}
+                </VStack>
+              </>
+            )}
+
             <Divider />
             <VStack align="stretch" spacing={3}>
               <Text fontWeight="semibold">Completion checklist</Text>
               <List spacing={2}>
-                <ListItem>Input Definition: {completion.input ? 'Complete' : 'Missing'}</ListItem>
-                <ListItem>Qualitative Indicators: {completion.qualitative ? 'Complete' : 'Missing'}</ListItem>
-                <ListItem>Value Functions: {completion.valueFunctions ? 'Complete' : 'Missing'}</ListItem>
-                <ListItem>PILE-BWT: {completion.pileBwt ? 'Complete' : 'Missing'}</ListItem>
+                <ListItem>Input Definition: {getStatusLabel(completion.input)}</ListItem>
+                <ListItem>Qualitative Indicators: {getStatusLabel(completion.qualitative)}</ListItem>
+                <ListItem>Value Functions: {getStatusLabel(completion.valueFunctions)}</ListItem>
+                <ListItem>Weights: {getStatusLabel(completion.pileBwt)}</ListItem>
               </List>
             </VStack>
           </>

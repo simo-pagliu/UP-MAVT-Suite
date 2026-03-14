@@ -178,6 +178,52 @@ class TestBuildPileBwtCsv:
         assert rows[0]['VALUE'] == 'raw_value'
 
 
+class TestBuildPileBwtDebugCsv:
+    def test_decreasing_vf_clamps_to_endpoint_y_by_x_bounds(self):
+        criteria_list = [
+            {
+                'criterion_name': 'Cost',
+                'is_qualitative': False,
+            }
+        ]
+        value_functions_data = {
+            'criteria': {
+                'Cost': {
+                    'points': [
+                        {'x': 100, 'y': 1.0},
+                        {'x': 200, 'y': 0.0},
+                    ]
+                }
+            }
+        }
+        bwt_data = {
+            'comparisons': [
+                {
+                    'reference_criterion': 'R',
+                    'adjusted_criterion': 'Cost',
+                    'data_value': 90,  # below min x -> should clamp to y at x=100 (1.0)
+                    'type': 'ratio',
+                    'group': 'G1',
+                },
+                {
+                    'reference_criterion': 'R',
+                    'adjusted_criterion': 'Cost',
+                    'data_value': 210,  # above max x -> should clamp to y at x=200 (0.0)
+                    'type': 'ratio',
+                    'group': 'G1',
+                },
+            ]
+        }
+
+        csv_text = ExportService.build_pile_bwt_debug_csv(
+            bwt_data, value_functions_data, criteria_list
+        )
+        rows = read_csv(csv_text)
+
+        assert rows[0]['a_value'] == '1.0'
+        assert rows[1]['a_value'] == ''
+
+
 # ---------------------------------------------------------------------------
 # _serialize_points
 # ---------------------------------------------------------------------------
