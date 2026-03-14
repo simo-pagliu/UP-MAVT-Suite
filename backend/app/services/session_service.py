@@ -5,11 +5,14 @@ retrieval, validation, locking, and data updates for individual elicitation
 sessions.
 """
 
+import logging
 from datetime import datetime, timezone
 from bson.objectid import ObjectId
 
 from app.repositories import SessionRepository, InputRepository
 from app.exceptions import NotFoundError, ValidationError, ConflictError, LockedError
+
+logger = logging.getLogger(__name__)
 
 
 class SessionService:
@@ -301,7 +304,7 @@ class SessionService:
                     if isinstance(criteria, list):
                         return criteria
             except Exception as e:
-                print(f"Warning: Could not fetch input document {input_id}: {e}")
+                logger.warning("Could not fetch input document %s: %s", input_id, e)
         return session.get('criteria', [])
 
     def _serialize_session(self, session):

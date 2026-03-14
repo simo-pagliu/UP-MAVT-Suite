@@ -5,6 +5,7 @@ Polls MongoDB for pending tasks, executes Python simulations,
 and saves results back to the database.
 """
 
+import logging
 import os
 import sys
 import time
@@ -35,6 +36,17 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://mongo:27017/elicitation")
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "2"))  # seconds
 
 # ============================================================================
+# LOGGING SETUP
+# ============================================================================
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+    datefmt='%Y-%m-%dT%H:%M:%S',
+    stream=sys.stdout,
+)
+logger = logging.getLogger(__name__)
+
+# ============================================================================
 # DB CONNECTION
 # ============================================================================
 client = MongoClient(MONGO_URI)
@@ -52,10 +64,10 @@ class TaskLogger:
         self.lines = []
 
     def log(self, message):
-        """Log a message: print to stdout and flush to DB immediately."""
+        """Log a message: write to logger and flush to DB immediately."""
         line = str(message)
         self.lines.append(line)
-        print(line, flush=True)
+        logger.info(line)
         self._flush()
 
     def flush(self):
@@ -359,12 +371,11 @@ TASK_HANDLERS = {
 # MAIN LOOP
 # ============================================================================
 def main():
-    print("=" * 60)
-    print("UP-MAVT Worker started")
-    print(f"MongoDB: {MONGO_URI}")
-    print(f"Poll interval: {POLL_INTERVAL}s")
-    print("=" * 60)
-    sys.stdout.flush()
+    logger.info(
+        "UP-MAVT Worker started | MongoDB: %s | Poll interval: %ss",
+        MONGO_URI,
+        POLL_INTERVAL,
+    )
 
     while True:
         try:
@@ -381,14 +392,13 @@ def main():
             if task:
                 task_type = task.get('type', 'unknown')
                 task_id = str(task['_id'])
-                print(f"\n[{datetime.now().isoformat()}] Processing task {task_id} (type: {task_type})")
-                sys.stdout.flush()
+                logger.info("Processing task %s (type: %s)", task_id, task_type)
 
                 handler = TASK_HANDLERS.get(task_type)
                 if handler:
                     handler(task)
                 else:
-                    print(f"  Unknown task type: {task_type}")
+                    logger.warning("Unknown task type: %s", task_type)
                     db.tasks.update_one(
                         {'_id': task['_id']},
                         {'$set': {
@@ -401,11 +411,10 @@ def main():
                 time.sleep(POLL_INTERVAL)
 
         except KeyboardInterrupt:
-            print("\nWorker shutting down...")
+            logger.info("Worker shutting down...")
             break
         except Exception as e:
-            print(f"Worker loop error: {e}")
-            traceback.print_exc()
+            logger.error("Worker loop error: %s", e, exc_info=True)
             time.sleep(POLL_INTERVAL)
 
 
