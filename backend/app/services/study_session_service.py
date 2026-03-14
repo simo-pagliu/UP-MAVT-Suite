@@ -6,7 +6,6 @@ criteria and feature settings.
 """
 
 from datetime import datetime, timezone
-import io
 import json
 import secrets
 import string
@@ -16,6 +15,7 @@ from bson.objectid import ObjectId
 from app.repositories import SessionRepository, StudySessionRepository, InputRepository
 from app.exceptions import NotFoundError, ValidationError, ConflictError
 from app.services.session_service import SessionService
+from app.services.backup_zip import BackupZip
 
 
 class StudySessionService:
@@ -503,49 +503,35 @@ class StudySessionService:
             ],
         }
 
-        buf = io.BytesIO()
-        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr('metadata.json', json.dumps(metadata, ensure_ascii=False, indent=2))
-            zf.writestr('input/input.json', json.dumps({'criteria': criteria}, ensure_ascii=False, indent=2))
+        entries = [
+            ('metadata.json', json.dumps(metadata, ensure_ascii=False, indent=2)),
+            ('input/input.json', json.dumps({'criteria': criteria}, ensure_ascii=False, indent=2)),
+        ]
 
-            for session in sessions:
-                session_name = session.get('name', str(session.get('_id')))
-                qualitative = session.get('qualitative_indicators') or {}
-                value_functions = session.get('value_functions') or {}
-                vf_criteria = value_functions.get('criteria', {}) if isinstance(value_functions, dict) else {}
-                bwt = session.get('bwt') or {}
+        for session in sessions:
+            session_name = session.get('name', str(session.get('_id')))
+            qualitative = session.get('qualitative_indicators') or {}
+            value_functions = session.get('value_functions') or {}
+            vf_criteria = value_functions.get('criteria', {}) if isinstance(value_functions, dict) else {}
+            bwt = session.get('bwt') or {}
 
-                session_payload = {
-                    'name': session_name,
-                    'qualitative_indicators': session.get('qualitative_indicators'),
-                    'value_functions': session.get('value_functions'),
-                    'bwt': session.get('bwt'),
-                    'locked': bool(session.get('locked', False)),
-                    'session_locked': bool(session.get('session_locked', False)),
-                }
-                zf.writestr(
-                    f'sessions/{session_name}.json',
-                    json.dumps(session_payload, ensure_ascii=False, indent=2),
-                )
+            session_payload = {
+                'name': session_name,
+                'qualitative_indicators': session.get('qualitative_indicators'),
+                'value_functions': session.get('value_functions'),
+                'bwt': session.get('bwt'),
+                'locked': bool(session.get('locked', False)),
+                'session_locked': bool(session.get('session_locked', False)),
+            }
+            entries.extend([
+                (f'sessions/{session_name}.json', json.dumps(session_payload, ensure_ascii=False, indent=2)),
+                (f'csv/{session_name}/input_raw_{session_name}.csv', ExportService.build_input_raw_csv(criteria)),
+                (f'csv/{session_name}/qualitative_{session_name}.csv', ExportService.build_qualitative_csv(criteria, qualitative)),
+                (f'csv/{session_name}/value_functions_{session_name}.csv', ExportService.build_value_functions_csv(criteria, vf_criteria, qualitative)),
+                (f'csv/{session_name}/pile_bwt_{session_name}.csv', ExportService.build_pile_bwt_csv(bwt)),
+            ])
 
-                zf.writestr(
-                    f'csv/{session_name}/input_raw_{session_name}.csv',
-                    ExportService.build_input_raw_csv(criteria),
-                )
-                zf.writestr(
-                    f'csv/{session_name}/qualitative_{session_name}.csv',
-                    ExportService.build_qualitative_csv(criteria, qualitative),
-                )
-                zf.writestr(
-                    f'csv/{session_name}/value_functions_{session_name}.csv',
-                    ExportService.build_value_functions_csv(criteria, vf_criteria, qualitative),
-                )
-                zf.writestr(
-                    f'csv/{session_name}/pile_bwt_{session_name}.csv',
-                    ExportService.build_pile_bwt_csv(bwt),
-                )
-
-        buf.seek(0)
+        buf = BackupZip.write(entries)
         return buf, f'backup_{study.get("code", study_session_id)}.zip', 'application/zip'
 
     def import_backup_zip(self, zip_bytes, on_conflict='abort'):
@@ -553,12 +539,7 @@ class StudySessionService:
             raise ValidationError('Invalid on_conflict value')
 
         try:
-            zip_buf = io.BytesIO(zip_bytes)
-            with zipfile.ZipFile(zip_buf, 'r') as zf:
-                metadata = json.loads(zf.read('metadata.json').decode('utf-8'))
-                input_payload = json.loads(zf.read('input/input.json').decode('utf-8'))
-                session_files = [name for name in zf.namelist() if name.startswith('sessions/') and name.endswith('.json')]
-                session_payloads = [json.loads(zf.read(path).decode('utf-8')) for path in session_files]
+            metadata, input_payload, session_payloads = BackupZip.read(zip_bytes)
         except KeyError as exc:
             raise ValidationError(f'Invalid backup ZIP format: missing {exc}') from exc
         except (zipfile.BadZipFile, json.JSONDecodeError, UnicodeDecodeError) as exc:
