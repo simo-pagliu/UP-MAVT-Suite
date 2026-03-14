@@ -444,9 +444,8 @@ class WorkflowService:
         if not first_solution:
             raise NotFoundError('No valid weight solutions found')
         criteria_names = sorted(first_solution.keys())
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['SESSION_ID', 'SOLUTION_INDEX', *criteria_names])
+        headers = ['SESSION_ID', 'SOLUTION_INDEX', *criteria_names]
+        rows = []
         for sid, solutions in sorted(non_empty, key=lambda x: str(x[0])):
             for index, solution in enumerate(solutions):
                 if not isinstance(solution, dict):
@@ -460,9 +459,9 @@ class WorkflowService:
                         except (TypeError, ValueError):
                             pass
                     row.append(v)
-                writer.writerow(row)
+                rows.append(row)
         filename = f'weight_solutions_{study.get("code", study_session_id)}.csv'
-        return output.getvalue().encode(), filename, 'text/csv'
+        return self._rows_to_csv(headers, rows).encode(), filename, 'text/csv'
 
     def export_weight_solutions_single_csv(self, study_session_id, session_id):
         """Export weight solutions for a single elicitation session as a CSV file.
@@ -508,9 +507,8 @@ class WorkflowService:
         all_criteria = sorted({k for sol in solutions if isinstance(sol, dict) for k in sol.keys()})
         if not all_criteria:
             raise NotFoundError('No criteria found in weight solutions')
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['SOLUTION_INDEX', *all_criteria])
+        headers = ['SOLUTION_INDEX', *all_criteria]
+        rows = []
         for index, sol in enumerate(solutions):
             if not isinstance(sol, dict):
                 continue
@@ -523,10 +521,10 @@ class WorkflowService:
                     except (TypeError, ValueError):
                         pass
                 row.append(v)
-            writer.writerow(row)
+            rows.append(row)
         session_doc = self._sessions.find_by_id(session_id)
         session_name = session_doc.get('name') if isinstance(session_doc, dict) else session_id
-        return output.getvalue().encode(), f'weight_solutions_{session_name}.csv', 'text/csv'
+        return self._rows_to_csv(headers, rows).encode(), f'weight_solutions_{session_name}.csv', 'text/csv'
 
     @staticmethod
     def _safe_filename(value):
