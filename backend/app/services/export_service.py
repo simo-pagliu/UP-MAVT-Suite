@@ -1,6 +1,5 @@
 """Export service: builds CSV and JSON payloads for session data."""
 
-import csv
 import io
 import json
 import zipfile
@@ -9,6 +8,7 @@ from bisect import bisect_right
 from app.repositories import SessionRepository, InputRepository
 from app.services.session_service import SessionService
 from app.exceptions import NotFoundError, ValidationError
+from app.utils.csv_utils import CsvUtils
 
 
 class ExportService:
@@ -150,9 +150,7 @@ class ExportService:
         Returns:
             str: The CSV text (UTF-8).
         """
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['Criterion', 'Unit', 'Alternative', 'Value'])
+        rows = []
         for criterion in criteria:
             if not isinstance(criterion, dict):
                 continue
@@ -161,8 +159,8 @@ class ExportService:
             for alt in criterion.get('alternatives', []):
                 if not isinstance(alt, dict):
                     continue
-                writer.writerow([criterion_name, unit, alt.get('name', ''), alt.get('value', '')])
-        return output.getvalue()
+                rows.append([criterion_name, unit, alt.get('name', ''), alt.get('value', '')])
+        return CsvUtils.build_csv(['Criterion', 'Unit', 'Alternative', 'Value'], rows)
     @classmethod
     def build_input_data_csv(cls, criteria, qualitative_indicators=None):
         """Build an input data CSV combining quantitative raw values and qualitative ranking data.
@@ -179,47 +177,42 @@ class ExportService:
         Returns:
             str: The CSV text (UTF-8).
         """
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['CRITERION_NAME', 'UNIT', 'ALTERNATIVE', 'VALUE', 'RANK', 'CONFIDENCE'])
-        
+        rows = []
         for criterion in criteria:
             if not isinstance(criterion, dict):
                 continue
             criterion_name = criterion.get('criterion_name', '')
             unit = criterion.get('unit', '')
             is_qualitative = criterion.get('is_qualitative', False)
-            
+
             if is_qualitative and qualitative_indicators:
                 # Qualitative criterion: show ranking data
                 data = qualitative_indicators.get(criterion_name, {}) if criterion_name else {}
                 ranking = data.get('ranking', {}) if isinstance(data, dict) else {}
                 confidences = data.get('confidences', {}) if isinstance(data, dict) else {}
-                
+
                 for alt in criterion.get('alternatives', []):
                     if not isinstance(alt, dict):
                         continue
                     alt_name = alt.get('name', '')
                     if not alt_name:
                         continue
-                    
+
                     rank = ranking.get(alt_name, '')
                     value = cls.get_qualitative_alt_value(qualitative_indicators, criterion_name, alt_name)
                     confidence = 4
                     if rank and isinstance(confidences, dict):
                         confidence = confidences.get(rank, confidences.get(str(rank), 4))
-                    
-                    writer.writerow([criterion_name, unit, alt_name, value, rank, confidence])
+
+                    rows.append([criterion_name, unit, alt_name, value, rank, confidence])
             else:
                 # Quantitative criterion: show raw values
                 for alt in criterion.get('alternatives', []):
                     if not isinstance(alt, dict):
                         continue
-                    alt_name = alt.get('name', '')
-                    value = alt.get('value', '')
-                    writer.writerow([criterion_name, unit, alt_name, value, '', ''])
-        
-        return output.getvalue()
+                    rows.append([criterion_name, unit, alt.get('name', ''), alt.get('value', ''), '', ''])
+
+        return CsvUtils.build_csv(['CRITERION_NAME', 'UNIT', 'ALTERNATIVE', 'VALUE', 'RANK', 'CONFIDENCE'], rows)
 
 
     @classmethod
@@ -239,9 +232,7 @@ class ExportService:
         Returns:
             str: The CSV text (UTF-8).
         """
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['Criterion', 'Unit', 'Alternative', 'Value'])
+        rows = []
         for criterion in criteria:
             if not isinstance(criterion, dict):
                 continue
@@ -259,8 +250,8 @@ class ExportService:
                         alt_value = round(float(alt_value), 3)
                     except (TypeError, ValueError):
                         pass
-                writer.writerow([criterion_name, unit, alt.get('name', ''), alt_value])
-        return output.getvalue()
+                rows.append([criterion_name, unit, alt.get('name', ''), alt_value])
+        return CsvUtils.build_csv(['Criterion', 'Unit', 'Alternative', 'Value'], rows)
 
     @classmethod
     def build_qualitative_csv(cls, criteria, qualitative_indicators):
@@ -279,9 +270,7 @@ class ExportService:
         Returns:
             str: The CSV text (UTF-8).
         """
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['CRITERION_NAME', 'ALTERNATIVE', 'RANK', 'VALUE', 'CONFIDENCE'])
+        rows = []
         for criterion in criteria:
             if not isinstance(criterion, dict) or not criterion.get('is_qualitative'):
                 continue
@@ -302,8 +291,8 @@ class ExportService:
                 confidence = 4
                 if rank is not None and isinstance(confidences, dict):
                     confidence = confidences.get(rank, confidences.get(str(rank), 4))
-                writer.writerow([name, alt_name, rank if rank is not None else '', value, confidence])
-        return output.getvalue()
+                rows.append([name, alt_name, rank if rank is not None else '', value, confidence])
+        return CsvUtils.build_csv(['CRITERION_NAME', 'ALTERNATIVE', 'RANK', 'VALUE', 'CONFIDENCE'], rows)
 
     @classmethod
     def build_value_functions_csv(cls, criteria, criteria_map, qualitative_indicators=None):
@@ -327,9 +316,7 @@ class ExportService:
         Returns:
             str: The CSV text (UTF-8).
         """
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['CRITERION_NAME', 'CONFIDENCE', 'LIST OF POINTS'])
+        rows = []
         if isinstance(criteria, list) and len(criteria) > 0:
             for criterion in criteria:
                 if not isinstance(criterion, dict):
@@ -370,14 +357,13 @@ class ExportService:
                     cfg = criteria_map.get(name) if isinstance(criteria_map, dict) else None
                     points = cfg.get('points') if isinstance(cfg, dict) else []
                     confidence = cfg.get('confidence', 4) if isinstance(cfg, dict) else 4
-                serialized = cls._serialize_points(points)
-                writer.writerow([name, confidence, serialized])
+                rows.append([name, confidence, cls._serialize_points(points)])
         else:
             for name, cfg in criteria_map.items():
                 points = cfg.get('points') if isinstance(cfg, dict) else []
                 confidence = cfg.get('confidence', 4) if isinstance(cfg, dict) else 4
-                writer.writerow([name, confidence, cls._serialize_points(points)])
-        return output.getvalue()
+                rows.append([name, confidence, cls._serialize_points(points)])
+        return CsvUtils.build_csv(['CRITERION_NAME', 'CONFIDENCE', 'LIST OF POINTS'], rows)
 
     @staticmethod
     def _serialize_points(points):
@@ -424,10 +410,8 @@ class ExportService:
         Returns:
             str: The CSV text (UTF-8).
         """
-        output = io.StringIO()
-        writer = csv.writer(output)
         if isinstance(bwt_data, dict) and isinstance(bwt_data.get('comparisons'), list):
-            writer.writerow(['REFERENCE_CRITERION', 'ADJUSTED_CRITERION', 'DATA_VALUE', 'TYPE', 'GROUP'])
+            rows = []
             for comp in bwt_data.get('comparisons', []):
                 if not isinstance(comp, dict):
                     continue
@@ -437,17 +421,18 @@ class ExportService:
                         data_value = round(float(data_value), 3)
                     except (TypeError, ValueError):
                         pass
-                writer.writerow([
+                rows.append([
                     comp.get('reference_criterion', ''),
                     comp.get('adjusted_criterion', ''),
                     data_value,
                     comp.get('type', ''),
                     comp.get('group', ''),
                 ])
-        else:
-            writer.writerow(['VALUE'])
-            writer.writerow([bwt_data])
-        return output.getvalue()
+            return CsvUtils.build_csv(
+                ['REFERENCE_CRITERION', 'ADJUSTED_CRITERION', 'DATA_VALUE', 'TYPE', 'GROUP'],
+                rows,
+            )
+        return CsvUtils.build_csv(['VALUE'], [[bwt_data]])
 
     @classmethod
     def build_pile_bwt_debug_csv(cls, bwt_data, value_functions_data, criteria_list):
@@ -540,23 +525,21 @@ class ExportService:
                 continue
         
         # Build CSV with a_value column
-        output = io.StringIO()
-        writer = csv.writer(output)
         if isinstance(bwt_data, dict) and isinstance(bwt_data.get('comparisons'), list):
-            writer.writerow(['REFERENCE_CRITERION', 'ADJUSTED_CRITERION', 'DATA_VALUE', 'TYPE', 'GROUP', 'a_value'])
+            rows = []
             for comp in bwt_data.get('comparisons', []):
                 if not isinstance(comp, dict):
                     continue
-                
+
                 data_value = comp.get('data_value', '')
                 adjusted_crit = comp.get('adjusted_criterion', '')
                 a_value = ''
-                
+
                 # Calculate a_value = 1/vf(DATA_VALUE)
                 if data_value != '' and data_value is not None and adjusted_crit:
                     try:
                         dv = float(data_value)
-                        
+
                         if adjusted_crit in qualitative_criteria:
                             # For qualitative: vf(x) = x, so a_value = 1/x
                             if dv > 0:
@@ -569,14 +552,14 @@ class ExportService:
                                 a_value = round(1.0 / vf_result, 6)
                     except (TypeError, ValueError, Exception):
                         a_value = ''
-                
+
                 if data_value != '' and data_value is not None:
                     try:
                         data_value = round(float(data_value), 3)
                     except (TypeError, ValueError):
                         pass
-                
-                writer.writerow([
+
+                rows.append([
                     comp.get('reference_criterion', ''),
                     adjusted_crit,
                     data_value,
@@ -584,10 +567,11 @@ class ExportService:
                     comp.get('group', ''),
                     a_value,
                 ])
-        else:
-            writer.writerow(['VALUE', 'a_value'])
-            writer.writerow([bwt_data, ''])
-        return output.getvalue()
+            return CsvUtils.build_csv(
+                ['REFERENCE_CRITERION', 'ADJUSTED_CRITERION', 'DATA_VALUE', 'TYPE', 'GROUP', 'a_value'],
+                rows,
+            )
+        return CsvUtils.build_csv(['VALUE', 'a_value'], [[bwt_data, '']])
 
     # ------------------------------------------------------------------ #
     # Public export methods
@@ -698,19 +682,18 @@ class ExportService:
         comparisons = bwt_data.get('comparisons', [])
         if not comparisons:
             raise NotFoundError('No BWT data to export')
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['REFERENCE_CRITERION', 'ADJUSTED_CRITERION', 'DATA_VALUE', 'TYPE'])
+        rows = []
         for comp in comparisons:
             if isinstance(comp, dict):
-                writer.writerow([
+                rows.append([
                     comp.get('reference_criterion', ''),
                     comp.get('adjusted_criterion', ''),
                     comp.get('data_value', ''),
-                    comp.get('type', '')
+                    comp.get('type', ''),
                 ])
+        content = CsvUtils.build_csv(['REFERENCE_CRITERION', 'ADJUSTED_CRITERION', 'DATA_VALUE', 'TYPE'], rows)
         filename = f'bwt_{session.get("name", session_id)}.csv'
-        return output.getvalue().encode(), filename, 'text/csv'
+        return content.encode(), filename, 'text/csv'
 
     def export_input_csv(self, session_id):
         """Export a session's normalised input data as a CSV file.
@@ -979,12 +962,12 @@ class ExportService:
         has_vf = session.get('value_functions') is not None
         has_bwt = session.get('bwt') is not None
         completed = sum([has_qi, has_vf, has_bwt])
-        output = io.StringIO()
-        writer = csv.writer(output)
-        writer.writerow(['Field', 'Value'])
-        writer.writerow(['Name', session.get('name')])
-        writer.writerow(['Qualitative Indicators Filled', has_qi])
-        writer.writerow(['Value Functions Filled', has_vf])
-        writer.writerow(['PILE-BWT Filled', has_bwt])
-        writer.writerow(['Completed Sections', f'{completed}/3'])
-        return output.getvalue().encode(), f'output_{session.get("name", session_id)}.csv', 'text/csv'
+        rows = [
+            ['Name', session.get('name')],
+            ['Qualitative Indicators Filled', has_qi],
+            ['Value Functions Filled', has_vf],
+            ['PILE-BWT Filled', has_bwt],
+            ['Completed Sections', f'{completed}/3'],
+        ]
+        content = CsvUtils.build_csv(['Field', 'Value'], rows)
+        return content.encode(), f'output_{session.get("name", session_id)}.csv', 'text/csv'
