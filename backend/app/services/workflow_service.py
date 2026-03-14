@@ -8,6 +8,7 @@ task state and exporting results.
 import csv
 import io
 import json
+import os
 import re
 import zipfile
 from datetime import datetime, timezone
@@ -15,6 +16,13 @@ from datetime import datetime, timezone
 from app.repositories import StudySessionRepository, SessionRepository, TaskRepository
 from app.services.session_service import SessionService
 from app.exceptions import NotFoundError, ValidationError
+
+# Monte-Carlo iteration limits – configurable via environment variables so that
+# deployments can tune resource usage without rebuilding the image.
+MC_ITERATIONS_MIN = int(os.getenv("MC_ITERATIONS_MIN", "100"))
+MC_ITERATIONS_MAX = int(os.getenv("MC_ITERATIONS_MAX", "5000"))
+MC_ITERATIONS_MAX_STEP6 = int(os.getenv("MC_ITERATIONS_MAX_STEP6", "10000"))
+MC_ITERATIONS_DEFAULT = int(os.getenv("MC_ITERATIONS_DEFAULT", "1000"))
 
 
 class WorkflowService:
@@ -100,7 +108,8 @@ class WorkflowService:
             step_number (int): The UP-MAVT step to run (2–6).
             selected_session_ids (list): The elicitation session IDs to include.
             mc_iterations (int): Number of Monte-Carlo iterations (clamped to
-                [100, 5000] for steps 2-5, [100, 10000] for step 6).
+                [MC_ITERATIONS_MIN, MC_ITERATIONS_MAX] for steps 2-5,
+                [MC_ITERATIONS_MIN, MC_ITERATIONS_MAX_STEP6] for step 6).
             aggregation_method (str): Aggregation method shortcode or full
                 name (``'SUM'``/``'weighted_sum'``, ``'GEO'``/``'geometric_mean'``,
                 ``'HAR'``/``'harmonic_mean'``).
@@ -124,10 +133,10 @@ class WorkflowService:
             raise ValidationError('No sessions selected')
 
         try:
-            upper = 10000 if step_number == 6 else 5000
-            mc_iterations = max(100, min(upper, int(mc_iterations)))
+            upper = MC_ITERATIONS_MAX_STEP6 if step_number == 6 else MC_ITERATIONS_MAX
+            mc_iterations = max(MC_ITERATIONS_MIN, min(upper, int(mc_iterations)))
         except (TypeError, ValueError):
-            mc_iterations = 1000
+            mc_iterations = MC_ITERATIONS_DEFAULT
 
         agg_map = {
             'SUM': 'weighted_sum', 'GEO': 'geometric_mean', 'HAR': 'harmonic_mean',

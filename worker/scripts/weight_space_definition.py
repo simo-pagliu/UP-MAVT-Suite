@@ -5,6 +5,8 @@ Reads comparison constraints and value functions from MongoDB,
 explores the weight space, and saves results back to DB.
 """
 
+import os
+
 import numpy as np
 import scipy.optimize as opt
 from functools import partial
@@ -19,7 +21,7 @@ EPS = 0.001
 N_RESTARTS = 50
 CONSTRAINT_TOL = 1e-5
 FEASIBILITY_TOL = 0.01  # Tolerance for constraint satisfaction
-PHASE2_SAMPLES = 1000
+PHASE2_SAMPLES = int(os.getenv("PHASE2_SAMPLES", "1000"))
 LHS_SAMPLES = PHASE2_SAMPLES  # Backward-compatible alias for the legacy name.
 MULTISTART_RESTARTS = 96
 EXTREME_POINT_DIRECTIONS = 48

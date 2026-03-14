@@ -22,8 +22,9 @@ def create_app():
     cors_origin = [o.strip() for o in cors_origins_raw.split(",")] if "," in cors_origins_raw else cors_origins_raw
     CORS(app, origins=cors_origin)
 
-    # Limit incoming request bodies to 10 MB to prevent denial-of-service via huge payloads.
-    app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
+    # Limit incoming request bodies to prevent denial-of-service via huge payloads.
+    max_content_mb = int(os.getenv("MAX_CONTENT_LENGTH_MB", "10"))
+    app.config["MAX_CONTENT_LENGTH"] = max_content_mb * 1024 * 1024
 
     # MongoDB connection
     mongo_uri = os.getenv("MONGO_URI", "mongodb://mongo:27017/elicitation")

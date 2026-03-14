@@ -5,6 +5,7 @@ import os
 
 from app.exceptions import ServiceError
 from app.services import SessionService, StudySessionService, ExportService, WorkflowService
+from app.services.workflow_service import MC_ITERATIONS_DEFAULT
 
 bp = Blueprint('api', __name__, url_prefix='/api')
 
@@ -405,7 +406,7 @@ def run_step_endpoint(study_session_id):
         study_session_id,
         step_number=data.get('step_number'),
         selected_session_ids=data.get('selected_session_ids', []),
-        mc_iterations=data.get('mc_iterations', 1000),
+        mc_iterations=data.get('mc_iterations', MC_ITERATIONS_DEFAULT),
         aggregation_method=data.get('aggregation_method', 'weighted_sum'),
         mc_mode=data.get('mc_mode', 'non_strict'),
         use_random_weights=data.get('use_random_weights', False),
