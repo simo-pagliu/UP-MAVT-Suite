@@ -1,7 +1,11 @@
 """Repository for the *sessions* (elicitation sessions) collection."""
 
+import logging
+
 from bson.objectid import ObjectId
 from .base import BaseRepository
+
+logger = logging.getLogger(__name__)
 
 
 class SessionRepository(BaseRepository):
@@ -25,13 +29,13 @@ class SessionRepository(BaseRepository):
             dict | None: The document, or ``None`` if not found.
         """
         oid = self._to_oid(session_id)
-        print(f"DEBUG: find_by_id - session_id={session_id}, converted oid={oid}")
+        logger.debug("find_by_id - session_id=%s, converted oid=%s", session_id, oid)
         if oid:
             result = self._col.find_one({'_id': oid})
-            print(f"DEBUG: find_by_id - query result: {result is not None}")
+            logger.debug("find_by_id - query result: %s", result is not None)
             return result
         else:
-            print(f"DEBUG: find_by_id - failed to convert to oid")
+            logger.debug("find_by_id - failed to convert to oid")
             return None
 
     def find_by_name(self, name):

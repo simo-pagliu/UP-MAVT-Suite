@@ -1,9 +1,13 @@
 """Application factory for the elicitation-tools Flask backend."""
 
+import logging
+import os
+
 from flask import Flask
 from flask_cors import CORS
 from pymongo import MongoClient
-import os
+
+logger = logging.getLogger(__name__)
 
 
 def create_app():
@@ -36,11 +40,9 @@ def create_app():
     # Register global error handler
     @app.errorhandler(Exception)
     def handle_general_error(e):
-        import traceback
         error_type = type(e).__name__
         error_msg = str(e)
-        print(f"UNHANDLED ERROR: {error_type}: {error_msg}")
-        traceback.print_exc()
+        logger.error("UNHANDLED ERROR: %s: %s", error_type, error_msg, exc_info=True)
         if 'mongo' in error_msg.lower() or 'connection' in error_msg.lower():
             return {'error': f'Database connection error: {error_msg}'}, 503
         return {'error': f'{error_type}: {error_msg}'}, 500

@@ -1,12 +1,14 @@
 from flask import Blueprint, request, jsonify, current_app, send_file
 import hmac
 import io
+import logging
 import os
 
 from app.exceptions import ServiceError
 from app.services import SessionService, StudySessionService, ExportService, WorkflowService
 
 bp = Blueprint('api', __name__, url_prefix='/api')
+logger = logging.getLogger(__name__)
 
 
 @bp.errorhandler(ServiceError)
@@ -131,9 +133,7 @@ def update_qualitative(session_id):
     except ServiceError:
         raise
     except Exception as e:
-        import traceback
-        print(f"ERROR in update_qualitative: {str(e)}")
-        traceback.print_exc()
+        logger.error("ERROR in update_qualitative: %s", str(e), exc_info=True)
         return jsonify({'error': f'Internal error: {str(e)}'}), 500
 
 
@@ -151,9 +151,7 @@ def update_value(session_id):
     except ServiceError:
         raise
     except Exception as e:
-        import traceback
-        print(f"ERROR in update_value: {str(e)}")
-        traceback.print_exc()
+        logger.error("ERROR in update_value: %s", str(e), exc_info=True)
         return jsonify({'error': f'Internal error: {str(e)}'}), 500
 
 
