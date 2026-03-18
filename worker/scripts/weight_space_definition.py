@@ -255,7 +255,8 @@ def step_b_sample_boundary_candidates(
     Use SLSQP multi-start to find diverse weight vectors with violation <= z_cap.
     
     Strategy:
-    - Try STEP_B_SLSQP_RESTARTS random starting points
+    - Try up to STEP_B_SLSQP_RESTARTS starting points
+    - Stop early once STEP_B_SAMPLES feasible solutions are found
     - For each starting point, use SLSQP to find a feasible solution
     - Accept solutions where max violation <= z_cap
     
@@ -267,11 +268,19 @@ def step_b_sample_boundary_candidates(
     if print_fn is None:
         print_fn = print
 
-    print_fn(f"  Sampling {STEP_B_SAMPLES} candidates using SLSQP multi-start...")
+    # Effective number of candidates we can aim for given the restart budget.
+    effective_samples = min(STEP_B_SAMPLES, STEP_B_SLSQP_RESTARTS)
+    print_fn(f"  Sampling up to {effective_samples} candidates using SLSQP multi-start...")
     print_fn(f"  Target: max violation <= z_cap = {z_cap:.6f}")
 
     rng = np.random.RandomState(RNG_SEED)
     candidates = []
+
+    # Anchor guidance (if available in the function signature).
+    try:
+        anchor_w = anchor_weights  # type: ignore[name-defined]
+    except NameError:
+        anchor_w = None
 
     def constraint_violation(w):
         """Constraint: max_violation <= z_cap"""
@@ -287,10 +296,18 @@ def step_b_sample_boundary_candidates(
         v = compute_violation(w, constraint_data, use_non_linear_model)
         return v  # Maximize proximity to z_cap boundary
 
-    # Multi-astart: try many random strting points
+    # Multi-start: try many starting points, with an upper bound on restarts.
     for restart in range(STEP_B_SLSQP_RESTARTS):
-        # Random start (simplex: positive weights summing to 1)
-        w0 = rng.dirichlet(np.ones(num_criteria))
+        # Stop early once we've collected the desired number of candidates.
+        if len(candidates) >= STEP_B_SAMPLES:
+            break
+
+        # Starting point (simplex: positive weights summing to 1). If an anchor
+        # is provided, use it; otherwise, sample from a Dirichlet distribution.
+        if anchor_w is not None:
+            w0 = normalize_weights(anchor_w)
+        else:
+            w0 = rng.dirichlet(np.ones(num_criteria))
 
         # Enforce feasible boundary and simplex structure.
         constraints = [
