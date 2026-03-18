@@ -57,18 +57,6 @@ import {
 } from '../utils/sessionUtils'
 
 const STEP2_COLORS = ['#3182CE', '#E57373', '#C77DFF', '#4DD0E1', '#38A169', '#D69E2E']
-// Methods are now fixed: Step A uses Differential Evolution, Step B uses SLSQP multistart
-const DEFAULT_WEIGHT_SPACE_PARAMETERS = {
-  rng_seed: 426,
-  eps: 0.001,
-  feasibility_tol: 0.01,
-  step_b_samples: 1000,
-  step_b_slsqp_restarts: 96,
-  step_b_slsqp_maxiter: 500,
-  step_b_slsqp_ftol: 1e-10,
-  output_weight_decimals: 3,
-  boundary_band_tol: 0.0001,
-}
 
 // ============================================================================
 // MAIN COMPONENT
@@ -112,8 +100,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [useNonLinearModel, setUseNonLinearModel] = useState(true)
   const [runPrefsHydrated, setRunPrefsHydrated] = useState(false)
   const [phase3TolerancePct, setPhase3TolerancePct] = useState(1)
-  const [weightSpaceParameters, setWeightSpaceParameters] = useState(DEFAULT_WEIGHT_SPACE_PARAMETERS)
-
   // Step 2 results state
   const [step2Results, setStep2Results] = useState(null)
   const [step5Results, setStep5Results] = useState(null)
@@ -292,15 +278,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       const pct = Number(workflowStatus.weights.phase3_tolerance_pct)
       setPhase3TolerancePct(Number.isFinite(pct) ? pct : 1)
     }
-    if (workflowStatus?.weights?.weight_space_parameters) {
-      setWeightSpaceParameters((prev) => ({
-        ...prev,
-        ...workflowStatus.weights.weight_space_parameters,
-      }))
-    }
   }, [
     workflowStatus?.weights?.phase3_tolerance_pct,
-    workflowStatus?.weights?.weight_space_parameters,
   ])
 
   // Fetch step 2 results when step 2 is completed
@@ -481,7 +460,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           selected_session_ids: selectedSessions,
           use_non_linear_model: useNonLinearModel,
           phase3_tolerance_pct: phase3TolerancePct,
-          weight_space_parameters: weightSpaceParameters,
         }
       )
       const taskId = response.data.task_id
@@ -1158,148 +1136,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   parametersTitle="Advanced"
                   parameters={
                     <VStack spacing={2} align="stretch">
-                      <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
-                        <Box borderWidth="1px" borderRadius="md" p={3}>
-                          <Text fontWeight="semibold" mb={2}>Step A (DE)</Text>
-                          <VStack spacing={2} align="stretch">
-                            <Box>
-                              <Text fontWeight="medium" mb={1}>Solver</Text>
-                              <Text fontSize="sm" color="gray.600">Differential Evolution</Text>
-                            </Box>
-                            <Box>
-                              <Text fontWeight="medium" mb={1}>RNG seed</Text>
-                              <NumberInput
-                                value={weightSpaceParameters.rng_seed}
-                                min={0}
-                                max={99999999}
-                                step={1}
-                                isDisabled={runningStep !== null}
-                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, rng_seed: Math.floor(n) }))}
-                              >
-                                <NumberInputField />
-                              </NumberInput>
-                            </Box>
-                            <Box>
-                              <Text fontWeight="medium" mb={1}>EPS</Text>
-                              <NumberInput
-                                value={weightSpaceParameters.eps}
-                                min={0}
-                                max={1}
-                                step={0.0001}
-                                precision={6}
-                                isDisabled={runningStep !== null}
-                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, eps: n }))}
-                              >
-                                <NumberInputField />
-                              </NumberInput>
-                            </Box>
-                          </VStack>
-                        </Box>
-
-                        <Box borderWidth="1px" borderRadius="md" p={3}>
-                          <Text fontWeight="semibold" mb={2}>Step B (SLSQP)</Text>
-                          <VStack spacing={2} align="stretch">
-                            <Box>
-                              <Text fontWeight="medium" mb={1}>Sampler</Text>
-                              <Text fontSize="sm" color="gray.600">SLSQP multi-start</Text>
-                            </Box>
-                            <Box>
-                              <Text fontWeight="medium" mb={1}>Samples</Text>
-                              <NumberInput
-                                value={weightSpaceParameters.step_b_samples}
-                                min={1}
-                                max={200000}
-                                step={100}
-                                isDisabled={runningStep !== null || !useNonLinearModel}
-                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, step_b_samples: Math.floor(n) }))}
-                              >
-                                <NumberInputField />
-                              </NumberInput>
-                            </Box>
-                            <Box>
-                              <Text fontWeight="medium" mb={1}>SLSQP restarts</Text>
-                              <NumberInput
-                                value={weightSpaceParameters.step_b_slsqp_restarts}
-                                min={1}
-                                max={5000}
-                                step={1}
-                                isDisabled={runningStep !== null || !useNonLinearModel}
-                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, step_b_slsqp_restarts: Math.floor(n) }))}
-                              >
-                                <NumberInputField />
-                              </NumberInput>
-                            </Box>
-                            <Box>
-                              <Text fontWeight="medium" mb={1}>SLSQP max iterations</Text>
-                              <NumberInput
-                                value={weightSpaceParameters.step_b_slsqp_maxiter}
-                                min={1}
-                                max={10000}
-                                step={10}
-                                isDisabled={runningStep !== null || !useNonLinearModel}
-                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, step_b_slsqp_maxiter: Math.floor(n) }))}
-                              >
-                                <NumberInputField />
-                              </NumberInput>
-                            </Box>
-                            <Box>
-                              <Text fontWeight="medium" mb={1}>SLSQP f-tolerance</Text>
-                              <NumberInput
-                                value={weightSpaceParameters.step_b_slsqp_ftol}
-                                min={0}
-                                max={1}
-                                step={0.0000000001}
-                                precision={12}
-                                isDisabled={runningStep !== null || !useNonLinearModel}
-                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, step_b_slsqp_ftol: n }))}
-                              >
-                                <NumberInputField />
-                              </NumberInput>
-                            </Box>
-                            <Box>
-                              <Text fontWeight="medium" mb={1}>Feasibility tolerance</Text>
-                              <NumberInput
-                                value={weightSpaceParameters.feasibility_tol}
-                                min={0}
-                                max={1}
-                                step={0.001}
-                                precision={6}
-                                isDisabled={runningStep !== null}
-                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, feasibility_tol: n }))}
-                              >
-                                <NumberInputField />
-                              </NumberInput>
-                            </Box>
-                            <Box>
-                              <Text fontWeight="medium" mb={1}>Output decimals</Text>
-                              <NumberInput
-                                value={weightSpaceParameters.output_weight_decimals}
-                                min={0}
-                                max={10}
-                                step={1}
-                                isDisabled={runningStep !== null}
-                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, output_weight_decimals: Math.floor(n) }))}
-                              >
-                                <NumberInputField />
-                              </NumberInput>
-                            </Box>
-                            <Box>
-                              <Text fontWeight="medium" mb={1}>Boundary band tolerance</Text>
-                              <NumberInput
-                                value={weightSpaceParameters.boundary_band_tol}
-                                min={0}
-                                max={1}
-                                step={0.00001}
-                                precision={8}
-                                isDisabled={runningStep !== null || !useNonLinearModel}
-                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, boundary_band_tol: n }))}
-                              >
-                                <NumberInputField />
-                              </NumberInput>
-                            </Box>
-                          </VStack>
-                        </Box>
-                      </SimpleGrid>
                       <Box>
                         <Text fontWeight="medium" mb={1}>Boundary upper band LIM (%)</Text>
                         <NumberInput
