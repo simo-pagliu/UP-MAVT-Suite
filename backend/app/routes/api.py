@@ -457,6 +457,17 @@ def get_workflow_status(study_session_id):
     return jsonify(WorkflowService(current_app.db).get_workflow_status(study_session_id)), 200
 
 
+@bp.route('/study-session/<study_session_id>/workflow-preferences/run-page', methods=['PUT'])
+def update_run_page_preferences(study_session_id):
+    data = request.json or {}
+    result = WorkflowService(current_app.db).update_run_page_preferences(
+        study_session_id,
+        use_non_linear_model=data.get('use_non_linear_model'),
+        selected_session_ids=data.get('selected_session_ids'),
+    )
+    return jsonify(result), 200
+
+
 @bp.route('/study-session/<study_session_id>/weight-space/<session_id>', methods=['GET'])
 def get_weight_space(study_session_id, session_id):
     data = WorkflowService(current_app.db).get_weight_space(study_session_id, session_id)

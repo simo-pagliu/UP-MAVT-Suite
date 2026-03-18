@@ -88,6 +88,75 @@ class StudySessionService:
                 }
         return serialized
 
+    @staticmethod
+    def _to_backup_jsonable(value):
+        """Convert DB values to JSON-safe backup representation."""
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, ObjectId):
+            return str(value)
+        if isinstance(value, dict):
+            return {str(k): StudySessionService._to_backup_jsonable(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [StudySessionService._to_backup_jsonable(v) for v in value]
+        return value
+
+    @staticmethod
+    def _parse_iso_datetime(value):
+        if not isinstance(value, str):
+            return None
+        try:
+            return datetime.fromisoformat(value)
+        except ValueError:
+            return None
+
+    @classmethod
+    def _export_computed_weights_for_backup(cls, computed_weights, session_id_to_name):
+        if not isinstance(computed_weights, dict) or not computed_weights:
+            return {}
+
+        payload = cls._to_backup_jsonable(computed_weights)
+        for key in ('weight_solutions', 'pre_threshold_weight_solutions', 'weight_spaces'):
+            bucket = payload.get(key)
+            if isinstance(bucket, dict):
+                payload[key] = {
+                    session_id_to_name.get(str(session_id), str(session_id)): rows
+                    for session_id, rows in bucket.items()
+                }
+        return payload
+
+    @classmethod
+    def _import_computed_weights_from_backup(cls, payload, backup_name_to_new_session_id):
+        if not isinstance(payload, dict) or not payload:
+            return {}
+
+        restored = dict(payload)
+        ts = cls._parse_iso_datetime(restored.get('timestamp'))
+        if ts is not None:
+            restored['timestamp'] = ts
+
+        for key in ('weight_solutions', 'pre_threshold_weight_solutions', 'weight_spaces'):
+            bucket = restored.get(key)
+            if isinstance(bucket, dict):
+                remapped = {}
+                for backup_session_name, rows in bucket.items():
+                    new_session_id = backup_name_to_new_session_id.get(str(backup_session_name))
+                    if new_session_id:
+                        remapped[str(new_session_id)] = rows
+                restored[key] = remapped
+
+        return restored
+
+    @classmethod
+    def _import_step_results_from_backup(cls, payload):
+        if not isinstance(payload, dict) or not payload:
+            return None
+        restored = dict(payload)
+        ts = cls._parse_iso_datetime(restored.get('timestamp'))
+        if ts is not None:
+            restored['timestamp'] = ts
+        return restored
+
     def _serialize_study(self, study, include_sessions=False):
         """Serialise a raw study session document for API consumption.
 
@@ -488,9 +557,13 @@ class StudySessionService:
                 criteria = input_doc.get('criteria', [])
 
         sessions = self._sessions.find_by_study_session_id(study_session_id)
+        session_id_to_name = {
+            str(session.get('_id')): session.get('name', str(session.get('_id')))
+            for session in sessions
+        }
 
         metadata = {
-            'version': 1,
+            'version': 2,
             'exported_at': datetime.now(timezone.utc).isoformat(),
             'study': {
                 'code': study.get('code'),
@@ -507,6 +580,18 @@ class StudySessionService:
                 }
                 for s in sessions
             ],
+            'workflow': {
+                'workflow_preferences': self._to_backup_jsonable(study.get('workflow_preferences', {})),
+                'computed_weights': self._export_computed_weights_for_backup(
+                    study.get('computed_weights', {}),
+                    session_id_to_name,
+                ),
+                'step_2_results': self._to_backup_jsonable(study.get('step_2_results')),
+                'step_3_results': self._to_backup_jsonable(study.get('step_3_results')),
+                'step_4_results': self._to_backup_jsonable(study.get('step_4_results')),
+                'step_5_results': self._to_backup_jsonable(study.get('step_5_results')),
+                'step_6_results': self._to_backup_jsonable(study.get('step_6_results')),
+            },
         }
 
         buf = io.BytesIO()
@@ -594,8 +679,10 @@ class StudySessionService:
         self.update_input(study_session_id, input_payload.get('criteria') or [])
 
         imported_sessions = []
+        backup_name_to_new_session_id = {}
         for payload in session_payloads:
-            requested_name = (payload.get('name') or '').strip()
+            backup_session_name = (payload.get('name') or '').strip()
+            requested_name = backup_session_name
             if not requested_name:
                 requested_name = self.generate_unique_session_code()
 
@@ -612,7 +699,31 @@ class StudySessionService:
                 'locked': bool(payload.get('locked', False)),
                 'session_locked': bool(payload.get('session_locked', False)),
             })
+            if backup_session_name:
+                backup_name_to_new_session_id[backup_session_name] = created_session_id
             imported_sessions.append(requested_name)
+
+        workflow_payload = metadata.get('workflow') or {}
+        study_updates = {}
+
+        workflow_preferences = workflow_payload.get('workflow_preferences')
+        if isinstance(workflow_preferences, dict):
+            study_updates['workflow_preferences'] = workflow_preferences
+
+        computed_weights = self._import_computed_weights_from_backup(
+            workflow_payload.get('computed_weights'),
+            backup_name_to_new_session_id,
+        )
+        if computed_weights:
+            study_updates['computed_weights'] = computed_weights
+
+        for step_field in ('step_2_results', 'step_3_results', 'step_4_results', 'step_5_results', 'step_6_results'):
+            restored_step = self._import_step_results_from_backup(workflow_payload.get(step_field))
+            if restored_step is not None:
+                study_updates[step_field] = restored_step
+
+        if study_updates:
+            self._studies.update(study_session_id, study_updates)
 
         return {
             'study_session_id': study_session_id,

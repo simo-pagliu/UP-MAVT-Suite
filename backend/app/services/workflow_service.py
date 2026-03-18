@@ -10,9 +10,11 @@ import io
 import json
 import re
 import zipfile
+from pathlib import Path
 from datetime import datetime, timezone
 
-from app.repositories import StudySessionRepository, SessionRepository, TaskRepository
+from app.repositories import StudySessionRepository, SessionRepository, TaskRepository, InputRepository
+from app.services.export_service import ExportService
 from app.services.session_service import SessionService
 from app.exceptions import NotFoundError, ValidationError
 
@@ -28,6 +30,7 @@ class WorkflowService:
         """
         self._studies = StudySessionRepository(db)
         self._sessions = SessionRepository(db)
+        self._inputs = InputRepository(db)
         self._tasks = TaskRepository(db)
         self._session_svc = SessionService(db)
 
@@ -338,7 +341,56 @@ class WorkflowService:
                 steps_status[str(step_num)] = step_info
             else:
                 steps_status[str(step_num)] = {'completed': False}
-        return {'weights': weights_status, 'steps': steps_status}
+        workflow_preferences = study.get('workflow_preferences', {})
+        if not isinstance(workflow_preferences, dict):
+            workflow_preferences = {}
+        run_page = workflow_preferences.get('run_page', {})
+        if not isinstance(run_page, dict):
+            run_page = {}
+
+        return {
+            'weights': weights_status,
+            'steps': steps_status,
+            'preferences': {
+                'run_page': {
+                    'use_non_linear_model': bool(run_page.get('use_non_linear_model', True)),
+                    'selected_session_ids': [
+                        str(session_id)
+                        for session_id in run_page.get('selected_session_ids', [])
+                        if session_id is not None
+                    ],
+                }
+            },
+        }
+
+    def update_run_page_preferences(
+        self,
+        study_session_id,
+        use_non_linear_model=None,
+        selected_session_ids=None,
+    ):
+        """Persist run-page preferences to the study session document."""
+        study = self._studies.find_by_id(study_session_id)
+        if not study:
+            raise NotFoundError('Study session not found')
+
+        updates = {}
+        if use_non_linear_model is not None:
+            updates['workflow_preferences.run_page.use_non_linear_model'] = bool(use_non_linear_model)
+
+        if selected_session_ids is not None:
+            if not isinstance(selected_session_ids, list):
+                raise ValidationError('selected_session_ids must be a list')
+            updates['workflow_preferences.run_page.selected_session_ids'] = [
+                str(session_id)
+                for session_id in selected_session_ids
+                if session_id is not None
+            ]
+
+        if updates:
+            self._studies.update(study_session_id, updates)
+
+        return self.get_workflow_status(study_session_id)
 
     def get_weight_space(self, study_session_id, session_id):
         """Return the weight-space data for a specific elicitation session.
@@ -687,6 +739,78 @@ class WorkflowService:
         if rows:
             zf.writestr(path, self._rows_to_csv(headers, rows))
 
+    @staticmethod
+    def _repo_root():
+        return Path(__file__).resolve().parents[3]
+
+    @staticmethod
+    def _find_existing_path(relative_candidates):
+        """Resolve first existing path from known project roots."""
+        roots = [
+            Path('/'),
+            Path(__file__).resolve().parents[2],
+            Path(__file__).resolve().parents[3],
+        ]
+        for root in roots:
+            for rel in relative_candidates:
+                candidate = root / rel
+                if candidate.exists():
+                    return candidate
+        raise FileNotFoundError(f'Could not find any of: {relative_candidates}')
+
+    @staticmethod
+    def _read_text(path):
+        return path.read_text(encoding='utf-8')
+
+    @staticmethod
+    def _build_local_input_csv(criteria):
+        """Build data/input.csv expected by frontend/public/load_LOCAL.py."""
+        criterion_names = [
+            c.get('criterion_name')
+            for c in criteria
+            if isinstance(c, dict) and c.get('criterion_name')
+        ]
+
+        alternatives_order = []
+        values_by_alt = {}
+
+        for criterion in criteria:
+            if not isinstance(criterion, dict):
+                continue
+            crit_name = criterion.get('criterion_name')
+            if not crit_name:
+                continue
+            for alt in criterion.get('alternatives', []):
+                if not isinstance(alt, dict):
+                    continue
+                alt_name = alt.get('name')
+                if not alt_name:
+                    continue
+                if alt_name not in values_by_alt:
+                    values_by_alt[alt_name] = {}
+                    alternatives_order.append(alt_name)
+                values_by_alt[alt_name][crit_name] = alt.get('value', '')
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['Alternative', *criterion_names])
+        for alt_name in alternatives_order:
+            row = [alt_name]
+            for crit_name in criterion_names:
+                row.append(values_by_alt.get(alt_name, {}).get(crit_name, ''))
+            writer.writerow(row)
+        return output.getvalue()
+
+    def _get_study_criteria(self, study):
+        input_id = self._studies._to_oid(study.get('input_id'))
+        if not input_id:
+            return []
+        input_doc = self._inputs.find_by_id(input_id)
+        if not isinstance(input_doc, dict):
+            return []
+        criteria = input_doc.get('criteria', [])
+        return criteria if isinstance(criteria, list) else []
+
     def export_workflow_data_zip(self, study_session_id):
         study = self._studies.find_by_id(study_session_id)
         if not study:
@@ -696,6 +820,7 @@ class WorkflowService:
         bundle_name = f'upmavt_data_{study_code}.zip'
 
         session_docs = self._sessions.find_by_study_session_id(study_session_id)
+        criteria = self._get_study_criteria(study)
         session_map = {
             str(doc.get('_id')): {
                 'id': str(doc.get('_id')),
@@ -715,6 +840,76 @@ class WorkflowService:
                 'sessions': list(session_map.values()),
             }
             zf.writestr('metadata.json', self._json_bytes(metadata))
+
+            # -----------------------------------------------------------------
+            # Local runnable bundle (scripts + data)
+            # -----------------------------------------------------------------
+            main_path = self._find_existing_path([
+                Path('frontend/public/main.py'),
+                Path('public/main.py'),
+            ])
+            load_local_path = self._find_existing_path([
+                Path('frontend/public/load_LOCAL.py'),
+                Path('public/load_LOCAL.py'),
+            ])
+            readme_path = self._find_existing_path([
+                Path('frontend/public/README.md'),
+                Path('public/README.md'),
+            ])
+            weight_space_path = self._find_existing_path([
+                Path('worker/scripts/weight_space_definition.py'),
+                Path('scripts/weight_space_definition.py'),
+            ])
+            upmavt_path = self._find_existing_path([
+                Path('worker/scripts/upmavt.py'),
+                Path('scripts/upmavt.py'),
+            ])
+
+            main_template = self._read_text(main_path)
+            # Run main from project root, import exact worker scripts as package modules.
+            main_content = main_template.replace(
+                'from weight_space_definition import compute_weights',
+                'from scripts.weight_space_definition import compute_weights',
+            ).replace(
+                'from upmavt import run_upmavt',
+                'from scripts.upmavt import run_upmavt',
+            )
+
+            zf.writestr('main.py', main_content)
+            zf.writestr('load_LOCAL.py', self._read_text(load_local_path))
+            zf.writestr('README.md', self._read_text(readme_path).replace('python scripts/main.py', 'python main.py'))
+            zf.writestr('requirements.txt', 'numpy\nscipy\nmatplotlib\n')
+
+            # Exact same implementation files used by backend/worker.
+            zf.writestr('scripts/__init__.py', '')
+            zf.writestr('scripts/weight_space_definition.py', self._read_text(weight_space_path))
+            zf.writestr('scripts/upmavt.py', self._read_text(upmavt_path))
+
+            # Local CSV data layout expected by load_LOCAL.py
+            zf.writestr('data/input.csv', self._build_local_input_csv(criteria))
+            for session_doc in session_docs:
+                if not isinstance(session_doc, dict):
+                    continue
+                session_name = session_doc.get('name') or str(session_doc.get('_id'))
+                safe_session_name = self._safe_filename(session_name)
+                session_criteria = self._session_svc.resolve_session_criteria(session_doc)
+                qualitative = session_doc.get('qualitative_indicators') or {}
+                value_functions = session_doc.get('value_functions') or {}
+                vf_criteria = value_functions.get('criteria', {}) if isinstance(value_functions, dict) else {}
+                bwt = session_doc.get('bwt') or {}
+
+                zf.writestr(
+                    f'data/{safe_session_name}/value_functions.csv',
+                    ExportService.build_value_functions_csv(session_criteria, vf_criteria, qualitative),
+                )
+                zf.writestr(
+                    f'data/{safe_session_name}/qualitative_indicators.csv',
+                    ExportService.build_qualitative_csv(session_criteria, qualitative),
+                )
+                zf.writestr(
+                    f'data/{safe_session_name}/bwt_comparisons.csv',
+                    ExportService.build_pile_bwt_csv(bwt),
+                )
 
             computed_weights = study.get('computed_weights')
             if computed_weights:

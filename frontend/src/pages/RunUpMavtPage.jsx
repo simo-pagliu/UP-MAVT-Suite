@@ -76,13 +76,6 @@ const DEFAULT_WEIGHT_SPACE_PARAMETERS = {
 function RunUpMavtPage({ studySessionId, onNavigate }) {
   const toast = useToast()
 
-  const nonLinearStorageKey = studySessionId
-    ? `run-upmavt:${studySessionId}:use-non-linear-model`
-    : null
-  const selectedSessionsStorageKey = studySessionId
-    ? `run-upmavt:${studySessionId}:selected-sessions`
-    : null
-
   // State for sessions
   const [sessions, setSessions] = useState([])
   const [criteria, setCriteria] = useState([])
@@ -117,6 +110,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [selectedWeightSession, setSelectedWeightSession] = useState('')
   const [weightSpaceData, setWeightSpaceData] = useState(null)
   const [useNonLinearModel, setUseNonLinearModel] = useState(true)
+  const [runPrefsHydrated, setRunPrefsHydrated] = useState(false)
   const [phase3TolerancePct, setPhase3TolerancePct] = useState(1)
   const [weightSpaceParameters, setWeightSpaceParameters] = useState(DEFAULT_WEIGHT_SPACE_PARAMETERS)
 
@@ -145,6 +139,18 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       setWorkflowStatus(response.data)
     } catch (error) {
       console.error('Error fetching workflow status:', error)
+    }
+  }, [studySessionId])
+
+  const saveRunPagePreferences = useCallback(async (payload) => {
+    if (!studySessionId) return
+    try {
+      await axios.put(
+        `${API_URL}/study-session/${studySessionId}/workflow-preferences/run-page`,
+        payload
+      )
+    } catch (error) {
+      console.error('Error saving run-page preferences:', error)
     }
   }, [studySessionId])
 
@@ -212,26 +218,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   }, [studySessionId])
 
   useEffect(() => {
-    if (!nonLinearStorageKey) return
-    try {
-      const raw = localStorage.getItem(nonLinearStorageKey)
-      if (raw === 'true') setUseNonLinearModel(true)
-      if (raw === 'false') setUseNonLinearModel(false)
-    } catch (error) {
-      console.warn('Could not restore non-linear model preference:', error)
-    }
-  }, [nonLinearStorageKey])
+    setRunPrefsHydrated(false)
 
-  useEffect(() => {
-    if (!nonLinearStorageKey) return
-    try {
-      localStorage.setItem(nonLinearStorageKey, String(useNonLinearModel))
-    } catch (error) {
-      console.warn('Could not persist non-linear model preference:', error)
-    }
-  }, [nonLinearStorageKey, useNonLinearModel])
-
-  useEffect(() => {
     const fetchSessions = async () => {
       if (!studySessionId) return
       setLoadingStudy(true)
@@ -247,27 +235,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         const completedAndLocked = allSessions.filter((s) =>
           isSessionComplete(s, allCriteria) && s.session_locked === true
         )
-
-        const defaultSelected = completedAndLocked.map((s) => s._id)
-        const validSet = new Set(defaultSelected)
-
-        let restoredSelected = null
-        if (selectedSessionsStorageKey) {
-          try {
-            const raw = localStorage.getItem(selectedSessionsStorageKey)
-            if (raw !== null) {
-              const parsed = JSON.parse(raw)
-              if (Array.isArray(parsed)) {
-                restoredSelected = parsed.filter((id) => validSet.has(id))
-              }
-            }
-          } catch (error) {
-            console.warn('Could not restore selected sessions preference:', error)
-          }
-        }
-
-        // Respect explicit persisted empty selection ([]). Only fallback when no saved state exists.
-        setSelectedSessions(restoredSelected !== null ? restoredSelected : defaultSelected)
+        setSelectedSessions(completedAndLocked.map((s) => s._id))
       } catch (error) {
         console.error('Error fetching study:', error)
         toast({
@@ -283,16 +251,41 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
     fetchSessions()
     fetchWorkflowStatus()
-  }, [studySessionId, toast, fetchWorkflowStatus, selectedSessionsStorageKey])
+  }, [studySessionId, toast, fetchWorkflowStatus])
 
   useEffect(() => {
-    if (!selectedSessionsStorageKey) return
-    try {
-      localStorage.setItem(selectedSessionsStorageKey, JSON.stringify(selectedSessions))
-    } catch (error) {
-      console.warn('Could not persist selected sessions preference:', error)
+    if (!studySessionId || sessions.length === 0) return
+    if (runPrefsHydrated) return
+
+    const validIds = new Set(
+      sessions
+        .filter((s) => isSessionComplete(s, criteria) && s.session_locked === true)
+        .map((s) => s._id)
+    )
+    const runPrefs = workflowStatus?.preferences?.run_page || {}
+
+    if (runPrefs.use_non_linear_model !== undefined) {
+      setUseNonLinearModel(Boolean(runPrefs.use_non_linear_model))
     }
-  }, [selectedSessionsStorageKey, selectedSessions])
+
+    if (Array.isArray(runPrefs.selected_session_ids)) {
+      const restoredSelected = runPrefs.selected_session_ids.filter((id) => validIds.has(id))
+      // Respect explicit persisted empty selection ([]).
+      setSelectedSessions(restoredSelected)
+    }
+
+    setRunPrefsHydrated(true)
+  }, [studySessionId, sessions, criteria, workflowStatus?.preferences?.run_page, runPrefsHydrated])
+
+  useEffect(() => {
+    if (!runPrefsHydrated) return
+    saveRunPagePreferences({ use_non_linear_model: useNonLinearModel })
+  }, [runPrefsHydrated, useNonLinearModel, saveRunPagePreferences])
+
+  useEffect(() => {
+    if (!runPrefsHydrated) return
+    saveRunPagePreferences({ selected_session_ids: selectedSessions })
+  }, [runPrefsHydrated, selectedSessions, saveRunPagePreferences])
 
   useEffect(() => {
     if (workflowStatus?.weights?.phase3_tolerance_pct !== undefined) {
@@ -960,27 +953,35 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
             <Link color="blue.600" textDecoration="underline" cursor="pointer" onClick={onMcModesOpen}>
               The logic behind these methods is detailed in this image.
             </Link>
-          </Text>
-        </VStack>
-
-        {/* Important Publication Reference */}
-        <Box bg="blue.50" p={5} borderRadius="md" borderLeft="4px solid" borderColor="blue.500">
-          <Text fontWeight="bold">
-            For a comprehensive explanation, an overview of the workflow, and an example case study, please refer to the publication{' '}
+            {' '}For a comprehensive explanation, an overview of the workflow, and an example case study, please refer to the publication{' '}
             <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
               PLACEHOLDER <ExternalLinkIcon mx="2px" />
             </Link>
             .
           </Text>
-        </Box>
+        </VStack>
 
         <Text color="gray.700">
-          If you want to do stuff offline or run the analysis locally, check our{' '}
-          <Link href="https://github.com/your-repo/elicitation-tools/tree/main/local" isExternal color="blue.600" textDecoration="underline">
+          To run this study locally, use the <b>Download Data ZIP</b> action in this page. It exports a runnable local bundle with scripts and CSV data for the selected study.
+          {' '}For the full project source code, see the{' '}
+          <Link href="https://github.com/your-repo/elicitation-tools" isExternal color="blue.600" textDecoration="underline">
             repository <ExternalLinkIcon mx="2px" />
           </Link>
-          {' '}where there is a local version of the code as well.
+          .
         </Text>
+
+        <HStack>
+          <Button
+            size="sm"
+            colorScheme="blue"
+            leftIcon={<DownloadIcon />}
+            onClick={handleExportWorkflowDataZip}
+            isLoading={exportingDataZip}
+            loadingText="Exporting"
+          >
+            Download Data ZIP
+          </Button>
+        </HStack>
 
         <Divider />
 

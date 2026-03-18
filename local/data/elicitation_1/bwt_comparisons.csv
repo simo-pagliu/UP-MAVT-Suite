@@ -1,5 +1,0 @@
-REFERENCE_CRITERION,ADJUSTED_CRITERION,DATA_VALUE,TYPE,GROUP
-Criterion_A,Criterion_B,5000,best,Economic
-Criterion_B,Criterion_A,600,worst,Economic
-Criterion_C,Criterion_D,50,best,Technical
-Criterion_D,Criterion_C,20,worst,Technical

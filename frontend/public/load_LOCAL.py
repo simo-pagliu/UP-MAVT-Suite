@@ -563,7 +563,17 @@ def list_sessions(data_dir):
     sessions = []
     for item in os.listdir(data_dir):
         item_path = os.path.join(data_dir, item)
-        if os.path.isdir(item_path) and item.startswith('elicitation_'):
+        if not os.path.isdir(item_path):
+            continue
+
+        # Accept any session directory that has at least one expected data file.
+        expected_files = {
+            'value_functions.csv',
+            'bwt_comparisons.csv',
+            'qualitative_indicators.csv',
+        }
+        present = set(os.listdir(item_path)) if os.path.isdir(item_path) else set()
+        if expected_files.intersection(present):
             sessions.append(item)
     
     return sorted(sessions)
