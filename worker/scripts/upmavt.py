@@ -10,56 +10,11 @@ import numpy as np
 from scipy.interpolate import interp1d
 import sys
 import re
-from .weight_space_definition import (
-    build_constraint_structure,
-)
 
 
 # ============================================================================
 # LOAD VALUE FUNCTIONS AND CONFIDENCE FROM DB
 # ============================================================================
-# ============================================================================
-# WEIGHT SAMPLER (direct sampling from precomputed feasible solutions)
-# ============================================================================
-def weight_sampler(weight_solutions, criteria, constraint_data=None, use_random_weights=False):
-    """Sample a random set of weights.
-
-    Uses direct sampling from precomputed feasible solutions.
-    If ``use_random_weights`` is True, falls back to unconstrained
-    Dirichlet sampling.
-
-    Parameters
-    ----------
-    weight_solutions : list[dict]
-        List of feasible solutions, each mapping criterion_name -> weight.
-    criteria : list[str]
-        List of criterion names.
-    constraint_data : dict or None
-        Unused here (kept for backward compatibility of call sites).
-    use_random_weights : bool
-        If True, generate weights from a Dirichlet distribution instead
-        of sampling from precomputed solutions.
-
-    Returns
-    -------
-    dict
-        Mapping criterion_name -> sampled weight.
-    """
-    if use_random_weights and (not isinstance(weight_solutions, list) or len(weight_solutions) == 0):
-        # Dirichlet distribution: uniform random weights
-        n = len(criteria)
-        raw = np.random.dirichlet(np.ones(n))
-        return {crit: raw[i] for i, crit in enumerate(criteria)}
-
-    if not isinstance(weight_solutions, list) or len(weight_solutions) == 0:
-        raise ValueError("No precomputed weight solutions available")
-    selected = weight_solutions[np.random.randint(len(weight_solutions))]
-    if not isinstance(selected, dict):
-        raise ValueError("Selected weight solution is not a valid mapping")
-
-    return {crit: float(selected[crit]) for crit in criteria}
-
-
 # ============================================================================
 # PARSE DISTRIBUTION STRINGS
 # ============================================================================
@@ -277,9 +232,28 @@ def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_list
 # ============================================================================
 # MONTE CARLO SIMULATION
 # ============================================================================
+def _sample_weights(solutions, criteria):
+    """Pick one random solution from the precomputed feasible set.
+
+    Parameters
+    ----------
+    solutions : list[dict]
+        Precomputed feasible weight solutions.
+    criteria : list[str]
+        Criterion names.
+
+    Returns
+    -------
+    dict
+        Mapping criterion_name -> weight for the selected solution.
+    """
+    selected = solutions[np.random.randint(len(solutions))]
+    return {crit: float(selected[crit]) for crit in criteria}
+
+
 def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
-                    confidence_lists, constraint_data_list, aggregation_method,
-                    opinion_weights, num_iterations, mc_mode, use_random_weights=False,
+                    confidence_lists, aggregation_method,
+                    opinion_weights, num_iterations, mc_mode,
                     print_fn=None):
     """Run MC simulation.
 
@@ -291,14 +265,10 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
         One value function dict per elicitation.
     confidence_lists : list[dict]
         One confidence dict per elicitation.
-    constraint_data_list : list[dict]
-        One constraint data dict per elicitation.
     opinion_weights : np.ndarray
         Weights for selecting elicitations in non-strict mode.
     mc_mode : str
         "strict" or "non_strict".
-    use_random_weights : bool
-        If True, use Dirichlet distribution for weights.
     print_fn : callable or None
         Logging function.
 
@@ -345,11 +315,7 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
                     print_fn(f"  Iteration {iteration}/{num_iterations}")
                 sys.stdout.flush()
             for elicit_idx in range(num_elicitations):
-                sampled_weights = weight_sampler(
-                    weight_solutions_list[elicit_idx], criteria,
-                    constraint_data_list[elicit_idx],
-                    use_random_weights=use_random_weights
-                )
+                sampled_weights = _sample_weights(weight_solutions_list[elicit_idx], criteria)
                 for alt_name, alt_data in alternatives.items():
                     score = evaluate_alternative(
                         alt_name, alt_data, criteria, vf_lists, confidence_lists,
@@ -377,11 +343,7 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
                     print_fn(f"  Iteration {iteration}/{num_iterations}")
                 sys.stdout.flush()
             weight_elicit_idx = np.random.choice(num_elicitations, p=opinion_weights)
-            sampled_weights = weight_sampler(
-                weight_solutions_list[weight_elicit_idx], criteria,
-                constraint_data_list[weight_elicit_idx],
-                use_random_weights=use_random_weights
-            )
+            sampled_weights = _sample_weights(weight_solutions_list[weight_elicit_idx], criteria)
             vf_elicit_idx = np.random.choice(num_elicitations, p=opinion_weights)
 
             for alt_name, alt_data in alternatives.items():
@@ -392,6 +354,7 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
                 results[alt_name].append(score)
 
     return results
+
 
 
 # ============================================================================
@@ -458,7 +421,6 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
         - mc_iterations: int
         - aggregation_method: str ("weighted_sum", "geometric_mean", "harmonic_mean")
         - mc_mode: str ("strict" or "non_strict")
-        - use_random_weights: bool
         - opinion_weights: list or None
     print_fn : callable or None
         Logging function.
@@ -474,7 +436,6 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
     mc_iterations = params.get('mc_iterations', 1000)
     aggregation_method = params.get('aggregation_method', 'weighted_sum')
     mc_mode = params.get('mc_mode', 'non_strict')
-    use_random_weights = params.get('use_random_weights', False)
     opinion_weights_raw = params.get('opinion_weights', None)
 
     num_elicitations = len(vf_lists)
@@ -501,29 +462,14 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
     print_fn(f"  Iterations: {mc_iterations}")
     print_fn(f"  Mode: {mc_mode}")
     print_fn(f"  Aggregation: {aggregation_method}")
-    print_fn(f"  Random weights: {use_random_weights}")
     print_fn(f"  Elicitations: {num_elicitations}")
     print_fn(f"  Opinion weights: {opinion_weights.tolist()}")
     sys.stdout.flush()
 
-    # Build constraint data for each elicitation
-    print_fn("\nBuilding constraint structures...")
-    constraint_data_list = []
-    for i, vf_dict in enumerate(vf_lists):
-        # Create constraint structure with criteria and value functions
-        constraint_data = {
-            'criteria': list(vf_dict.keys()),
-            'criterion_to_index': {c: j for j, c in enumerate(vf_dict.keys())},
-            'comparisons': [],
-            'value_functions': vf_dict
-        }
-        constraint_data_list.append(constraint_data)
-        print_fn(f"  - Elicitation {i+1}: {len(vf_dict)} value functions")
-    
     results = run_monte_carlo(
         alternatives, criteria_names, weight_solutions_list, vf_lists,
-        confidence_lists, constraint_data_list, aggregation_method,
-        opinion_weights, mc_iterations, mc_mode, use_random_weights=use_random_weights,
+        confidence_lists, aggregation_method,
+        opinion_weights, mc_iterations, mc_mode,
         print_fn=print_fn,
     )
     print_fn("✓ Simulation complete")
@@ -533,7 +479,6 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
     formatted['mc_iterations'] = mc_iterations
     formatted['aggregation_method'] = aggregation_method
     formatted['mc_mode'] = mc_mode
-    formatted['use_random_weights'] = use_random_weights
 
     # Print summary
     print_fn("\nSummary:")

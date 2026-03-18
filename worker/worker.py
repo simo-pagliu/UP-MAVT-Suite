@@ -223,7 +223,6 @@ def handle_run_step(task):
     mc_iterations = params.get('mc_iterations', 1000)
     aggregation_method = params.get('aggregation_method', 'weighted_sum')
     mc_mode = params.get('mc_mode', 'non_strict')
-    use_random_weights = params.get('use_random_weights', False)
     opinion_weights = params.get('opinion_weights', None)
 
     try:
@@ -293,7 +292,6 @@ def handle_run_step(task):
                     'mc_iterations': mc_iterations,
                     'aggregation_method': agg_method,
                     'mc_mode': mc_mode,
-                    'use_random_weights': use_random_weights,
                     'opinion_weights': opinion_weights,
                 }
 
@@ -309,7 +307,6 @@ def handle_run_step(task):
             result_doc = {
                 'mc_iterations': mc_iterations,
                 'mc_mode': mc_mode,
-                'use_random_weights': use_random_weights,
                 'results_by_aggregation': results_by_aggregation,
             }
 
@@ -320,7 +317,6 @@ def handle_run_step(task):
                 'mc_iterations': mc_iterations,
                 'aggregation_method': aggregation_method,
                 'mc_mode': mc_mode,
-                'use_random_weights': use_random_weights,
                 'opinion_weights': opinion_weights,
             }
 
@@ -337,7 +333,6 @@ def handle_run_step(task):
                 'mc_iterations': mc_iterations,
                 'aggregation_method': aggregation_method,
                 'mc_mode': mc_mode,
-                'use_random_weights': use_random_weights,
             })
 
             save_step_results(db, study_session_id, step_number, result_doc)
