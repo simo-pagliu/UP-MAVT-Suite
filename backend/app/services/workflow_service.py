@@ -318,7 +318,7 @@ class WorkflowService:
                 'timestamp': ts.isoformat() if ts else None,
                 'session_count': len(ws) if isinstance(ws, dict) else 0,
                 'phase1_method': computed_weights.get('phase1_method', 'differential_evolution'),
-                'method': computed_weights.get('method', 'hit_and_run'),
+                'method': computed_weights.get('method', 'differential_evolution_slsqp_multistart'),
                 'use_non_linear_model': computed_weights.get('use_non_linear_model', True),
                 'phase3_tolerance_pct': computed_weights.get('phase3_tolerance_pct', 1.0),
                 'weight_space_parameters': computed_weights.get('weight_space_parameters', {}),
