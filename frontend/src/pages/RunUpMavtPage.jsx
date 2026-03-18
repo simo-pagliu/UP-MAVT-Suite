@@ -1081,12 +1081,9 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   description={
                     <VStack spacing={2} align="stretch">
                       <Text>
-                        Step 1 computes the critical boundary level z*, samples candidate weights under the selected method,
+                        Step 1 computes the critical boundary level z*, samples candidate weights,
                         then filters to the boundary band and stores rounded, deduplicated solutions.
-                      </Text>
-                      <Text>
-                        Step A uses a Differential Evolution solver and Step B uses an SLSQP multistart sampler. These method
-                        settings are fixed; additional controls are available in the Advanced panel.
+                        Additional controls are available in the Advanced panel.
                       </Text>
                       <Text>
                         For background on the general workflow, see{' '}
