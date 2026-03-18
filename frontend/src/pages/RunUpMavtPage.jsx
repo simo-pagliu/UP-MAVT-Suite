@@ -1107,8 +1107,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                         then filters to the boundary band and stores rounded, deduplicated solutions.
                       </Text>
                       <Text>
-                        Choose the Step A solver and Step B sampler in Advanced settings.
-                        Additional controls are available in the Advanced panel.
+                        Step A uses a Differential Evolution solver and Step B uses an SLSQP multistart sampler. These method
+                        settings are fixed; additional controls are available in the Advanced panel.
                       </Text>
                       <Text>
                         For background on the general workflow, see{' '}
