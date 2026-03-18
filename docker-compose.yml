@@ -45,7 +45,9 @@ services:
     restart: unless-stopped
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      target: dev
     container_name: elicitation-frontend
     ports:
       - "3000:3000"
