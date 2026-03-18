@@ -496,9 +496,6 @@ services:
   up-mavt-suite-frontend:
     image: gitea.psi.ch/images/up-mavt-suite-frontend:0.1.1
     container_name: up-mavt-suite-frontend
-    environment:
-      VITE_API_URL: http://localhost:5000/api
-      __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: .psi.ch
     depends_on:
       - up-mavt-suite-backend
     networks:
