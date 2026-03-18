@@ -1,0 +1,517 @@
+services:
+  # linux-eng@psi.ch
+  # Reverse Proxy handling all HTTP/HTTPS requests
+  # Only container that is exposed to the network
+  # Communication to other services is trough docker network
+  nginx:
+    image: nginx:latest
+    container_name: nginx_proxy
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /etc/letsencrypt/live:/etc/letsencrypt/live:ro
+      - /etc/letsencrypt/archive:/etc/letsencrypt/archive:ro
+      - /etc/pki/tls/certs:/etc/nginx/certs:ro
+      - /etc/pki/tls/private:/etc/nginx/private:ro
+      - /etc/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /etc/nginx/conf.d:/etc/nginx/conf.d:ro
+      - /opt/webcontent/sinqstatus-test:/opt/webcontent/sinqstatus-test:ro
+      - /opt/webcontent/it-strategy-dashboard/frontend/:/opt/webcontent/it-strategy-dashboard/:ro
+    networks:
+      - public
+      - backend
+
+  # rfwtools
+  # gfa-status-test
+  # fluid-eos
+  # spaceweather
+  apache:
+    image: gitea.psi.ch/images/php-apache:latest
+    container_name: apache_app
+    restart: always
+    volumes:
+      - /opt/webcontent/rfmwtools:/var/www/rfmwtools:ro
+      - /opt/webcontent/cas-status:/var/www/cas-status:rw
+      - /opt/webcontent/fluid-eos:/var/www/fluid-eos:rw
+      - /opt/webcontent/sls2:/var/www/sls2:rw
+      - /opt/webcontent/megwiki:/var/www/megwiki:rw
+      - /opt/webcontent/sinqimaging:/var/www/sinqimaging:rw
+      - /opt/webcontent/omny:/var/www/omny:rw
+      - /mount/srem/webhosting:/var/www/srem:rw
+      - ./apache/conf:/etc/apache2/sites-enabled:ro
+    networks:
+      - backend
+
+  legacy_scheduleit:
+    # image: gitea.psi.ch/images/php-apache:latest
+    image: gitea.psi.ch/images/legacy_scheduleit:latest
+    restart: always
+    container_name: legacy-scheduleit
+    volumes:
+      - /opt/webcontent/lbr-scheduler/code:/var/www/lbr-scheduler:rw
+      - /opt/webcontent/lbr-scheduler/apache/conf:/etc/apache2/sites-enabled:ro
+    networks:
+      - backend
+
+  # linux-eng@psi.ch
+  # Test app
+  excalidraw:
+    image: excalidraw/excalidraw:latest
+    container_name: excalidraw
+    restart: always
+    networks:
+      - backend
+
+  # Rostomyan Tigran <tigran.rostomyan@psi.ch>
+  # INC0137443
+  # Elog instance
+  pif-elog:
+    image: gitea.psi.ch/images/elog:3.1.5
+    container_name: pif-elog
+    restart: always
+    volumes:
+      - /opt/logbooks/pif:/usr/local/elog/logbooks
+      - /opt/webcontent/pif/elog.cfg:/usr/local/elog/elogd.cfg
+    networks:
+      - backend
+
+  # Krieger Jonas Andreas <jonas.krieger@psi.ch>, Raselli Andrea-Raeto <andrea.raselli@psi.ch>
+  # Elog as a Service PoC mit musr-elog.psi.ch? linux-eng@psi.ch
+  lmu-elog:
+    image: gitea.psi.ch/images/elog:3.1.5
+    container_name: lmu-elog
+    restart: always
+    volumes:
+      - /opt/logbooks/LMU:/usr/local/elog/logbooks
+      - /opt/webcontent/LMU/elog.cfg:/usr/local/elog/elogd.cfg
+    networks:
+      - backend
+
+  # Huang He <river.huang@psi.ch>
+  # Also installed on docker-dmz
+  # PSI Service
+  # MCDA DSS
+  mcda-dss:
+    image: gitea.psi.ch/images/mcda-dss:0.1.0
+    container_name: mcda-dss
+    restart: always
+    networks:
+      - backend
+
+  # MCDA Calculator
+  mcda-calculator:
+    image: gitea.psi.ch/images/mcda-calculator:1.0.3
+    container_name: mcda-calculator
+    restart: always
+    networks:
+      - backend
+
+  # MCDA SRF tool
+  mcda-srf:
+    image: gitea.psi.ch/images/mcda-srf:0.1.0
+    container_name: mcda-srf
+    restart: always
+    networks:
+      - backend
+
+  # MCDA SRF tool
+  mcda-pct:
+    image: gitea.psi.ch/images/mcda-pct:0.2.0
+    container_name: mcda-pct
+    restart: always
+    networks:
+      - backend
+
+  # PEPISCO <andras.boedi@psi.ch> <patrick.hemberger@psi.ch>
+  # PhotoElectron PhotoIon Spectral COmpendium
+  pepisco:
+    image: gitea.psi.ch/images/pepisco:v2026.03.13
+    container_name: pepisco-test
+    restart: always
+    networks:
+      - backend
+
+  # Romain Sacchi <romain.sacchi@psi.ch>
+  swiss-ecargo:
+    image: gitea.psi.ch/sacchi_r/swiss-ecargo:0.1.2
+    container_name: swiss-ecargo
+    restart: always
+    environment:
+      - HOSTED_API_KEY=${ecargo_api_key}
+    networks:
+      - backend
+
+  # Augustin Sven <sven.augustin@psi.ch>
+  # POC for SiwssFel
+  hedgedoc_app:
+    image: quay.io/hedgedoc/hedgedoc:latest
+    container_name: hedgedoc
+    environment:
+      - CMD_DB_URL=postgres://${hedgedoc_user}:${hedgedoc_password}@hedgedoc_db:5432/hedgedoc
+      - CMD_DOMAIN=hedgedoc.psi.ch
+      - CMD_URL_ADDPORT=false
+      - CMD_PROTOCOL_USESSL=true
+      - CMD_LDAP_URL=ldaps://dc00.d.psi.ch
+      - CMD_LDAP_BINDDN=${bind_user}
+      - CMD_LDAP_BINDCREDENTIALS=${bind_password}
+      - CMD_LDAP_SEARCHBASE=OU=users,OU=psi,DC=d,DC=psi,DC=ch
+      - CMD_LDAP_SEARCHFILTER=(&(objectcategory=person)(objectclass=user)(|(sAMAccountName={{username}})(mail={{username}})))
+      - CMD_LDAP_USERIDFIELD=sAMAccountName
+      - CMD_LDAP_PROVIDERNAME="PSI"
+      - NODE_ENV=production
+      - CMD_EMAIL=false
+      - CMD_ALLOW_EMAIL_REGISTER=false
+      - CMD_SESSION_SECRET=${session_secret}
+    volumes:
+      - /opt/webcontent/sf-hedgedoc/uploads:/hedgedoc/public/uploads
+    restart: always
+    depends_on:
+      - hedgedoc_db
+    networks:
+      - backend
+      - hedgedoc_backend
+
+  # Augustin Sven <sven.augustin@psi.ch>
+  hedgedoc_db:
+    image: postgres:13.4-alpine
+    container_name: hedgedoc_db
+    environment:
+      - POSTGRES_USER={{ hedgedoc_user }}
+      - POSTGRES_PASSWORD={{ hedgedoc_password }}
+      - POSTGRES_DB=hedgedoc
+    volumes:
+      - /opt/webcontent/sf-hedgedoc/data:/var/lib/postgresql/data
+    restart: always
+    networks:
+      - hedgedoc_backend
+
+  # Flechsig Uwe <uwe.flechsig@psi.ch>
+  # opticswiki 
+  # webcontent:
+  #    lx-fs-01.psi.ch:/lx_webhosting
+  opticswiki:
+    image: gitea.psi.ch/images/opticswiki:1.4
+    container_name: opticswiki
+    restart: always
+    volumes:
+      - /opt/webcontent/opticswiki/data:/usr/local/apache2/wiki/data
+      - /opt/webcontent/opticswiki/pub:/usr/local/apache2/wiki/pub
+      - /opt/webcontent/opticswiki/working:/usr/local/apache2/wiki/working
+      - /opt/webcontent/opticswiki/lib:/usr/local/apache2/wiki/lib
+      - /opt/webcontent/opticswiki/conf:/usr/local/apache2/conf
+      - /opt/webcontent/opticswiki/htdocs:/usr/local/apache2/htdocs
+      - /opt/webcontent/opticswiki/log:/var/log/apache2
+    networks:
+      - backend
+
+  # Angelo Sozzi INC0150655 angelo.sozzi@psi.ch
+  # POC Software - might be installed on docker-dmz
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: n8n
+    restart: always
+    environment:
+      - N8N_HOST=n8n
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - WEBHOOK_URL=https://n8n.psi.ch
+      - GENERIC_TIMEZONE=Europe/Zurich
+      - DB_SQLITE_POOL_SIZE=4
+      - N8N_RUNNERS_ENABLED=true
+    volumes:
+      - /opt/webcontent/n8n/n8n_data:/home/node/.n8n
+      - /opt/webcontent/n8n/local_files:/files
+    networks:
+      - backend
+
+# Ritter Tom <tom.ritter@psi.ch>
+# It-Strategy monitoring dashboard
+
+  it-strategy-dashboard-frontend:
+    image: gitea.psi.ch/9501/it-strategy-dashboard-frontend:4.0.2
+    container_name: it-strategy-dashboard-frontend
+    command: ["sh","-c","/usr/local/bin/copyData.sh"]
+    volumes:
+      - /opt/webcontent/it-strategy-dashboard/frontend:/opt/webcontent/it-strategy-dashboard/frontend
+    restart: "no"
+    networks:
+      - it_strategy_dashboard_backend
+
+  it-strategy-dashboard-backend:
+    image: gitea.psi.ch/9501/it-strategy-dashboard-backend:4.0.3
+    container_name: it-strategy-dashboard-backend
+    restart: always
+    environment:
+      - DB_HOST=it-strategy-dashboard-db
+      - DB_PORT=3306
+      - DB_NAME=itstrategy
+      - DB_USER=${IT_DASHBOARD_DB_USER}
+      - DB_PASS=${IT_DASHBOARD_DB_PW}
+      - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_PW_HASH=${ADMIN_PW_HASH}
+    depends_on:
+      it-strategy-dashboard-db:
+        condition: service_healthy
+    networks:
+      - it_strategy_dashboard_backend
+      - backend
+
+  it-strategy-dashboard-db:
+    image: mariadb:12
+    container_name: it-strategy-dashboard-db
+    restart: always
+    environment:
+      - MYSQL_ROOT_PASSWORD=${IT_DASHBOARD_DB_ROOT_PW}
+      - MYSQL_DATABASE=itstrategy
+      - MYSQL_USER=${IT_DASHBOARD_DB_USER}
+      - MYSQL_PASSWORD=${IT_DASHBOARD_DB_PW}
+    volumes:
+      - /opt/webcontent/it-strategy-dashboard/mysql/data:/var/lib/mysql
+    depends_on:
+      it-strategy-dashboard-frontend:
+        condition: service_completed_successfully
+    networks:
+      - it_strategy_dashboard_backend
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-u${IT_DASHBOARD_DB_USER}", "-p${IT_DASHBOARD_DB_PW}"]
+      interval: 2s
+      timeout: 5s
+      retries: 5
+
+# Christoph Hug <christoph.hug@psi.ch>, Simon Suter <simon.suter@psi.ch>
+# Panda-Maintenance (OpenMaint)
+  panda-maintenance-db:
+    image: postgis/postgis:17-3.5-alpine
+    container_name: panda-maintenance-db
+    volumes:
+      - /opt/webcontent/panda-maintenance/data:/var/lib/postgresql/data:rw
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${PANDA_MAINTENANCE_DB_PW}
+    restart: always
+    mem_limit: 4000m
+    mem_reservation: 2000m
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 80s
+    networks:
+      - panda_maintenance_backend
+  panda-maintenance-app:
+    image: itmicus/cmdbuild:om-2.4-4.1.0
+    container_name: panda-maintenance-app
+    links:
+      - panda-maintenance-db
+    depends_on:
+      panda-maintenance-db:
+        condition: service_healthy
+    restart: always
+    volumes:
+      - /opt/webcontent/panda-maintenance/docker-entrypoint.sh:/usr/local/bin/docker-entrypoint.sh:ro
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${PANDA_MAINTENANCE_DB_PW}
+      - POSTGRES_PORT=5432
+      - POSTGRES_HOST=panda-maintenance-db
+      - POSTGRES_DB=openmaint
+      - CMDBUILD_DUMP=empty.dump.xz
+      - JAVA_OPTS=-Xmx6000m -Xms3000m
+    mem_limit: 6000m
+    mem_reservation: 3500m
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "-L", "http://localhost:8080/cmdbuild/ui" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    networks:
+      - backend
+      - panda_maintenance_backend
+
+  # michael.schmidt@psi.ch
+  # SAP Archiv Programm von der Firma KGS supportabteilung@kgs-software.com
+  tiacore-test:
+    container_name: tiacore-test
+    image: images.kgs-cloud.de/tia/core/saphttp:3.17.1
+    restart: always
+    volumes:
+      - /opt/webcontent/tiacore-test/config/license:/application/license
+      - /opt/webcontent/tiacore-test/config/keystore:/application/ssl
+      - /opt/webcontent/tiacore-test/config:/application/config/
+      - /mount/saparchive/testdata:/application/data
+    environment:
+      LOGGING_LEVEL_ROOT: INFO
+      # Authentifizierung für WebUI
+      WEBAPP_SECURITY_AUTH_BASIC_USERNAME: psiadmin
+      WEBAPP_SECURITY_AUTH_BASIC_PASSWORD: "$$2y$$10$$LA.TjBKRIDM/c6AJ86BZ/elpa9InzVbzqzLsyfc1Wt7h3S3N8MUPm"
+    networks:
+      - backend
+
+  # michael.schmidt@psi.ch
+  # SAP Archiv Programm von der Firma KGS supportabteilung@kgs-software.com
+  tiacore-prod:
+    container_name: tiacore-prod
+    image: images.kgs-cloud.de/tia/core/saphttp:3.17.1
+    restart: always
+    volumes:
+      - /opt/webcontent/tiacore-prod/config/license:/application/license
+      - /opt/webcontent/tiacore-prod/config/keystore:/application/ssl
+      - /opt/webcontent/tiacore-prod/config:/application/config/
+      - /mount/saparchive/proddata:/application/data
+    environment:
+      LOGGING_LEVEL_ROOT: INFO
+      # Authentifizierung für WebUI
+      WEBAPP_SECURITY_AUTH_BASIC_USERNAME: psiadmin
+      WEBAPP_SECURITY_AUTH_BASIC_PASSWORD: "$$2y$$10$$LA.TjBKRIDM/c6AJ86BZ/elpa9InzVbzqzLsyfc1Wt7h3S3N8MUPm"
+    networks:
+      - backend
+
+  # michael.schmidt@psi.ch
+  # SAP Document Router von der Firma KGS supportabteilung@kgs-software.com
+  documentrouter-prod:
+    container_name: tiadocrouter-prod
+    image: images.kgs-cloud.de/tia-documentrouter/tia-documentrouter:5.1.3
+    restart: always
+    volumes:
+      - /opt/webcontent/tiadocrouter-prod/work:/application/work
+      - /opt/webcontent/tiadocrouter-prod/lib:/application/lib
+      - /opt/webcontent/tiadocrouter-prod/config:/application/config
+#      - <scanfolder01>:/application/dr-instance-01-input
+    environment:
+      LOGGING_LEVEL_ROOT: INFO
+      # Authentifizierung für WebUI
+      WEBAPP_SECURITY_AUTH_BASIC_USERNAME: psiadmin
+      WEBAPP_SECURITY_AUTH_BASIC_PASSWORD: "$$2y$$10$$LA.TjBKRIDM/c6AJ86BZ/elpa9InzVbzqzLsyfc1Wt7h3S3N8MUPm"
+    networks:
+      - backend
+
+  # michael.schmidt@psi.ch
+  # SAP Document Router von der Firma KGS supportabteilung@kgs-software.com
+  documentrouter-test:
+    container_name: tiadocrouter-test
+    image: images.kgs-cloud.de/tia-documentrouter/tia-documentrouter:5.1.3
+    restart: always
+    volumes:
+      - /opt/webcontent/tiadocrouter-test/work:/application/work
+      - /opt/webcontent/tiadocrouter-test/lib:/application/lib
+      - /opt/webcontent/tiadocrouter-test/config:/application/config
+#      - <scanfolder01>:/application/dr-instance-01-input
+    environment:
+      LOGGING_LEVEL_ROOT: INFO
+      # Authentifizierung für WebUI
+      WEBAPP_SECURITY_AUTH_BASIC_USERNAME: psiadmin
+      WEBAPP_SECURITY_AUTH_BASIC_PASSWORD: "$$2y$$10$$LA.TjBKRIDM/c6AJ86BZ/elpa9InzVbzqzLsyfc1Wt7h3S3N8MUPm"
+    networks:
+      - backend
+
+  # Lange Clemens <clemens.lange@psi.ch>
+  # summer-project-selection.psi.ch
+  summer-project-selection:
+    image: gitea.psi.ch/lange_c/summer-project-selection:latest
+    restart: always
+    volumes:
+      - /opt/webcontent/summer-project-selection/data:/app/data
+      - /opt/webcontent/summer-project-selection/projects:/app/projects
+      - /opt/webcontent/summer-project-selection/applicants:/app/applicants
+    networks:
+      - backend
+
+  # Tomcat Beamline Wiki INC0159147 tomcatwiki.psi.ch
+  # goran.lovric@psi.ch
+  tomcatwikidb:
+    image: postgres:15-alpine
+    container_name: tomcatwiki_db
+    restart: always
+    environment:
+      - POSTGRES_DB=wiki
+      - POSTGRES_PASSWORD=${TOMCATWIKI_DB_SECRET}
+      - POSTGRES_USER=wiki
+    volumes:
+      - /opt/webcontent/tomcatwiki/db-data:/var/lib/postgresql/data
+    networks:
+      - tomcatwiki_backend
+
+  tomcatwiki:
+    image: ghcr.io/requarks/wiki:2
+    container_name: tomcatwiki
+    restart: always
+    depends_on:
+      - tomcatwikidb
+    environment:
+      - DB_TYPE=postgres
+      - DB_HOST=tomcatwikidb
+      - DB_PORT=5432
+      - DB_USER=wiki
+      - DB_PASS=${TOMCATWIKI_DB_SECRET}
+      - DB_NAME=wiki
+    networks:
+      - tomcatwiki_backend
+      - backend
+
+  # Simone Pagliuca <simone.pagliuca@psi.ch> / River Huang <river.huang@psi.ch>
+  # UP-MAVT-Suite
+  up-mavt-suite-mongo:
+    image: mongo:7.0
+    container_name: up-mavt-suite-mongo
+    environment:
+      MONGO_INITDB_DATABASE: elicitation
+    volumes:
+      - /opt/webcontent/up-mavt-suite/mongo-data:/data/db
+    networks:
+      - up_mavt_suite_network
+    restart: always
+
+  up-mavt-suite-backend:
+    image: gitea.psi.ch/images/up-mavt-suite-backend:0.1.0
+    container_name: up-mavt-suite-backend
+    env_file:
+      - .env
+    environment:
+      MONGO_URI: mongodb://up-mavt-suite-mongo:27017/elicitation
+      FLASK_ENV: development
+      ADMIN_PASSWORD: ${MCDA_UP_ADMIN_PASSWORD}
+    depends_on:
+      - up-mavt-suite-mongo
+    networks:
+      - up_mavt_suite_network
+      - backend
+    restart: always
+
+  up-mavt-suite-worker:
+    image: gitea.psi.ch/images/up-mavt-suite-worker:0.1.0
+    container_name: up-mavt-suite-worker
+    environment:
+      MONGO_URI: mongodb://up-mavt-suite-mongo:27017/elicitation
+    depends_on:
+      - up-mavt-suite-mongo
+    networks:
+      - up_mavt_suite_network
+    restart: always
+
+  up-mavt-suite-frontend:
+    image: gitea.psi.ch/images/up-mavt-suite-frontend:0.1.1
+    container_name: up-mavt-suite-frontend
+    environment:
+      VITE_API_URL: http://localhost:5000/api
+      __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: .psi.ch
+    depends_on:
+      - up-mavt-suite-backend
+    networks:
+      - up_mavt_suite_network
+      - backend
+    restart: always
+
+networks:
+  public:
+  backend:
+  hedgedoc_backend:
+  it_strategy_dashboard_backend:
+  panda_maintenance_backend:
+  tomcatwiki_backend:
+  up_mavt_suite_network:
+
