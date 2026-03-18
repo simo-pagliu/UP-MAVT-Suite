@@ -258,7 +258,8 @@ class TestGetWorkflowStatus:
         status = wf_svc.get_workflow_status(study_with_weights)
         assert status['weights']['computed'] is True
         assert status['weights']['session_count'] >= 1
-        assert status['weights']['method'] == 'hit_and_run'
+        assert 'method' not in status['weights']
+        assert 'phase1_method' not in status['weights']
 
     def test_not_found_raises(self, wf_svc):
         with pytest.raises(NotFoundError):
@@ -273,7 +274,8 @@ class TestGetWeightSpace:
     def test_returns_weight_data(self, wf_svc, study_with_weights, session_id):
         data = wf_svc.get_weight_space(study_with_weights, session_id)
         assert isinstance(data, dict)
-        assert data['method'] == 'hit_and_run'
+        assert 'method' not in data
+        assert 'phase1_method' not in data
         assert isinstance(data['weight_space'], list)
 
     def test_not_computed_raises(self, wf_svc, study_id, session_id):
