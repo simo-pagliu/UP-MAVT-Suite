@@ -127,7 +127,7 @@ def handle_compute_weights(task):
         # Process each selected session
         weight_solutions = {}
         pre_threshold_weight_solutions = {}
-        applied_weight_space_parameters = None
+        applied_weight_space_parameters = None  # Will be set from compute_weights runtime metadata, if available
         total = len(selected_session_ids)
 
         for idx, session_id in enumerate(selected_session_ids):
@@ -173,7 +173,12 @@ def handle_compute_weights(task):
             pre_threshold_weight_solutions=pre_threshold_weight_solutions,
             use_non_linear_model=use_non_linear_model,
             phase3_tolerance_pct=phase3_tolerance_pct,
-            weight_space_parameters=applied_weight_space_parameters or weight_space_parameters,
+            # Use actually-applied parameters when metadata is present; fall back to requested only if missing
+            weight_space_parameters=(
+                weight_space_parameters
+                if applied_weight_space_parameters is None
+                else applied_weight_space_parameters
+            ),
         )
 
         logger.log(f"\n✓ All weights computed and saved to database.")
