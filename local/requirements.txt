@@ -1,7 +1,0 @@
-# Local UP-MAVT Standalone Dependencies
-# This is a local-optimized version (no MongoDB required)
-
-numpy>=1.24
-scipy>=1.11
-pandas>=2.0
-matplotlib>=3.4.0

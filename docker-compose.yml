@@ -26,6 +26,8 @@ services:
       - mongo
     volumes:
       - ./backend:/app
+      - ./frontend/public:/frontend/public:ro
+      - ./worker/scripts:/worker/scripts:ro
     networks:
       - elicitation-network
 
