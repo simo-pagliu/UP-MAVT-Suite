@@ -80,6 +80,12 @@ class StudySessionService:
             ws = serialized['weight_solutions']
             if isinstance(ws, dict):
                 serialized['weight_solutions'] = {str(k): v for k, v in ws.items()}
+        if 'pre_threshold_weight_solutions' in serialized:
+            pre_threshold = serialized['pre_threshold_weight_solutions']
+            if isinstance(pre_threshold, dict):
+                serialized['pre_threshold_weight_solutions'] = {
+                    str(k): v for k, v in pre_threshold.items()
+                }
         return serialized
 
     def _serialize_study(self, study, include_sessions=False):

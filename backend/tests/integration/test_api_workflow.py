@@ -1,4 +1,7 @@
 """Integration tests for workflow HTTP endpoints."""
+import csv
+import io
+
 import pytest
 from bson.objectid import ObjectId
 from datetime import datetime, timezone
@@ -41,6 +44,12 @@ def inject_computed_weights(app, study_id, session_id):
     app.db.study_sessions.update_one(
         {'_id': OID(study_id)},
         {'$set': {'computed_weights': {
+            'pre_threshold_weight_solutions': {
+                session_id: [
+                    {'weights': {'Cost': 0.333}, 'error': 0.1234567},
+                    {'weights': {'Cost': 0.667}, 'error': 0.7654321},
+                ]
+            },
             'weight_solutions': {session_id: [{'Cost': 1.0}]},
             'timestamp': datetime.now(timezone.utc),
         }}}
@@ -255,6 +264,7 @@ class TestExportWeightSolutions:
         assert resp.status_code == 200
         assert 'text/csv' in resp.content_type
         assert b'SESSION_ID' in resp.data
+        assert b'ERROR' in resp.data
 
 
 # ---------------------------------------------------------------------------
@@ -269,7 +279,9 @@ class TestExportWeightSolutionsSingle:
             f'/api/study-session/{study_id}/weight-solutions/{session_id}/export'
         )
         assert resp.status_code == 200
-        assert b'SOLUTION_INDEX' in resp.data
+        rows = list(csv.reader(io.StringIO(resp.data.decode())))
+        assert rows[0] == ['SOLUTION_INDEX', 'Cost', 'ERROR']
+        assert rows[1] == ['0', '0.333', '0.123457']
 
     def test_export_single_unknown_session_fails(self, app, client):
         study_id, session_id = setup_study_with_session(client)

@@ -100,9 +100,8 @@ def handle_compute_weights(task):
     study_session_id = params.get('study_session_id')
     selected_session_ids = params.get('selected_session_ids', [])
     use_non_linear_model = bool(params.get('use_non_linear_model', True))
-    phase1_method = params.get('phase1_method', 'constraint_dominated_ea')
-    weight_sampling_method = params.get('weight_sampling_method', 'lhs_simplex')
     phase3_tolerance_pct = params.get('phase3_tolerance_pct', 1.0)
+    weight_space_parameters = params.get('weight_space_parameters', {})
     try:
         phase3_tolerance_pct = max(0.0, float(phase3_tolerance_pct))
     except (TypeError, ValueError):
@@ -111,9 +110,10 @@ def handle_compute_weights(task):
     try:
         logger.log("=" * 60)
         logger.log(f"Model: {'non-linear' if use_non_linear_model else 'linear'}")
-        logger.log(f"Phase 1 method: {phase1_method}")
-        logger.log(f"Weight sampling method: {weight_sampling_method}")
+        logger.log("Step A solver: Differential Evolution")
+        logger.log("Step B sampler: SLSQP multi-start")
         logger.log(f"Phase 3 tolerance LIM (%): {phase3_tolerance_pct}")
+        logger.log(f"Weight space parameters: {weight_space_parameters}")
         logger.log("COMPUTE WEIGHTS")
         logger.log("=" * 60)
 
@@ -126,6 +126,8 @@ def handle_compute_weights(task):
 
         # Process each selected session
         weight_solutions = {}
+        pre_threshold_weight_solutions = {}
+        applied_weight_space_parameters = None
         total = len(selected_session_ids)
 
         for idx, session_id in enumerate(selected_session_ids):
@@ -139,17 +141,21 @@ def handle_compute_weights(task):
                 comparisons = build_comparisons_from_session(session_doc)
                 criteria_names = [c['criterion_name'] for c in criteria if 'criterion_name' in c]
                 
-                ws = compute_weights(
+                weight_result = compute_weights(
                     value_functions,
                     comparisons,
                     criteria_names=criteria_names,
                     print_fn=logger.log,
                     use_non_linear_model=use_non_linear_model,
-                    phase1_method=phase1_method,
-                    weight_sampling_method=weight_sampling_method,
-                    phase3_tolerance_pct=phase3_tolerance_pct,
+                    step_c_lim_percent=phase3_tolerance_pct,
+                    parameter_overrides=weight_space_parameters,
+                    return_metadata=True,
                 )
+                ws = weight_result.get('accepted_solutions', [])
+                pre_threshold_ws = weight_result.get('pre_threshold_decimal_solutions', [])
+                applied_weight_space_parameters = weight_result.get('runtime_parameters', applied_weight_space_parameters)
                 weight_solutions[session_id] = ws
+                pre_threshold_weight_solutions[session_id] = pre_threshold_ws
 
                 logger.log(f"✓ Session {session_name} completed ({len(ws)} feasible solutions)")
             except ValueError as e:
@@ -164,10 +170,10 @@ def handle_compute_weights(task):
             db,
             study_session_id,
             weight_solutions,
-            phase1_method=phase1_method,
-            method=weight_sampling_method,
+            pre_threshold_weight_solutions=pre_threshold_weight_solutions,
             use_non_linear_model=use_non_linear_model,
             phase3_tolerance_pct=phase3_tolerance_pct,
+            weight_space_parameters=applied_weight_space_parameters or weight_space_parameters,
         )
 
         logger.log(f"\n✓ All weights computed and saved to database.")

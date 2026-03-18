@@ -1,4 +1,7 @@
 """Unit tests for WorkflowService."""
+import csv
+import io
+
 import pytest
 from bson.objectid import ObjectId
 from datetime import datetime, timezone
@@ -65,13 +68,10 @@ class TestCreateComputeWeightsTask:
             study_id,
             [session_id],
             use_non_linear_model=True,
-            phase1_method='differential_evolution',
-            weight_sampling_method='dirichlet',
             phase3_tolerance_pct=2.5,
         )
         task = mock_db.tasks.find_one({'_id': ObjectId(task_id)})
-        assert task['params']['phase1_method'] == 'differential_evolution'
-        assert task['params']['weight_sampling_method'] == 'dirichlet'
+        assert task['params']['use_non_linear_model'] is True
         assert task['params']['phase3_tolerance_pct'] == 2.5
 
     def test_no_sessions_raises(self, wf_svc, study_id):
@@ -258,7 +258,7 @@ class TestGetWorkflowStatus:
         status = wf_svc.get_workflow_status(study_with_weights)
         assert status['weights']['computed'] is True
         assert status['weights']['session_count'] >= 1
-        assert status['weights']['method'] == 'lhs_simplex'
+        assert status['weights']['method'] == 'hit_and_run'
 
     def test_not_found_raises(self, wf_svc):
         with pytest.raises(NotFoundError):
@@ -273,7 +273,7 @@ class TestGetWeightSpace:
     def test_returns_weight_data(self, wf_svc, study_with_weights, session_id):
         data = wf_svc.get_weight_space(study_with_weights, session_id)
         assert isinstance(data, dict)
-        assert data['method'] == 'lhs_simplex'
+        assert data['method'] == 'hit_and_run'
         assert isinstance(data['weight_space'], list)
 
     def test_not_computed_raises(self, wf_svc, study_id, session_id):
@@ -305,3 +305,52 @@ class TestGetStepResults:
         )
         result = wf_svc.get_step_results(study_id, 2)
         assert result['data'] == [1, 2, 3]
+
+
+# ---------------------------------------------------------------------------
+# export_weight_solutions_csv / export_weight_solutions_single_csv
+# ---------------------------------------------------------------------------
+
+class TestExportWeightSolutionCsv:
+    def test_prefers_pre_threshold_rows_and_includes_error(self, mock_db, wf_svc, study_id, session_id):
+        mock_db.study_sessions.update_one(
+            {'_id': ObjectId(study_id)},
+            {'$set': {'computed_weights': {
+                'pre_threshold_weight_solutions': {
+                    session_id: [
+                        {'weights': {'Cost': 0.333}, 'error': 0.1234567},
+                        {'weights': {'Cost': 0.667}, 'error': 0.7654321},
+                    ]
+                },
+                'weight_solutions': {session_id: [{'Cost': 1.0}]},
+                'timestamp': datetime.now(timezone.utc),
+            }}}
+        )
+
+        content, _, mime = wf_svc.export_weight_solutions_single_csv(study_id, session_id)
+
+        assert mime == 'text/csv'
+        rows = list(csv.reader(io.StringIO(content.decode())))
+        assert rows[0] == ['SOLUTION_INDEX', 'Cost', 'ERROR']
+        assert rows[1] == ['0', '0.333', '0.123457']
+        assert rows[2] == ['1', '0.667', '0.765432']
+
+    def test_all_sessions_export_includes_error_column(self, mock_db, wf_svc, study_id, session_id):
+        another_session_id = str(ObjectId())
+        mock_db.study_sessions.update_one(
+            {'_id': ObjectId(study_id)},
+            {'$set': {'computed_weights': {
+                'pre_threshold_weight_solutions': {
+                    session_id: [{'weights': {'Cost': 0.25}, 'error': 0.25}],
+                    another_session_id: [{'weights': {'Cost': 0.75}, 'error': 0.5}],
+                },
+                'timestamp': datetime.now(timezone.utc),
+            }}}
+        )
+
+        content, _, _ = wf_svc.export_weight_solutions_csv(study_id)
+
+        rows = list(csv.reader(io.StringIO(content.decode())))
+        assert rows[0] == ['SESSION_ID', 'SOLUTION_INDEX', 'Cost', 'ERROR']
+        assert rows[1][-1] == '0.25'
+        assert rows[2][-1] == '0.5'

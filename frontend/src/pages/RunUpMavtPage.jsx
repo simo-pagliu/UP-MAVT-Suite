@@ -57,25 +57,31 @@ import {
 } from '../utils/sessionUtils'
 
 const STEP2_COLORS = ['#3182CE', '#E57373', '#C77DFF', '#4DD0E1', '#38A169', '#D69E2E']
-const PHASE1_METHOD_OPTIONS = [
-  { value: 'constraint_dominated_ea', label: 'Constraint-dominated evolutionary search (CDS)' },
-  { value: 'differential_evolution', label: 'Differential Evolution (legacy)' },
-]
-const WEIGHT_SAMPLING_OPTIONS = [
-  { value: 'lhs_simplex', label: 'Latin Hypercube + simplex map' },
-  { value: 'dirichlet', label: 'Direct Dirichlet sampling' },
-  { value: 'sobol_simplex', label: 'Sobol low-discrepancy + simplex map' },
-  { value: 'ball_walk', label: 'Ball walk from feasible anchor' },
-  { value: 'adaptive_dirichlet', label: 'Adaptive Dirichlet search' },
-  { value: 'multistart_optimization', label: 'Multi-start optimization' },
-  { value: 'extreme_points', label: 'Extreme-point search' },
-]
+// Methods are now fixed: Step A uses Differential Evolution, Step B uses SLSQP multistart
+const DEFAULT_WEIGHT_SPACE_PARAMETERS = {
+  rng_seed: 426,
+  eps: 0.001,
+  feasibility_tol: 0.01,
+  step_b_samples: 1000,
+  step_b_slsqp_restarts: 96,
+  step_b_slsqp_maxiter: 500,
+  step_b_slsqp_ftol: 1e-10,
+  output_weight_decimals: 3,
+  boundary_band_tol: 0.0001,
+}
 
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
 function RunUpMavtPage({ studySessionId, onNavigate }) {
   const toast = useToast()
+
+  const nonLinearStorageKey = studySessionId
+    ? `run-upmavt:${studySessionId}:use-non-linear-model`
+    : null
+  const selectedSessionsStorageKey = studySessionId
+    ? `run-upmavt:${studySessionId}:selected-sessions`
+    : null
 
   // State for sessions
   const [sessions, setSessions] = useState([])
@@ -111,9 +117,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [selectedWeightSession, setSelectedWeightSession] = useState('')
   const [weightSpaceData, setWeightSpaceData] = useState(null)
   const [useNonLinearModel, setUseNonLinearModel] = useState(true)
-  const [phase1Method, setPhase1Method] = useState('constraint_dominated_ea')
-  const [weightSamplingMethod, setWeightSamplingMethod] = useState('lhs_simplex')
   const [phase3TolerancePct, setPhase3TolerancePct] = useState(1)
+  const [weightSpaceParameters, setWeightSpaceParameters] = useState(DEFAULT_WEIGHT_SPACE_PARAMETERS)
 
   // Step 2 results state
   const [step2Results, setStep2Results] = useState(null)
@@ -129,15 +134,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   // Derived state
   const weightsComputed = workflowStatus?.weights?.computed === true
   const weightsTimestamp = workflowStatus?.weights?.timestamp
-  const persistedPhase1Method = workflowStatus?.weights?.phase1_method || 'constraint_dominated_ea'
-  const persistedPhase1MethodLabel = PHASE1_METHOD_OPTIONS.find(
-    (option) => option.value === persistedPhase1Method
-  )?.label || persistedPhase1Method
-  const persistedWeightMethod = workflowStatus?.weights?.method || 'lhs_simplex'
-  const persistedWeightMethodLabel = WEIGHT_SAMPLING_OPTIONS.find(
-    (option) => option.value === persistedWeightMethod
-  )?.label || persistedWeightMethod
-  const persistedPhase3TolerancePct = Number(workflowStatus?.weights?.phase3_tolerance_pct ?? 1)
 
   // ============================================================================
   // LOAD DATA
@@ -216,6 +212,26 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   }, [studySessionId])
 
   useEffect(() => {
+    if (!nonLinearStorageKey) return
+    try {
+      const raw = localStorage.getItem(nonLinearStorageKey)
+      if (raw === 'true') setUseNonLinearModel(true)
+      if (raw === 'false') setUseNonLinearModel(false)
+    } catch (error) {
+      console.warn('Could not restore non-linear model preference:', error)
+    }
+  }, [nonLinearStorageKey])
+
+  useEffect(() => {
+    if (!nonLinearStorageKey) return
+    try {
+      localStorage.setItem(nonLinearStorageKey, String(useNonLinearModel))
+    } catch (error) {
+      console.warn('Could not persist non-linear model preference:', error)
+    }
+  }, [nonLinearStorageKey, useNonLinearModel])
+
+  useEffect(() => {
     const fetchSessions = async () => {
       if (!studySessionId) return
       setLoadingStudy(true)
@@ -231,7 +247,27 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         const completedAndLocked = allSessions.filter((s) =>
           isSessionComplete(s, allCriteria) && s.session_locked === true
         )
-        setSelectedSessions(completedAndLocked.map((s) => s._id))
+
+        const defaultSelected = completedAndLocked.map((s) => s._id)
+        const validSet = new Set(defaultSelected)
+
+        let restoredSelected = null
+        if (selectedSessionsStorageKey) {
+          try {
+            const raw = localStorage.getItem(selectedSessionsStorageKey)
+            if (raw !== null) {
+              const parsed = JSON.parse(raw)
+              if (Array.isArray(parsed)) {
+                restoredSelected = parsed.filter((id) => validSet.has(id))
+              }
+            }
+          } catch (error) {
+            console.warn('Could not restore selected sessions preference:', error)
+          }
+        }
+
+        // Respect explicit persisted empty selection ([]). Only fallback when no saved state exists.
+        setSelectedSessions(restoredSelected !== null ? restoredSelected : defaultSelected)
       } catch (error) {
         console.error('Error fetching study:', error)
         toast({
@@ -247,23 +283,31 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
     fetchSessions()
     fetchWorkflowStatus()
-  }, [studySessionId, toast, fetchWorkflowStatus])
+  }, [studySessionId, toast, fetchWorkflowStatus, selectedSessionsStorageKey])
 
   useEffect(() => {
-    if (workflowStatus?.weights?.phase1_method) {
-      setPhase1Method(workflowStatus.weights.phase1_method)
+    if (!selectedSessionsStorageKey) return
+    try {
+      localStorage.setItem(selectedSessionsStorageKey, JSON.stringify(selectedSessions))
+    } catch (error) {
+      console.warn('Could not persist selected sessions preference:', error)
     }
-    if (workflowStatus?.weights?.method) {
-      setWeightSamplingMethod(workflowStatus.weights.method)
-    }
+  }, [selectedSessionsStorageKey, selectedSessions])
+
+  useEffect(() => {
     if (workflowStatus?.weights?.phase3_tolerance_pct !== undefined) {
       const pct = Number(workflowStatus.weights.phase3_tolerance_pct)
       setPhase3TolerancePct(Number.isFinite(pct) ? pct : 1)
     }
+    if (workflowStatus?.weights?.weight_space_parameters) {
+      setWeightSpaceParameters((prev) => ({
+        ...prev,
+        ...workflowStatus.weights.weight_space_parameters,
+      }))
+    }
   }, [
-    workflowStatus?.weights?.phase1_method,
-    workflowStatus?.weights?.method,
     workflowStatus?.weights?.phase3_tolerance_pct,
+    workflowStatus?.weights?.weight_space_parameters,
   ])
 
   // Fetch step 2 results when step 2 is completed
@@ -443,9 +487,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         {
           selected_session_ids: selectedSessions,
           use_non_linear_model: useNonLinearModel,
-          phase1_method: phase1Method,
-          weight_sampling_method: weightSamplingMethod,
           phase3_tolerance_pct: phase3TolerancePct,
+          weight_space_parameters: weightSpaceParameters,
         }
       )
       const taskId = response.data.task_id
@@ -1059,13 +1102,12 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   description={
                     <VStack spacing={2} align="stretch">
                       <Text>
-                        Step 1 first finds the minimum attainable constraint violation for the selected sessions, then applies the chosen
-                        Phase 2 method to generate candidate weights and filters them into the stored weight space. This lets you compare
-                        direct simplex sampling, low-discrepancy coverage, feasible-region walks, and optimization-based searches from the same UI.
+                        Step 1 computes the critical boundary level z*, samples candidate weights under the selected method,
+                        then filters to the boundary band and stores rounded, deduplicated solutions.
                       </Text>
                       <Text>
-                        The current worker implementation supports multiple candidate-generation strategies so you can test how strongly the
-                        final stored weight space depends on the exploration method rather than on the feasibility filter alone.
+                        Choose the Step A solver and Step B sampler in Advanced settings.
+                        Additional controls are available in the Advanced panel.
                       </Text>
                       <Text>
                         For background on the general workflow, see{' '}
@@ -1096,40 +1138,169 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   showConsole={showConsole}
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
+                  controlMeta={weightsComputed ? (
+                    <HStack spacing={2}>
+                      <Text fontSize="sm" color="gray.600">
+                        Last computed: {formatTimestamp(weightsTimestamp) || '-'}
+                      </Text>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        colorScheme="orange"
+                        onClick={handleResetWeights}
+                      >
+                        Reset Weights
+                      </Button>
+                    </HStack>
+                  ) : null}
+                  parametersCollapsible
+                  parametersTitle="Advanced"
                   parameters={
                     <VStack spacing={2} align="stretch">
+                      <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+                        <Box borderWidth="1px" borderRadius="md" p={3}>
+                          <Text fontWeight="semibold" mb={2}>Step A (DE)</Text>
+                          <VStack spacing={2} align="stretch">
+                            <Box>
+                              <Text fontWeight="medium" mb={1}>Solver</Text>
+                              <Text fontSize="sm" color="gray.600">Differential Evolution</Text>
+                            </Box>
+                            <Box>
+                              <Text fontWeight="medium" mb={1}>RNG seed</Text>
+                              <NumberInput
+                                value={weightSpaceParameters.rng_seed}
+                                min={0}
+                                max={99999999}
+                                step={1}
+                                isDisabled={runningStep !== null}
+                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, rng_seed: Math.floor(n) }))}
+                              >
+                                <NumberInputField />
+                              </NumberInput>
+                            </Box>
+                            <Box>
+                              <Text fontWeight="medium" mb={1}>EPS</Text>
+                              <NumberInput
+                                value={weightSpaceParameters.eps}
+                                min={0}
+                                max={1}
+                                step={0.0001}
+                                precision={6}
+                                isDisabled={runningStep !== null}
+                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, eps: n }))}
+                              >
+                                <NumberInputField />
+                              </NumberInput>
+                            </Box>
+                          </VStack>
+                        </Box>
+
+                        <Box borderWidth="1px" borderRadius="md" p={3}>
+                          <Text fontWeight="semibold" mb={2}>Step B (SLSQP)</Text>
+                          <VStack spacing={2} align="stretch">
+                            <Box>
+                              <Text fontWeight="medium" mb={1}>Sampler</Text>
+                              <Text fontSize="sm" color="gray.600">SLSQP multi-start</Text>
+                            </Box>
+                            <Box>
+                              <Text fontWeight="medium" mb={1}>Samples</Text>
+                              <NumberInput
+                                value={weightSpaceParameters.step_b_samples}
+                                min={1}
+                                max={200000}
+                                step={100}
+                                isDisabled={runningStep !== null || !useNonLinearModel}
+                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, step_b_samples: Math.floor(n) }))}
+                              >
+                                <NumberInputField />
+                              </NumberInput>
+                            </Box>
+                            <Box>
+                              <Text fontWeight="medium" mb={1}>SLSQP restarts</Text>
+                              <NumberInput
+                                value={weightSpaceParameters.step_b_slsqp_restarts}
+                                min={1}
+                                max={5000}
+                                step={1}
+                                isDisabled={runningStep !== null || !useNonLinearModel}
+                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, step_b_slsqp_restarts: Math.floor(n) }))}
+                              >
+                                <NumberInputField />
+                              </NumberInput>
+                            </Box>
+                            <Box>
+                              <Text fontWeight="medium" mb={1}>SLSQP max iterations</Text>
+                              <NumberInput
+                                value={weightSpaceParameters.step_b_slsqp_maxiter}
+                                min={1}
+                                max={10000}
+                                step={10}
+                                isDisabled={runningStep !== null || !useNonLinearModel}
+                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, step_b_slsqp_maxiter: Math.floor(n) }))}
+                              >
+                                <NumberInputField />
+                              </NumberInput>
+                            </Box>
+                            <Box>
+                              <Text fontWeight="medium" mb={1}>SLSQP f-tolerance</Text>
+                              <NumberInput
+                                value={weightSpaceParameters.step_b_slsqp_ftol}
+                                min={0}
+                                max={1}
+                                step={0.0000000001}
+                                precision={12}
+                                isDisabled={runningStep !== null || !useNonLinearModel}
+                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, step_b_slsqp_ftol: n }))}
+                              >
+                                <NumberInputField />
+                              </NumberInput>
+                            </Box>
+                            <Box>
+                              <Text fontWeight="medium" mb={1}>Feasibility tolerance</Text>
+                              <NumberInput
+                                value={weightSpaceParameters.feasibility_tol}
+                                min={0}
+                                max={1}
+                                step={0.001}
+                                precision={6}
+                                isDisabled={runningStep !== null}
+                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, feasibility_tol: n }))}
+                              >
+                                <NumberInputField />
+                              </NumberInput>
+                            </Box>
+                            <Box>
+                              <Text fontWeight="medium" mb={1}>Output decimals</Text>
+                              <NumberInput
+                                value={weightSpaceParameters.output_weight_decimals}
+                                min={0}
+                                max={10}
+                                step={1}
+                                isDisabled={runningStep !== null}
+                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, output_weight_decimals: Math.floor(n) }))}
+                              >
+                                <NumberInputField />
+                              </NumberInput>
+                            </Box>
+                            <Box>
+                              <Text fontWeight="medium" mb={1}>Boundary band tolerance</Text>
+                              <NumberInput
+                                value={weightSpaceParameters.boundary_band_tol}
+                                min={0}
+                                max={1}
+                                step={0.00001}
+                                precision={8}
+                                isDisabled={runningStep !== null || !useNonLinearModel}
+                                onChange={(_, n) => Number.isFinite(n) && setWeightSpaceParameters((prev) => ({ ...prev, boundary_band_tol: n }))}
+                              >
+                                <NumberInputField />
+                              </NumberInput>
+                            </Box>
+                          </VStack>
+                        </Box>
+                      </SimpleGrid>
                       <Box>
-                        <Text fontWeight="medium" mb={1}>Phase 1 method (compute z*)</Text>
-                        <Select
-                          value={phase1Method}
-                          onChange={(e) => setPhase1Method(e.target.value)}
-                          isDisabled={runningStep !== null || !useNonLinearModel}
-                        >
-                          {PHASE1_METHOD_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                          ))}
-                        </Select>
-                        <Text fontSize="sm" color="gray.600" mt={1}>
-                          Select how Phase 1 computes the minimum violation bound before Phase 2 sampling starts.
-                        </Text>
-                      </Box>
-                      <Box>
-                        <Text fontWeight="medium" mb={1}>Weight space method</Text>
-                        <Select
-                          value={weightSamplingMethod}
-                          onChange={(e) => setWeightSamplingMethod(e.target.value)}
-                          isDisabled={runningStep !== null || !useNonLinearModel}
-                        >
-                          {WEIGHT_SAMPLING_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                          ))}
-                        </Select>
-                        <Text fontSize="sm" color="gray.600" mt={1}>
-                          Applies only to the non-linear model. The linear model still returns the single Phase 1 optimum.
-                        </Text>
-                      </Box>
-                      <Box>
-                        <Text fontWeight="medium" mb={1}>Phase 3 tolerance LIM (%)</Text>
+                        <Text fontWeight="medium" mb={1}>Boundary upper band LIM (%)</Text>
                         <NumberInput
                           value={phase3TolerancePct}
                           min={0}
@@ -1151,7 +1322,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                           </NumberInputStepper>
                         </NumberInput>
                         <Text fontSize="sm" color="gray.600" mt={1}>
-                          Phase 3 filtering uses z_cap = z_star + z_star * LIM. Default is 1%.
+                          Upper boundary cap uses z_cap = z_star + z_star * LIM. Default is 1%.
                         </Text>
                       </Box>
                       <Checkbox
@@ -1166,20 +1337,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                       </Text>
                     </VStack>
                   }
-                  statusInfo={
-                    weightsComputed ? (
-                      <HStack spacing={3}>
-                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Weights computed</Badge>
-                        <Badge colorScheme="purple" fontSize="sm" px={2} py={1}>{persistedPhase1MethodLabel}</Badge>
-                        <Badge colorScheme="blue" fontSize="sm" px={2} py={1}>{persistedWeightMethodLabel}</Badge>
-                        <Badge colorScheme="orange" fontSize="sm" px={2} py={1}>LIM {persistedPhase3TolerancePct}%</Badge>
-                        <Text fontSize="sm" color="gray.500">{formatTimestamp(weightsTimestamp)}</Text>
-                        <Button size="xs" colorScheme="orange" variant="outline" onClick={handleResetWeights}>
-                          Reset Weights
-                        </Button>
-                      </HStack>
-                    ) : null
-                  }
+                  statusInfo={null}
                 >
                   {weightsComputed && (
                     <VStack spacing={3} align="stretch">
@@ -1202,7 +1360,12 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                       </HStack>
 
                       <Text>Weight Space Plot</Text>
-                      <WeightSpacePlot data={weightSpaceData} />
+                      <WeightSpacePlot
+                        data={weightSpaceData}
+                        orderedCriteria={(criteria || [])
+                          .map((criterion) => criterion?.criterion_name)
+                          .filter((name) => typeof name === 'string' && name.length > 0)}
+                      />
 
                       <Text mt={4}>Declared vs Computed Ratios</Text>
                       {step1ConsistencyData.length > 0 ? (
@@ -1949,7 +2112,24 @@ function RankingHeatmap({ title, results }) {
 // ============================================================================
 // WEIGHT SPACE PLOT COMPONENT
 // ============================================================================
-function WeightSpacePlot({ data }) {
+function WeightSpacePlot({ data, orderedCriteria = [] }) {
+  const reorderCriteria = (detectedCriteria) => {
+    const canon = (value) => String(value || '').trim().toLowerCase()
+    const detectedByCanon = new Map(detectedCriteria.map((name) => [canon(name), name]))
+
+    // Match input-order criteria to detected keys using normalized names.
+    const preferred = []
+    orderedCriteria.forEach((name) => {
+      const match = detectedByCanon.get(canon(name))
+      if (match && !preferred.includes(match)) {
+        preferred.push(match)
+      }
+    })
+
+    const remainder = detectedCriteria.filter((name) => !preferred.includes(name))
+    return [...preferred, ...remainder]
+  }
+
   if (!data) {
     return (
       <Box bg="gray.100" h={300} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
@@ -1959,7 +2139,7 @@ function WeightSpacePlot({ data }) {
   }
 
   if (!Array.isArray(data) && typeof data === 'object' && Object.keys(data).length > 0) {
-    const criteria = Object.keys(data)
+    const criteria = reorderCriteria(Object.keys(data))
     const maxWeight = Math.max(...criteria.flatMap((criterion) => data[criterion]))
 
     return (
@@ -2023,7 +2203,14 @@ function WeightSpacePlot({ data }) {
     )
   }
 
-  const criteria = Object.keys(data[0] || {})
+  const allDetected = Array.from(
+    new Set(
+      data
+        .filter((row) => row && typeof row === 'object')
+        .flatMap((row) => Object.keys(row))
+    )
+  )
+  const criteria = reorderCriteria(allDetected)
   const criterionToValues = criteria.reduce((acc, criterion) => {
     acc[criterion] = data
       .map((solution) => (typeof solution?.[criterion] === 'number' ? solution[criterion] : Number(solution?.[criterion] || 0)))
@@ -2096,10 +2283,13 @@ function StepSection({
   onStop,
   isRunning,
   isDisabled,
+  controlMeta,
   showConsole,
   consoleOutput,
   onToggleConsole,
   parameters,
+  parametersTitle = 'Parameters',
+  parametersCollapsible = false,
   statusInfo,
   children,
 }) {
@@ -2131,7 +2321,16 @@ function StepSection({
       {/* Parameters Section */}
       {parameters && (
         <Box bg="gray.50" p={4} borderRadius="md">
-          {parameters}
+          {parametersCollapsible ? (
+            <Box as="details">
+              <Box as="summary" fontWeight="semibold" cursor="pointer" userSelect="none">
+                {parametersTitle}
+              </Box>
+              <Box mt={3}>{parameters}</Box>
+            </Box>
+          ) : (
+            parameters
+          )}
         </Box>
       )}
 
@@ -2154,6 +2353,7 @@ function StepSection({
         <Button variant="outline" onClick={onToggleConsole}>
           {showConsole ? 'Hide' : 'View'} Console Output
         </Button>
+        {controlMeta}
       </HStack>
 
       {/* Console Output Panel */}

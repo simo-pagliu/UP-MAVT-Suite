@@ -388,9 +388,9 @@ def compute_weights_endpoint(study_session_id):
         study_session_id,
         data.get('selected_session_ids', []),
         data.get('use_non_linear_model', True),
-        data.get('phase1_method', 'constraint_dominated_ea'),
-        data.get('weight_sampling_method', 'lhs_simplex'),
+
         data.get('phase3_tolerance_pct', 1.0),
+        data.get('weight_space_parameters', {}),
     )
     return jsonify({'task_id': task_id}), 202
 

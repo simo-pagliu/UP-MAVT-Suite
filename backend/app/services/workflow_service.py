@@ -36,9 +36,8 @@ class WorkflowService:
         study_session_id,
         selected_session_ids,
         use_non_linear_model=True,
-        phase1_method='constraint_dominated_ea',
-        weight_sampling_method='lhs_simplex',
         phase3_tolerance_pct=1.0,
+        weight_space_parameters=None,
     ):
         """Enqueue a background task to compute weights for the selected sessions.
 
@@ -51,12 +50,9 @@ class WorkflowService:
                 sessions to include.
             use_non_linear_model (bool): Whether to use the non-linear
                 weight model for constraint violation.
-            phase1_method (str): Phase 1 method used to compute the
-                minimum violation bound.
-            weight_sampling_method (str): Phase 2 candidate generation method
-                used by the worker.
             phase3_tolerance_pct (float): Phase 3 filtering tolerance percentage
                 LIM used in z_cap = z_star + z_star*LIM.
+            weight_space_parameters (dict): Optional runtime parameter overrides.
 
         Returns:
             str: The ``_id`` of the newly created task as a hex string.
@@ -78,9 +74,8 @@ class WorkflowService:
                 'study_session_id': study_session_id,
                 'selected_session_ids': selected_session_ids,
                 'use_non_linear_model': bool(use_non_linear_model),
-                'phase1_method': phase1_method,
-                'weight_sampling_method': weight_sampling_method,
                 'phase3_tolerance_pct': float(phase3_tolerance_pct),
+                'weight_space_parameters': weight_space_parameters or {},
             },
             'console_output': '',
             'created_at': datetime.now(timezone.utc),
@@ -319,10 +314,11 @@ class WorkflowService:
                 'computed': True,
                 'timestamp': ts.isoformat() if ts else None,
                 'session_count': len(ws) if isinstance(ws, dict) else 0,
-                'phase1_method': computed_weights.get('phase1_method', 'constraint_dominated_ea'),
-                'method': computed_weights.get('method', 'lhs_simplex'),
+                'phase1_method': computed_weights.get('phase1_method', 'differential_evolution'),
+                'method': computed_weights.get('method', 'hit_and_run'),
                 'use_non_linear_model': computed_weights.get('use_non_linear_model', True),
                 'phase3_tolerance_pct': computed_weights.get('phase3_tolerance_pct', 1.0),
+                'weight_space_parameters': computed_weights.get('weight_space_parameters', {}),
             }
         steps_status = {}
         for step_num in [2, 3, 4, 5, 6]:
@@ -372,10 +368,11 @@ class WorkflowService:
             raise NotFoundError('Weight space not found for this session')
         return {
             'weight_space': data,
-            'phase1_method': cw.get('phase1_method', 'constraint_dominated_ea'),
-            'method': cw.get('method', 'lhs_simplex'),
+            'phase1_method': cw.get('phase1_method', 'differential_evolution'),
+            'method': cw.get('method', 'hit_and_run'),
             'use_non_linear_model': cw.get('use_non_linear_model', True),
             'phase3_tolerance_pct': cw.get('phase3_tolerance_pct', 1.0),
+            'weight_space_parameters': cw.get('weight_space_parameters', {}),
         }
 
     def get_step_results(self, study_session_id, step_number):
@@ -412,11 +409,94 @@ class WorkflowService:
                     agg_data['timestamp'] = agg_data['timestamp'].isoformat()
         return step_data
 
+    @staticmethod
+    def _normalize_weight_export_rows(raw_rows):
+        rows = []
+        if not isinstance(raw_rows, list):
+            return rows
+        for row in raw_rows:
+            if not isinstance(row, dict):
+                continue
+            weights = row.get('weights') if isinstance(row.get('weights'), dict) else row
+            if not isinstance(weights, dict) or not weights:
+                continue
+            error = row.get('error', '') if isinstance(row.get('weights'), dict) else ''
+            rows.append({'weights': weights, 'error': error})
+        return rows
+
+    @staticmethod
+    def _legacy_weight_export_rows(cw, session_id):
+        rows = []
+
+        ws = cw.get('weight_solutions', {})
+        if isinstance(ws, dict) and session_id in ws:
+            rows.extend(WorkflowService._normalize_weight_export_rows(ws.get(session_id, [])))
+        if rows:
+            return rows
+
+        weight_spaces = cw.get('weight_spaces', {})
+        if isinstance(weight_spaces, dict) and session_id in weight_spaces:
+            space_data = weight_spaces[session_id]
+            # Keep stored key order for legacy dict-of-lists structures.
+            criteria_names = list(space_data.keys())
+            if criteria_names:
+                count = len(space_data[criteria_names[0]]) if isinstance(space_data[criteria_names[0]], list) else 0
+                for idx in range(count):
+                    weights = {
+                        criterion: space_data.get(criterion, [])[idx]
+                        for criterion in criteria_names
+                        if idx < len(space_data.get(criterion, []))
+                    }
+                    if weights:
+                        rows.append({'weights': weights, 'error': ''})
+        return rows
+
+    @classmethod
+    def _get_weight_export_rows(cls, cw, session_id):
+        pre_threshold = cw.get('pre_threshold_weight_solutions', {})
+        if isinstance(pre_threshold, dict) and session_id in pre_threshold:
+            rows = cls._normalize_weight_export_rows(pre_threshold.get(session_id, []))
+            if rows:
+                return rows
+        return cls._legacy_weight_export_rows(cw, session_id)
+
+    def _session_criteria_order(self, session_id):
+        """Return criterion names in input-defined order for one session."""
+        session_doc = self._sessions.find_by_id(session_id)
+        criteria = self._session_svc.resolve_session_criteria(session_doc)
+        if not isinstance(criteria, list):
+            return []
+        names = []
+        for criterion in criteria:
+            if isinstance(criterion, dict):
+                name = criterion.get('criterion_name')
+                if isinstance(name, str) and name and name not in names:
+                    names.append(name)
+        return names
+
+    @staticmethod
+    def _apply_preferred_order(detected_names, preferred_names):
+        """Order detected names by preferred order, then append remaining names."""
+        preferred = [name for name in preferred_names if name in detected_names]
+        remainder = [name for name in detected_names if name not in preferred]
+        return [*preferred, *remainder]
+
+    @staticmethod
+    def _format_export_number(value, decimals):
+        if value == '' or value is None:
+            return ''
+        try:
+            return round(float(value), decimals)
+        except (TypeError, ValueError):
+            return value
+
     def export_weight_solutions_csv(self, study_session_id):
         """Export all weight solutions for a study session as a CSV file.
 
         The CSV has a column for each criterion plus ``SESSION_ID`` and
-        ``SOLUTION_INDEX`` columns.
+        ``SOLUTION_INDEX`` columns. When available, it prefers the stored
+        pre-threshold decimal-filtered candidates and appends ``ERROR`` as the
+        last column.
 
         Args:
             study_session_id: The study session's ``_id``.
@@ -434,32 +514,41 @@ class WorkflowService:
         cw = study.get('computed_weights')
         if not cw:
             raise NotFoundError('Weights not computed yet')
-        ws = cw.get('weight_solutions', {})
-        if not isinstance(ws, dict) or not ws:
+        session_ids = set()
+        for key in ['pre_threshold_weight_solutions', 'weight_solutions', 'weight_spaces']:
+            data = cw.get(key, {})
+            if isinstance(data, dict):
+                session_ids.update(str(session_id) for session_id in data.keys())
+        if not session_ids:
             raise NotFoundError('No weight solutions found')
-        non_empty = [(sid, sols) for sid, sols in ws.items() if isinstance(sols, list) and sols]
+        non_empty = []
+        for session_id in sorted(session_ids):
+            rows = self._get_weight_export_rows(cw, session_id)
+            if rows:
+                non_empty.append((session_id, rows))
         if not non_empty:
             raise NotFoundError('No valid weight solutions found')
-        first_solution = next((sols[0] for _, sols in non_empty if isinstance(sols[0], dict) and sols[0]), None)
-        if not first_solution:
+        # Preserve first-seen criterion order from rows, then align with input order.
+        detected_names = []
+        for _, rows in non_empty:
+            for row in rows:
+                for criterion in row['weights'].keys():
+                    if criterion not in detected_names:
+                        detected_names.append(criterion)
+
+        preferred_names = self._session_criteria_order(non_empty[0][0])
+        criteria_names = self._apply_preferred_order(detected_names, preferred_names)
+        if not criteria_names:
             raise NotFoundError('No valid weight solutions found')
-        criteria_names = sorted(first_solution.keys())
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(['SESSION_ID', 'SOLUTION_INDEX', *criteria_names])
-        for sid, solutions in sorted(non_empty, key=lambda x: str(x[0])):
-            for index, solution in enumerate(solutions):
-                if not isinstance(solution, dict):
-                    continue
+        writer.writerow(['SESSION_ID', 'SOLUTION_INDEX', *criteria_names, 'ERROR'])
+        for sid, rows in non_empty:
+            for index, solution_row in enumerate(rows):
                 row = [sid, index]
                 for c in criteria_names:
-                    v = solution.get(c, '')
-                    if v != '' and v is not None:
-                        try:
-                            v = round(float(v), 3)
-                        except (TypeError, ValueError):
-                            pass
-                    row.append(v)
+                    row.append(self._format_export_number(solution_row['weights'].get(c, ''), 3))
+                row.append(self._format_export_number(solution_row.get('error', ''), 6))
                 writer.writerow(row)
         filename = f'weight_solutions_{study.get("code", study_session_id)}.csv'
         return output.getvalue().encode(), filename, 'text/csv'
@@ -487,42 +576,27 @@ class WorkflowService:
         cw = study.get('computed_weights')
         if not cw:
             raise NotFoundError('Weights not computed yet')
-        ws = cw.get('weight_solutions', {})
-        solutions = []
-        if isinstance(ws, dict) and session_id in ws:
-            solutions = ws.get(session_id, [])
-        if not solutions:
-            weight_spaces = cw.get('weight_spaces', {})
-            if isinstance(weight_spaces, dict) and session_id in weight_spaces:
-                space_data = weight_spaces[session_id]
-                if isinstance(space_data, dict) and space_data:
-                    criteria_names = sorted(space_data.keys())
-                    if criteria_names:
-                        num_solutions = len(space_data[criteria_names[0]]) if isinstance(space_data[criteria_names[0]], list) else 0
-                        for idx in range(num_solutions):
-                            sol = {c: space_data.get(c, [])[idx] for c in criteria_names if idx < len(space_data.get(c, []))}
-                            if sol:
-                                solutions.append(sol)
-        if not solutions:
+        solution_rows = self._get_weight_export_rows(cw, session_id)
+        if not solution_rows:
             raise NotFoundError('No weight solutions found for this session')
-        all_criteria = sorted({k for sol in solutions if isinstance(sol, dict) for k in sol.keys()})
+        detected_names = []
+        for row in solution_rows:
+            for criterion in row['weights'].keys():
+                if criterion not in detected_names:
+                    detected_names.append(criterion)
+
+        preferred_names = self._session_criteria_order(session_id)
+        all_criteria = self._apply_preferred_order(detected_names, preferred_names)
         if not all_criteria:
             raise NotFoundError('No criteria found in weight solutions')
         output = io.StringIO()
         writer = csv.writer(output)
-        writer.writerow(['SOLUTION_INDEX', *all_criteria])
-        for index, sol in enumerate(solutions):
-            if not isinstance(sol, dict):
-                continue
+        writer.writerow(['SOLUTION_INDEX', *all_criteria, 'ERROR'])
+        for index, solution_row in enumerate(solution_rows):
             row = [index]
             for c in all_criteria:
-                v = sol.get(c, '')
-                if v != '' and v is not None:
-                    try:
-                        v = round(float(v), 3)
-                    except (TypeError, ValueError):
-                        pass
-                row.append(v)
+                row.append(self._format_export_number(solution_row['weights'].get(c, ''), 3))
+            row.append(self._format_export_number(solution_row.get('error', ''), 6))
             writer.writerow(row)
         session_doc = self._sessions.find_by_id(session_id)
         session_name = session_doc.get('name') if isinstance(session_doc, dict) else session_id
