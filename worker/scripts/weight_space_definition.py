@@ -128,7 +128,7 @@ def build_constraint_structure(comparisons, value_functions, criteria_order=None
 # This is called "z" - the worst-case constraint violation.
 # ============================================================================
 
-def compute_violation(weights, constraint_data, use_non_linear_model=True, eps=None):
+def compute_violation(weights, constraint_data, use_non_linear_model=True):
     """
     Compute max absolute constraint violation for a given weight vector.
     
@@ -141,16 +141,12 @@ def compute_violation(weights, constraint_data, use_non_linear_model=True, eps=N
     use_non_linear_model : bool
         If True: use 1/vf - w_adj/w_ref formula
         If False: use (1/vf)*w_ref - w_adj formula
-    eps : float, optional
-        Small value for numerical stability (defaults to module EPS)
     
     Returns
     -------
     float
         Maximum absolute violation across all constraints for these weights
     """
-    if eps is None:
-        eps = EPS
     violations = []
 
     for comp in constraint_data['comparisons']:
@@ -166,11 +162,11 @@ def compute_violation(weights, constraint_data, use_non_linear_model=True, eps=N
         w_ref = weights[ref_idx]
         w_adj = weights[adj_idx]
         vf_adj = constraint_data['value_functions'][adj_crit]
-        vf_adj_val = max(vf_adj(comp_value), eps)
+        vf_adj_val = max(vf_adj(comp_value), EPS)
 
         # Compute residual
         if use_non_linear_model:
-            residual = 1.0 / vf_adj_val - (w_adj + eps) / (w_ref + eps)
+            residual = 1.0 / vf_adj_val - (w_adj + EPS) / (w_ref + EPS)
         else:
             residual = 1.0 / vf_adj_val * w_ref - w_adj
 
@@ -200,7 +196,6 @@ def step_a_minimize_max_violation(
     num_criteria,
     use_non_linear_model=True,
     print_fn=None,
-    eps=None,
 ):
     """
     Use Differential Evolution to find the weight vector with minimum max violation.
@@ -222,7 +217,7 @@ def step_a_minimize_max_violation(
     def objective(w):
         """Return max violation for weight vector w."""
         w_simplex = normalize_weights(w)
-        return compute_violation(w_simplex, constraint_data, use_non_linear_model, eps=eps)
+        return compute_violation(w_simplex, constraint_data, use_non_linear_model)
 
     # Bounds: each weight in (0, 1)
     bounds = [(0.0, 1.0)] * num_criteria
@@ -245,7 +240,7 @@ def step_a_minimize_max_violation(
 
 
 # ============================================================================
-# STEP B: Sample feasible weight vectors (minimizing constraint violation)
+# STEP B: Sample diverse weight vectors near the boundary
 # ============================================================================
 
 def step_b_sample_boundary_candidates(
@@ -255,61 +250,32 @@ def step_b_sample_boundary_candidates(
     anchor_weights,
     use_non_linear_model=True,
     print_fn=None,
-    step_b_samples=None,
-    step_b_slsqp_restarts=None,
-    step_b_slsqp_maxiter=None,
-    step_b_slsqp_ftol=None,
-    rng_seed=None,
-    eps=None,
 ):
     """
-    Use SLSQP multi-start to collect feasible weight vectors (violation <= z_cap).
-
-    The objective minimizes constraint violation, so SLSQP drives solutions
-    toward the interior of the feasible region (low violation), not toward the
-    boundary. Boundary proximity is enforced in Step C by filtering to the
-    boundary band [z_star - BOUNDARY_BAND_TOL, z_cap].
-
+    Use SLSQP multi-start to find diverse weight vectors with violation <= z_cap.
+    
     Strategy:
-    - Try up to STEP_B_SLSQP_RESTARTS starting points
-    - Stop early once STEP_B_SAMPLES feasible solutions are found
-    - For each starting point, use SLSQP to minimize violation subject to
-      the feasibility constraint (violation <= z_cap)
+    - Try STEP_B_SLSQP_RESTARTS random starting points
+    - For each starting point, use SLSQP to find a feasible solution
     - Accept solutions where max violation <= z_cap
-
+    
     Returns
     -------
     list[np.ndarray]
-        List of candidate weight vectors (normalized), all feasible but
-        generally interior points (not necessarily on the boundary).
+        List of candidate weight vectors (normalized)
     """
     if print_fn is None:
         print_fn = print
 
-    # Apply parameter overrides or use module-level defaults
-    _step_b_samples = STEP_B_SAMPLES if step_b_samples is None else step_b_samples
-    _step_b_slsqp_restarts = STEP_B_SLSQP_RESTARTS if step_b_slsqp_restarts is None else step_b_slsqp_restarts
-    _step_b_slsqp_maxiter = STEP_B_SLSQP_MAXITER if step_b_slsqp_maxiter is None else step_b_slsqp_maxiter
-    _step_b_slsqp_ftol = STEP_B_SLSQP_FTOL if step_b_slsqp_ftol is None else step_b_slsqp_ftol
-    _rng_seed = RNG_SEED if rng_seed is None else rng_seed
-
-    # Effective number of candidates we can aim for given the restart budget.
-    effective_samples = min(_step_b_samples, _step_b_slsqp_restarts)
-    print_fn(f"  Sampling up to {effective_samples} candidates using SLSQP multi-start...")
+    print_fn(f"  Sampling {STEP_B_SAMPLES} candidates using SLSQP multi-start...")
     print_fn(f"  Target: max violation <= z_cap = {z_cap:.6f}")
 
-    rng = np.random.RandomState(_rng_seed)
+    rng = np.random.RandomState(RNG_SEED)
     candidates = []
-
-    # Anchor guidance (if available in the function signature).
-    try:
-        anchor_w = anchor_weights  # type: ignore[name-defined]
-    except NameError:
-        anchor_w = None
 
     def constraint_violation(w):
         """Constraint: max_violation <= z_cap"""
-        v = compute_violation(w, constraint_data, use_non_linear_model, eps=eps)
+        v = compute_violation(w, constraint_data, use_non_linear_model)
         return z_cap - v  # Must be >= 0 for feasibility
 
     def constraint_sum_to_one(w):
@@ -317,46 +283,14 @@ def step_b_sample_boundary_candidates(
         return np.sum(w) - 1.0
 
     def objective_smooth(w):
-        """Objective: minimize constraint violation (finds interior-feasible solutions).
+        """Objective: try to stay near the boundary (not too far from anchor)."""
+        v = compute_violation(w, constraint_data, use_non_linear_model)
+        return v  # Maximize proximity to z_cap boundary
 
-        NOTE: Because SLSQP minimizes this objective, returning `v` pushes solutions
-        toward low-violation interior points, NOT toward the z_cap boundary.
-        Boundary filtering is handled in Step C.
-
-        # --- Suggested modification to target the boundary instead ---
-        # To explicitly push solutions toward the boundary (violation close to z_cap),
-        # replace `return v` with one of the following:
-        #
-        #   Option 1: maximize violation (minimize its negative)
-        #       return -v
-        #
-        #   Option 2: penalize distance from boundary (minimize squared gap)
-        #       return (z_cap - v) ** 2
-        #
-        # Optionally, add an anchor-distance term for diversity:
-        #       return (z_cap - v) ** 2 + alpha * np.sum((w - anchor_w) ** 2)
-        # where `anchor_w` is the anchor weight vector and `alpha` is a small scalar.
-        """
-        v = compute_violation(w, constraint_data, use_non_linear_model, eps=eps)
-        return v  # Minimizes violation → solutions near interior, not boundary
-
-    # Multi-start: try many starting points, with an upper bound on restarts.
-    for restart in range(_step_b_slsqp_restarts):
-        # Stop early once we've collected the desired number of candidates.
-        if len(candidates) >= _step_b_samples:
-            break
-
-        # Starting point (simplex: positive weights summing to 1). If an anchor
-        # is provided, draw a jittered point near the anchor; otherwise, sample
-        # from a Dirichlet distribution.
-        if anchor_w is not None:
-            anchor_norm = normalize_weights(anchor_w)
-            # Mix the anchor with a random Dirichlet draw to obtain diversity.
-            random_dirichlet = rng.dirichlet(np.ones(num_criteria))
-            alpha = 0.8  # weight on the anchor; (1 - alpha) on the random draw
-            w0 = normalize_weights(alpha * anchor_norm + (1.0 - alpha) * random_dirichlet)
-        else:
-            w0 = rng.dirichlet(np.ones(num_criteria))
+    # Multi-astart: try many random strting points
+    for restart in range(STEP_B_SLSQP_RESTARTS):
+        # Random start (simplex: positive weights summing to 1)
+        w0 = rng.dirichlet(np.ones(num_criteria))
 
         # Enforce feasible boundary and simplex structure.
         constraints = [
@@ -364,17 +298,17 @@ def step_b_sample_boundary_candidates(
             {'type': 'eq', 'fun': constraint_sum_to_one},
         ]
 
-        # SLSQP: minimize violation → finds interior-feasible solutions
+        # SLSQP: minimize violation (push toward boundary, staying feasible)
         result = opt.minimize(
             objective_smooth,
             w0,
             method='SLSQP',
             bounds=[(0.0, 1.0)] * num_criteria,
             constraints=constraints,
-            options={'maxiter': _step_b_slsqp_maxiter, 'ftol': _step_b_slsqp_ftol},
+            options={'maxiter': STEP_B_SLSQP_MAXITER, 'ftol': STEP_B_SLSQP_FTOL},
         )
 
-        if result.success and compute_violation(result.x, constraint_data, use_non_linear_model, eps=eps) <= z_cap:
+        if result.success and compute_violation(result.x, constraint_data, use_non_linear_model) <= z_cap:
             w_normalized = normalize_weights(result.x)
             candidates.append(w_normalized)
 
@@ -394,9 +328,6 @@ def step_c_build_boundary_solutions(
     constraint_data,
     use_non_linear_model=True,
     print_fn=None,
-    output_weight_decimals=None,
-    boundary_band_tol=None,
-    eps=None,
 ):
     """
     Filter candidate weights to the boundary band, round, and deduplicate.
@@ -416,10 +347,7 @@ def step_c_build_boundary_solutions(
     if print_fn is None:
         print_fn = print
 
-    _output_weight_decimals = OUTPUT_WEIGHT_DECIMALS if output_weight_decimals is None else output_weight_decimals
-    _boundary_band_tol = BOUNDARY_BAND_TOL if boundary_band_tol is None else boundary_band_tol
-
-    lower_threshold = z_star - _boundary_band_tol
+    lower_threshold = z_star - BOUNDARY_BAND_TOL
     upper_threshold = z_cap
 
     print_fn(f"  Boundary band: [{lower_threshold:.6f}, {upper_threshold:.6f}]")
@@ -432,12 +360,12 @@ def step_c_build_boundary_solutions(
             continue
 
         # Step C boundary check happens on raw weights.
-        violation = compute_violation(w, constraint_data, use_non_linear_model, eps=eps)
+        violation = compute_violation(w, constraint_data, use_non_linear_model)
         if violation < lower_threshold or violation > upper_threshold:
             continue
 
-        # Round to _output_weight_decimals decimal places
-        w_rounded = np.round(w, _output_weight_decimals)
+        # Round to OUTPUT_WEIGHT_DECIMALS
+        w_rounded = np.round(w, OUTPUT_WEIGHT_DECIMALS)
 
         # Create solution dict
         solution = {crit: float(w_rounded[i]) for i, crit in enumerate(criteria)}
@@ -486,9 +414,7 @@ def compute_weights(
     step_c_lim_percent : float
         Upper band margin as percentage of z* (default 1%)
     parameter_overrides : dict, optional
-        Runtime parameter overrides. Supported keys: rng_seed, eps,
-        step_b_samples, step_b_slsqp_restarts, step_b_slsqp_maxiter,
-        step_b_slsqp_ftol, output_weight_decimals, boundary_band_tol.
+        Runtime parameter overrides (ignored in simplified version)
     return_metadata : bool
         If True, return dict with metadata; else return solutions list
     
@@ -499,17 +425,6 @@ def compute_weights(
     """
     if print_fn is None:
         print_fn = print
-
-    # Apply parameter overrides with module-level defaults as fallback
-    overrides = parameter_overrides or {}
-    _rng_seed = overrides.get('rng_seed', RNG_SEED)
-    _eps = overrides.get('eps', EPS)
-    _step_b_samples = overrides.get('step_b_samples', STEP_B_SAMPLES)
-    _step_b_slsqp_restarts = overrides.get('step_b_slsqp_restarts', STEP_B_SLSQP_RESTARTS)
-    _step_b_slsqp_maxiter = overrides.get('step_b_slsqp_maxiter', STEP_B_SLSQP_MAXITER)
-    _step_b_slsqp_ftol = overrides.get('step_b_slsqp_ftol', STEP_B_SLSQP_FTOL)
-    _output_weight_decimals = overrides.get('output_weight_decimals', OUTPUT_WEIGHT_DECIMALS)
-    _boundary_band_tol = overrides.get('boundary_band_tol', BOUNDARY_BAND_TOL)
 
     # Validate inputs
     if not comparisons:
@@ -539,7 +454,7 @@ def compute_weights(
     print_fn(f"Model: {'non-linear' if use_non_linear_model else 'linear'}")
     print_fn(f"Step A: Differential Evolution (minimize max violation)")
     print_fn(f"Step B: SLSQP multi-start (sample boundary candidates)")
-    print_fn(f"Step C: Round to {_output_weight_decimals} decimals, deduplicate")
+    print_fn(f"Step C: Round to {OUTPUT_WEIGHT_DECIMALS} decimals, deduplicate")
     print_fn(f"Criteria: {num_criteria}")
     print_fn(f"Comparisons: {len(comparisons)}")
 
@@ -555,7 +470,6 @@ def compute_weights(
         num_criteria,
         use_non_linear_model=use_non_linear_model,
         print_fn=print_fn,
-        eps=_eps,
     )
 
     print_fn(f"\nResult:")
@@ -580,12 +494,6 @@ def compute_weights(
         anchor_weights=z_star_weights,
         use_non_linear_model=use_non_linear_model,
         print_fn=print_fn,
-        step_b_samples=_step_b_samples,
-        step_b_slsqp_restarts=_step_b_slsqp_restarts,
-        step_b_slsqp_maxiter=_step_b_slsqp_maxiter,
-        step_b_slsqp_ftol=_step_b_slsqp_ftol,
-        rng_seed=_rng_seed,
-        eps=_eps,
     )
 
     # Always include the Step A solution
@@ -606,9 +514,6 @@ def compute_weights(
         constraint_data=constraint_data,
         use_non_linear_model=use_non_linear_model,
         print_fn=print_fn,
-        output_weight_decimals=_output_weight_decimals,
-        boundary_band_tol=_boundary_band_tol,
-        eps=_eps,
     )
 
     # Keep linear mode deterministic: return one representative solution
@@ -616,7 +521,7 @@ def compute_weights(
     if not use_non_linear_model and solutions:
         def _solution_score(solution):
             weights = np.array([solution[c] for c in criteria_for_weights], dtype=float)
-            violation = compute_violation(weights, constraint_data, use_non_linear_model=False, eps=_eps)
+            violation = compute_violation(weights, constraint_data, use_non_linear_model=False)
             dist_to_anchor = float(np.linalg.norm(weights - z_star_weights))
             return (abs(violation - z_star), dist_to_anchor)
 
@@ -634,43 +539,13 @@ def compute_weights(
     print_fn("Weight space computation finished.")
     print_fn("=" * 70)
 
-    # Collect all actually-applied parameter values for the caller to inspect.
-    applied_parameters = {
-        'rng_seed': _rng_seed,
-        'eps': _eps,
-        'step_b_samples': _step_b_samples,
-        'step_b_slsqp_restarts': _step_b_slsqp_restarts,
-        'step_b_slsqp_maxiter': _step_b_slsqp_maxiter,
-        'step_b_slsqp_ftol': _step_b_slsqp_ftol,
-        'output_weight_decimals': _output_weight_decimals,
-        'boundary_band_tol': _boundary_band_tol,
-    }
-
     if return_metadata:
-        # Compute per-solution violation/error for export
-        pre_threshold_decimal_solutions = []
-        for sol in solutions:
-            weights_array = np.array(
-                [sol[c] for c in criteria_for_weights],
-                dtype=float,
-            )
-            violation = compute_violation(
-                weights_array,
-                constraint_data,
-                use_non_linear_model=use_non_linear_model,
-                eps=_eps,
-            )
-            pre_threshold_decimal_solutions.append(
-                {
-                    'weights': sol,
-                    'error': float(violation),
-                }
-            )
-
         return {
             'accepted_solutions': solutions,
-            'pre_threshold_decimal_solutions': pre_threshold_decimal_solutions,
-            'runtime_parameters': applied_parameters,
+            'pre_threshold_decimal_solutions': [
+                {'weights': sol, 'error': z_star} for sol in solutions
+            ],
+            'runtime_parameters': {},
         }
 
     return solutions
