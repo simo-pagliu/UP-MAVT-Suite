@@ -347,9 +347,14 @@ def step_b_sample_boundary_candidates(
             break
 
         # Starting point (simplex: positive weights summing to 1). If an anchor
-        # is provided, use it; otherwise, sample from a Dirichlet distribution.
+        # is provided, draw a jittered point near the anchor; otherwise, sample
+        # from a Dirichlet distribution.
         if anchor_w is not None:
-            w0 = normalize_weights(anchor_w)
+            anchor_norm = normalize_weights(anchor_w)
+            # Mix the anchor with a random Dirichlet draw to obtain diversity.
+            random_dirichlet = rng.dirichlet(np.ones(num_criteria))
+            alpha = 0.8  # weight on the anchor; (1 - alpha) on the random draw
+            w0 = normalize_weights(alpha * anchor_norm + (1.0 - alpha) * random_dirichlet)
         else:
             w0 = rng.dirichlet(np.ones(num_criteria))
 
@@ -653,6 +658,7 @@ def compute_weights(
                 weights_array,
                 constraint_data,
                 use_non_linear_model=use_non_linear_model,
+                eps=_eps,
             )
             pre_threshold_decimal_solutions.append(
                 {
@@ -661,27 +667,9 @@ def compute_weights(
                 }
             )
 
-        # Capture the key runtime parameters actually used in this run
-        runtime_parameters = {
-            'rng_seed': RNG_SEED,
-            'eps': EPS,
-            'feasibility_tol': FEASIBILITY_TOL,
-            'step_b_samples': STEP_B_SAMPLES,
-            'step_b_slsqp_restarts': STEP_B_SLSQP_RESTARTS,
-            'step_b_slsqp_maxiter': STEP_B_SLSQP_MAXITER,
-            'step_b_slsqp_ftol': STEP_B_SLSQP_FTOL,
-            'output_weight_decimals': OUTPUT_WEIGHT_DECIMALS,
-            'step_a_de_popszie': STEP_A_DE_POPSIZE,
-            'z_star': float(z_star),
-            'z_cap': float(z_cap),
-            'use_non_linear_model': bool(use_non_linear_model),
-        }
-
         return {
             'accepted_solutions': solutions,
-            'pre_threshold_decimal_solutions': [
-                {'weights': sol, 'error': z_star} for sol in solutions
-            ],
+            'pre_threshold_decimal_solutions': pre_threshold_decimal_solutions,
             'runtime_parameters': applied_parameters,
         }
 
