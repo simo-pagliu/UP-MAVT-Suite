@@ -245,7 +245,7 @@ def step_a_minimize_max_violation(
 
 
 # ============================================================================
-# STEP B: Sample diverse weight vectors near the boundary
+# STEP B: Sample feasible weight vectors (minimizing constraint violation)
 # ============================================================================
 
 def step_b_sample_boundary_candidates(
@@ -263,18 +263,25 @@ def step_b_sample_boundary_candidates(
     eps=None,
 ):
     """
-    Use SLSQP multi-start to find diverse weight vectors with violation <= z_cap.
-    
+    Use SLSQP multi-start to collect feasible weight vectors (violation <= z_cap).
+
+    The objective minimizes constraint violation, so SLSQP drives solutions
+    toward the interior of the feasible region (low violation), not toward the
+    boundary. Boundary proximity is enforced in Step C by filtering to the
+    boundary band [z_star - BOUNDARY_BAND_TOL, z_cap].
+
     Strategy:
     - Try up to STEP_B_SLSQP_RESTARTS starting points
     - Stop early once STEP_B_SAMPLES feasible solutions are found
-    - For each starting point, use SLSQP to find a feasible solution
+    - For each starting point, use SLSQP to minimize violation subject to
+      the feasibility constraint (violation <= z_cap)
     - Accept solutions where max violation <= z_cap
-    
+
     Returns
     -------
     list[np.ndarray]
-        List of candidate weight vectors (normalized)
+        List of candidate weight vectors (normalized), all feasible but
+        generally interior points (not necessarily on the boundary).
     """
     if print_fn is None:
         print_fn = print
@@ -310,9 +317,28 @@ def step_b_sample_boundary_candidates(
         return np.sum(w) - 1.0
 
     def objective_smooth(w):
-        """Objective: try to stay near the boundary (not too far from anchor)."""
+        """Objective: minimize constraint violation (finds interior-feasible solutions).
+
+        NOTE: Because SLSQP minimizes this objective, returning `v` pushes solutions
+        toward low-violation interior points, NOT toward the z_cap boundary.
+        Boundary filtering is handled in Step C.
+
+        # --- Suggested modification to target the boundary instead ---
+        # To explicitly push solutions toward the boundary (violation close to z_cap),
+        # replace `return v` with one of the following:
+        #
+        #   Option 1: maximize violation (minimize its negative)
+        #       return -v
+        #
+        #   Option 2: penalize distance from boundary (minimize squared gap)
+        #       return (z_cap - v) ** 2
+        #
+        # Optionally, add an anchor-distance term for diversity:
+        #       return (z_cap - v) ** 2 + alpha * np.sum((w - anchor_w) ** 2)
+        # where `anchor_w` is the anchor weight vector and `alpha` is a small scalar.
+        """
         v = compute_violation(w, constraint_data, use_non_linear_model, eps=eps)
-        return v  # Maximize proximity to z_cap boundary
+        return v  # Minimizes violation → solutions near interior, not boundary
 
     # Multi-start: try many starting points, with an upper bound on restarts.
     for restart in range(_step_b_slsqp_restarts):
@@ -333,7 +359,7 @@ def step_b_sample_boundary_candidates(
             {'type': 'eq', 'fun': constraint_sum_to_one},
         ]
 
-        # SLSQP: minimize violation (push toward boundary, staying feasible)
+        # SLSQP: minimize violation → finds interior-feasible solutions
         result = opt.minimize(
             objective_smooth,
             w0,
