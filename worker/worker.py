@@ -110,9 +110,6 @@ def handle_compute_weights(task):
     try:
         logger.log("=" * 60)
         logger.log(f"Model: {'non-linear' if use_non_linear_model else 'linear'}")
-        logger.log("Step A solver: Differential Evolution")
-        logger.log("Step B sampler: SLSQP multi-start")
-        logger.log(f"Phase 3 tolerance LIM (%): {phase3_tolerance_pct}")
         logger.log(f"Weight space parameters: {weight_space_parameters}")
         logger.log("COMPUTE WEIGHTS")
         logger.log("=" * 60)

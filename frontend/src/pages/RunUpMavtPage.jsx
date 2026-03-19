@@ -100,6 +100,17 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [useNonLinearModel, setUseNonLinearModel] = useState(true)
   const [runPrefsHydrated, setRunPrefsHydrated] = useState(false)
   const [phase3TolerancePct, setPhase3TolerancePct] = useState(1)
+  const [maxResults, setMaxResults] = useState(10)
+  const [maxRestarts, setMaxRestarts] = useState(300)
+  const [rngSeed, setRngSeed] = useState(426)
+  const [eps, setEps] = useState(0.001)
+  const [feasibilityTol, setFeasibilityTol] = useState(0.01)
+  const [slsqpMaxiter, setSlsqpMaxiter] = useState(500)
+  const [slsqpFtol, setSlsqpFtol] = useState(1e-10)
+  const [outputWeightDecimals, setOutputWeightDecimals] = useState(3)
+  const [dePopsize, setDePopsize] = useState(15)
+  const [deMaxiter, setDeMaxiter] = useState(1000)
+  const [deSeed, setDeSeed] = useState(426)
   // Step 2 results state
   const [step2Results, setStep2Results] = useState(null)
   const [step5Results, setStep5Results] = useState(null)
@@ -460,6 +471,19 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           selected_session_ids: selectedSessions,
           use_non_linear_model: useNonLinearModel,
           phase3_tolerance_pct: phase3TolerancePct,
+          weight_space_parameters: {
+            max_results: maxResults,
+            max_restarts: maxRestarts,
+            rng_seed: rngSeed,
+            eps,
+            feasibility_tol: feasibilityTol,
+            slsqp_maxiter: slsqpMaxiter,
+            slsqp_ftol: slsqpFtol,
+            output_weight_decimals: outputWeightDecimals,
+            de_popsize: dePopsize,
+            de_maxiter: deMaxiter,
+            de_seed: deSeed,
+          },
         }
       )
       const taskId = response.data.task_id
@@ -1132,7 +1156,288 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   parametersCollapsible
                   parametersTitle="Advanced"
                   parameters={
-                    <VStack spacing={2} align="stretch">
+                    <VStack spacing={3} align="stretch">
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>Target Valid Solutions</Text>
+                        <NumberInput
+                          value={maxResults}
+                          min={1}
+                          max={500}
+                          step={1}
+                          isDisabled={runningStep !== null}
+                          onChange={(_, valueAsNumber) => {
+                            if (Number.isFinite(valueAsNumber)) {
+                              const clamped = Math.max(1, Math.min(500, valueAsNumber))
+                              setMaxResults(clamped)
+                            }
+                          }}
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Maximum number of valid weight solutions to collect. Higher values might compromise web page responsiveness. Default is 10.
+                        </Text>
+                      </Box>
+
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>Maximum Restart Attempts</Text>
+                        <NumberInput
+                          value={maxRestarts}
+                          min={10}
+                          max={5000}
+                          step={10}
+                          isDisabled={runningStep !== null}
+                          onChange={(_, valueAsNumber) => {
+                            if (Number.isFinite(valueAsNumber)) {
+                              const clamped = Math.max(10, Math.min(5000, valueAsNumber))
+                              setMaxRestarts(clamped)
+                            }
+                          }}
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Maximum number of search attempts to find valid solutions. Increasing this will prolong the runtime. Default is 300.
+                        </Text>
+                      </Box>
+
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>RNG Seed</Text>
+                        <NumberInput
+                          value={rngSeed}
+                          min={0}
+                          max={1000000000}
+                          step={1}
+                          isDisabled={runningStep !== null}
+                          onChange={(_, valueAsNumber) => {
+                            if (Number.isFinite(valueAsNumber)) {
+                              setRngSeed(Math.max(0, Math.floor(valueAsNumber)))
+                            }
+                          }}
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Seed for randomized restarts in Step B. Default is 426.
+                        </Text>
+                      </Box>
+
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>EPS</Text>
+                        <NumberInput
+                          value={eps}
+                          min={1e-12}
+                          max={1}
+                          step={0.0001}
+                          precision={6}
+                          isDisabled={runningStep !== null}
+                          onChange={(_, valueAsNumber) => {
+                            if (Number.isFinite(valueAsNumber)) {
+                              setEps(Math.max(1e-12, valueAsNumber))
+                            }
+                          }}
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Numerical floor used in ratio calculations to avoid division by zero. Default is 0.001.
+                        </Text>
+                      </Box>
+
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>Feasibility Tolerance</Text>
+                        <NumberInput
+                          value={feasibilityTol}
+                          min={0}
+                          max={1}
+                          step={0.001}
+                          precision={6}
+                          isDisabled={runningStep !== null}
+                          onChange={(_, valueAsNumber) => {
+                            if (Number.isFinite(valueAsNumber)) {
+                              setFeasibilityTol(Math.max(0, valueAsNumber))
+                            }
+                          }}
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Stored as runtime tolerance metadata for feasibility checks. Default is 0.01.
+                        </Text>
+                      </Box>
+
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>SLSQP Max Iterations</Text>
+                        <NumberInput
+                          value={slsqpMaxiter}
+                          min={1}
+                          max={20000}
+                          step={50}
+                          isDisabled={runningStep !== null}
+                          onChange={(_, valueAsNumber) => {
+                            if (Number.isFinite(valueAsNumber)) {
+                              setSlsqpMaxiter(Math.max(1, Math.floor(valueAsNumber)))
+                            }
+                          }}
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Maximum SLSQP iterations per restart. Default is 500.
+                        </Text>
+                      </Box>
+
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>SLSQP Function Tolerance (ftol)</Text>
+                        <NumberInput
+                          value={slsqpFtol}
+                          min={1e-16}
+                          max={1e-2}
+                          step={1e-10}
+                          precision={12}
+                          isDisabled={runningStep !== null}
+                          onChange={(_, valueAsNumber) => {
+                            if (Number.isFinite(valueAsNumber)) {
+                              setSlsqpFtol(Math.max(1e-16, valueAsNumber))
+                            }
+                          }}
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Convergence tolerance for SLSQP objective value. Default is 1e-10.
+                        </Text>
+                      </Box>
+
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>Output Weight Decimals</Text>
+                        <NumberInput
+                          value={outputWeightDecimals}
+                          min={0}
+                          max={10}
+                          step={1}
+                          isDisabled={runningStep !== null}
+                          onChange={(_, valueAsNumber) => {
+                            if (Number.isFinite(valueAsNumber)) {
+                              const clamped = Math.max(0, Math.min(10, Math.floor(valueAsNumber)))
+                              setOutputWeightDecimals(clamped)
+                            }
+                          }}
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Decimal precision used for deduplication and final output. Default is 3.
+                        </Text>
+                      </Box>
+
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>DE Population Size</Text>
+                        <NumberInput
+                          value={dePopsize}
+                          min={1}
+                          max={200}
+                          step={1}
+                          isDisabled={runningStep !== null}
+                          onChange={(_, valueAsNumber) => {
+                            if (Number.isFinite(valueAsNumber)) {
+                              setDePopsize(Math.max(1, Math.floor(valueAsNumber)))
+                            }
+                          }}
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Differential Evolution population multiplier. Default is 15.
+                        </Text>
+                      </Box>
+
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>DE Max Iterations</Text>
+                        <NumberInput
+                          value={deMaxiter}
+                          min={1}
+                          max={20000}
+                          step={50}
+                          isDisabled={runningStep !== null}
+                          onChange={(_, valueAsNumber) => {
+                            if (Number.isFinite(valueAsNumber)) {
+                              setDeMaxiter(Math.max(1, Math.floor(valueAsNumber)))
+                            }
+                          }}
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Maximum Differential Evolution iterations in Step A. Default is 1000.
+                        </Text>
+                      </Box>
+
+                      <Box>
+                        <Text fontWeight="medium" mb={1}>DE Seed</Text>
+                        <NumberInput
+                          value={deSeed}
+                          min={0}
+                          max={1000000000}
+                          step={1}
+                          isDisabled={runningStep !== null}
+                          onChange={(_, valueAsNumber) => {
+                            if (Number.isFinite(valueAsNumber)) {
+                              setDeSeed(Math.max(0, Math.floor(valueAsNumber)))
+                            }
+                          }}
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                        <Text fontSize="sm" color="gray.600" mt={1}>
+                          Random seed for Differential Evolution in Step A. Default is 426.
+                        </Text>
+                      </Box>
+
                       <Box>
                         <Text fontWeight="medium" mb={1}>Boundary upper band LIM (%)</Text>
                         <NumberInput
@@ -1159,6 +1464,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                           Upper boundary cap uses z_cap = z_star + z_star * LIM. Default is 1%.
                         </Text>
                       </Box>
+
                       <Checkbox
                         isChecked={useNonLinearModel}
                         onChange={(e) => setUseNonLinearModel(e.target.checked)}
