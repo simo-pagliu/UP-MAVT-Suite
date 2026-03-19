@@ -103,7 +103,7 @@ function LoginPage({ onLogin, onDocumentation }) {
           <Heading size="lg" letterSpacing="wide">UP-MAVT Suite</Heading>
           <Text color="gray.700">
             This suite supports stakeholder elicitation and practitioner analysis using Qualitative Indicators,
-            Value Functions, and Weight Elicitation.
+            Quantitative Indicators, and Weight Elicitation.
           </Text>
           <Text color="gray.600" fontSize="sm">
             Use a session code to continue an existing session, or create a new case study as a practitioner.

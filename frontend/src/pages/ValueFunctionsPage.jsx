@@ -1086,7 +1086,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
     return (
       <Flex align="center" justify="center" minH="60vh">
         <Spinner size="lg" mr={3} />
-        <Text>Loading value functions...</Text>
+        <Text>Loading quantitative indicators...</Text>
       </Flex>
     )
   }
@@ -1113,9 +1113,9 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
         overflowY="auto"
       >
         <VStack spacing={4} align="stretch" mb={6}>
-          <Heading size="md">Value Functions</Heading>
+          <Heading size="md">Quantitative Indicators</Heading>
           <Text fontSize="sm" color="gray.600">
-            Define value functions for each criterion using either mid-value splitting or free edit (set per criterion in Input Definition).
+            Define quantitative indicators (value functions) for each criterion using either mid-value splitting or free edit (set per criterion in Input Definition).
           </Text>
         </VStack>
         <VStack spacing={3} align="stretch">
@@ -1185,8 +1185,8 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
               <VStack align="start" spacing={2} flex={1}>
                 <Text fontSize="sm" color="yellow.800" fontWeight="semibold">
                   {isBwtLockActive
-                    ? 'Value Functions are locked while weight elicitation is active.'
-                    : 'Value Functions are locked by the practitioner.'}
+                    ? 'Quantitative Indicators are locked while weight elicitation is active.'
+                    : 'Quantitative Indicators are locked by the practitioner.'}
                 </Text>
                 {isBwtLockActive ? (
                   <Button size="xs" variant="outline" onClick={() => onPageChange?.('pile')}>

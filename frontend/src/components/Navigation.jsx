@@ -16,7 +16,7 @@ function Navigation({
   const baseStakeholderPages = [
     { id: 'recap', label: 'Overview', requiresSession: true },
     { id: 'qualitative', label: 'Qualitative Indicators', requiresSession: true, featureKey: 'qi' },
-    { id: 'value', label: 'Value Functions', requiresSession: true, featureKey: 'vf' },
+    { id: 'value', label: 'Quantitative Indicators', requiresSession: true, featureKey: 'vf' },
     { id: 'pile', label: 'Weights', requiresSession: true, featureKey: 'bwt' },
   ]
 

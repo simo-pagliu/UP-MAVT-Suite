@@ -184,7 +184,7 @@ function AdminPage(props, ref) {
     sessions.forEach(session => {
       const steps = [
         { key: 'qualitative_indicators', label: 'Qualitative' },
-        { key: 'value_functions', label: 'Value Functions' },
+        { key: 'value_functions', label: 'Quantitative Indicators' },
         { key: 'bwt', label: 'Weights' },
       ]
 
@@ -224,7 +224,7 @@ function AdminPage(props, ref) {
   const calculateSessionProgress = (session) => {
     const steps = [
       { key: 'qualitative_indicators', label: 'Qualitative' },
-      { key: 'value_functions', label: 'Value Functions' },
+      { key: 'value_functions', label: 'Quantitative Indicators' },
       { key: 'bwt', label: 'Weights' },
     ]
 

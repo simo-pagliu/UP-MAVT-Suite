@@ -72,7 +72,7 @@ describe('Navigation – admin role', () => {
   it('shows no nav items for the admin role', () => {
     renderNavigation({ isLoggedIn: true, currentRole: 'admin' })
     expect(screen.queryByRole('button', { name: /qualitative/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /value functions/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /quantitative indicators/i })).not.toBeInTheDocument()
   })
 })
 
@@ -88,7 +88,7 @@ describe('Navigation – stakeholder role', () => {
       features: { qi: true, vf: false, bwt: false },
     })
     expect(screen.getByRole('button', { name: /qualitative indicators/i })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /value functions/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /quantitative indicators/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /weights/i })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /overview/i })).toBeInTheDocument()
   })
@@ -101,7 +101,7 @@ describe('Navigation – stakeholder role', () => {
       features: { qi: true, vf: true, bwt: true },
     })
     expect(screen.getByRole('button', { name: /qualitative indicators/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /value functions/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /quantitative indicators/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /weights/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /overview/i })).toBeInTheDocument()
   })

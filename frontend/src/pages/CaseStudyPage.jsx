@@ -226,7 +226,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
       })
       toast({
         title: 'Features updated',
-        description: `${featureName === 'qi' ? 'QI' : featureName === 'vf' ? 'Value Functions' : 'Weight elicitation'} ${newFeatures[featureName] ? 'enabled' : 'disabled'}`,
+        description: `${featureName === 'qi' ? 'QI' : featureName === 'vf' ? 'Quantitative Indicators' : 'Weight elicitation'} ${newFeatures[featureName] ? 'enabled' : 'disabled'}`,
         status: 'success',
         duration: 2000,
         isClosable: true,
@@ -508,7 +508,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
                 isDisabled={savingFeatures}
               >
                 <VStack align="start" spacing={0}>
-                  <Text fontWeight="medium">Value Functions</Text>
+                  <Text fontWeight="medium">Quantitative Indicators</Text>
                   <Text fontSize="xs" color="gray.600">Criteria with optional min/max</Text>
                 </VStack>
               </Checkbox>
@@ -588,7 +588,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
                           onClick={() => handleDownload(`/session/${session._id}/value-functions/export`, `value_functions_${session.name}.csv`)}
                           isDisabled={!session.progress.hasValueFunctions}
                         >
-                          Value Functions
+                          Quantitative Indicators
                         </MenuItem>
                         <MenuItem
                           onClick={() => handleDownload(`/session/${session._id}/export-input-data`, `input_data_${session.name}.csv`)}
