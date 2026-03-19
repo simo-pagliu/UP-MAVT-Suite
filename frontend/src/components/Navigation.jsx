@@ -1,4 +1,4 @@
-import { Box, Button, Heading, HStack, IconButton, Menu, MenuButton, MenuItem, MenuList, Spacer } from '@chakra-ui/react'
+import { Box, Button, Heading, HStack, IconButton, Image, Spacer } from '@chakra-ui/react'
 import { InfoIcon } from '@chakra-ui/icons'
 
 function Navigation({
@@ -9,7 +9,6 @@ function Navigation({
   sessionId,
   studySessionId,
   features = { qi: false, vf: false, bwt: false },
-  onLogin,
   onLogout,
   onDocumentation,
 }) {
@@ -37,9 +36,24 @@ function Navigation({
   const pages = currentRole === 'stakeholder' ? stakeholderPages : practitionerPages
 
   return (
-    <Box as="header" bg="blue.700" color="white" px={8} py={4} boxShadow="none">
+    <Box
+      as="header"
+      bg="#0f3155"
+      color="white"
+      px={{ base: 4, md: 8 }}
+      py={4}
+      boxShadow="sm"
+    >
       <HStack spacing={6} align="center" wrap="wrap">
-        <Heading size="md" letterSpacing="wide">UP-MAVT Suite</Heading>
+        <HStack spacing={3} align="center">
+          <Image
+            src="/psi-logo-placeholder.svg"
+            alt="PSI logo placeholder"
+            boxSize={{ base: '34px', md: '40px' }}
+            objectFit="contain"
+          />
+          <Heading size="md" letterSpacing="wide">UP-MAVT Suite</Heading>
+        </HStack>
         
         {isLoggedIn && currentRole !== 'admin' && (
           <>
@@ -99,19 +113,7 @@ function Navigation({
           >
             Logout
           </Button>
-        ) : (
-          <Button
-            size="sm"
-            variant="outline"
-            borderColor="whiteAlpha.700"
-            color="white"
-            _hover={{ bg: 'blue.600', borderColor: 'whiteAlpha.800' }}
-            _active={{ bg: 'blue.600', borderColor: 'whiteAlpha.800' }}
-            onClick={onLogin}
-          >
-            Login
-          </Button>
-        )}
+        ) : null}
       </HStack>
     </Box>
   )

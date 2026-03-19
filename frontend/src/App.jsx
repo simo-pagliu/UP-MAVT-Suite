@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Box, Container, VStack } from '@chakra-ui/react'
+import { Box } from '@chakra-ui/react'
 import axios from 'axios'
 import { API_URL } from './config'
 import Navigation from './components/Navigation'
@@ -190,23 +190,22 @@ function App() {
         sessionId={sessionId}
         studySessionId={studySessionId}
         features={features}
-        onLogin={() => handleLogout()} // Show login page by logging out
         onLogout={handleLogout}
         onDocumentation={handleDocumentation}
       />
-      <Container maxW="container.xl" py={8}>
-        <VStack spacing={8} align="stretch">
-          {/* Login Page - Landing page */}
-          {!isLoggedIn && <LoginPage onLogin={handleLogin} onDocumentation={handleDocumentation} />}
+      {/* Login Page - Landing page (full width, no boxed container) */}
+      {!isLoggedIn && <LoginPage onLogin={handleLogin} onDocumentation={handleDocumentation} />}
 
+      {isLoggedIn && (
+        <Box py={8} px={{ base: 4, md: 8 }}>
           {/* Admin Page */}
-          {isLoggedIn && currentRole === 'admin' && <AdminPage />}
+          {currentRole === 'admin' && <AdminPage />}
 
           {/* Documentation Page */}
-          {isLoggedIn && currentRole !== 'admin' && showDocumentation && <DocumentationPage />}
+          {currentRole !== 'admin' && showDocumentation && <DocumentationPage />}
 
           {/* Stakeholder Pages */}
-          {isLoggedIn && currentRole === 'stakeholder' && !showDocumentation && (
+          {currentRole === 'stakeholder' && !showDocumentation && (
             <>
               {currentPage === 'qualitative' && sessionId && features.qi && (
                 <QualitativeIndicatorsPage sessionId={sessionId} onPageChange={handlePageChange} />
@@ -224,7 +223,7 @@ function App() {
           )}
 
           {/* Practitioner Pages */}
-          {isLoggedIn && currentRole === 'practitioner' && !showDocumentation && (
+          {currentRole === 'practitioner' && !showDocumentation && (
             <>
               {currentPage === 'case-study' && (
                 <CaseStudyPage
@@ -242,8 +241,8 @@ function App() {
               )}
             </>
           )}
-        </VStack>
-      </Container>
+        </Box>
+      )}
     </Box>
   )
 }

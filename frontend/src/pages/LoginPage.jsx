@@ -1,4 +1,19 @@
-import { Box, Button, Divider, FormLabel, Heading, HStack, Input, Link, Text, VStack, useToast } from '@chakra-ui/react'
+import {
+  Box,
+  Button,
+  Divider,
+  FormLabel,
+  Grid,
+  GridItem,
+  Heading,
+  HStack,
+  Input,
+  Link,
+  SimpleGrid,
+  Text,
+  VStack,
+  useToast,
+} from '@chakra-ui/react'
 import axios from 'axios'
 import { useState } from 'react'
 import { API_URL } from '../config'
@@ -97,69 +112,114 @@ function LoginPage({ onLogin, onDocumentation }) {
   }
 
   return (
-    <Box minH="100vh" bg="white" borderWidth={1} borderRadius="lg" p={10}>
-      <VStack maxW="900px" mx="auto" align="stretch" spacing={8}>
-        <VStack align="stretch" spacing={3}>
-          <Heading size="lg" letterSpacing="wide">UP-MAVT Suite</Heading>
-          <Text color="gray.700">
-            This suite supports stakeholder elicitation and practitioner analysis using Qualitative Indicators,
-            Quantitative Indicators, and Weight Elicitation.
-          </Text>
-          <Text color="gray.600" fontSize="sm">
-            Use a session code to continue an existing session, or create a new case study as a practitioner.
-          </Text>
-        </VStack>
+    <Box minH={{ base: 'calc(100vh - 68px)', md: 'calc(100vh - 72px)' }} display="flex" flexDirection="column">
+      <Grid templateColumns={{ base: '1fr', lg: '1.2fr 1fr' }} flex="1">
+        <GridItem p={{ base: 6, md: 10 }} bg="white">
+          <VStack align="stretch" spacing={6}>
+            <VStack align="stretch" spacing={3}>
+              <Heading size="xl" lineHeight="1.2">
+                UP-MAVT Suite
+              </Heading>
+              <Text color="gray.700" fontSize="lg">
+                A complete solution for multi-criteria group decision analysis under uncertainty
+              </Text>
+            </VStack>
 
-        <Divider />
+            <SimpleGrid columns={1} spacing={4}>
+              <Box bg="blue.50" borderRadius="md" p={4} borderWidth={1} borderColor="blue.100">
+                <Text fontWeight="semibold" mb={1}>1. Define context</Text>
+                <Text fontSize="sm" color="gray.600">
+                  Practitioners create a case study and define the indicator structure.
+                </Text>
+              </Box>
+              <Box bg="blue.50" borderRadius="md" p={4} borderWidth={1} borderColor="blue.100">
+                <Text fontWeight="semibold" mb={1}>2. Elicit preferences</Text>
+                <Text fontSize="sm" color="gray.600">
+                  Stakeholders complete qualitative, value-function, and weight elicitation steps.
+                </Text>
+              </Box>
+              <Box bg="blue.50" borderRadius="md" p={4} borderWidth={1} borderColor="blue.100">
+                <Text fontWeight="semibold" mb={1}>3. Review outcomes</Text>
+                <Text fontSize="sm" color="gray.600">
+                  The team compares results and consolidates evidence for final decisions.
+                </Text>
+              </Box>
+            </SimpleGrid>
 
-        <VStack spacing={4} align="stretch" width="100%">
-          <Box>
-            <FormLabel fontWeight="medium" mb={2}>
-              Access existing session
-            </FormLabel>
-            <Input
-              placeholder="Enter session code"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleDetectAndLogin()}
-              isDisabled={loading}
-            />
-          </Box>
-          <Button
-            colorScheme="blue"
-            isLoading={loading}
-            onClick={handleDetectAndLogin}
-            width="fit-content"
-          >
-            Access session
-          </Button>
-        </VStack>
+            <HStack spacing={5} wrap="wrap">
+              <Link
+                href="https://example.org/publication-upmavt"
+                isExternal
+                color="blue.700"
+                fontWeight="semibold"
+              >
+                Read the publication (placeholder)
+              </Link>
+            </HStack>
+          </VStack>
+        </GridItem>
 
-        <Divider />
+        <GridItem p={{ base: 6, md: 10 }} bg="white">
+          <VStack spacing={6} align="stretch">
+            <Box>
+              <Heading size="md" mb={2}>Access Existing Session</Heading>
+              <Text color="gray.600" fontSize="sm">
+                Enter your assigned session code to continue elicitation, or create a new case study if you are
+                initiating a practitioner workflow.
+              </Text>
+            </Box>
 
-        <VStack spacing={3} align="stretch">
-          <Text fontWeight="medium">Create new case study</Text>
-          <Text fontSize="sm" color="gray.600">
-            A unique alphanumeric study code is generated automatically.
-          </Text>
-          <Button
-            colorScheme="green"
-            isLoading={loading}
-            onClick={handleCreatePractitionerSession}
-            width="fit-content"
-          >
-            Create new
-          </Button>
-        </VStack>
+            <Box>
+              <FormLabel fontWeight="medium" mb={2}>
+                Session code
+              </FormLabel>
+              <HStack spacing={3}>
+                <Input
+                  placeholder="Enter session code"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleDetectAndLogin()}
+                  isDisabled={loading}
+                  bg="white"
+                  w="50%"
+                />
+                <Button colorScheme="blue" isLoading={loading} onClick={handleDetectAndLogin} w="50%">
+                  Access session
+                </Button>
+              </HStack>
+            </Box>
 
-        <Divider />
+            <Divider />
 
-        <HStack>
-          <Link color="blue.600" onClick={onDocumentation}>
-            Open documentation
-          </Link>
-        </HStack>
-      </VStack>
+            <VStack spacing={3} align="stretch">
+              <Button colorScheme="blue" isLoading={loading} onClick={handleCreatePractitionerSession}>
+                Create case study
+              </Button>
+            </VStack>
+          </VStack>
+        </GridItem>
+      </Grid>
+
+      <Box borderTopWidth={1} borderColor="gray.200" bg="gray.100" px={{ base: 6, md: 10 }} py={5} mt="auto">
+        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
+          <VStack align="start" spacing={1}>
+            <Text fontWeight="semibold">Software documentation</Text>
+            <Link color="blue.700" onClick={onDocumentation}>Open software documentation</Link>
+          </VStack>
+
+          <VStack align="start" spacing={1}>
+            <Text fontWeight="semibold">Disclaimers</Text>
+            <Text fontSize="sm" color="gray.600">For research and decision-support use only.</Text>
+            <Text fontSize="sm" color="gray.600">No warranty or guarantee of fitness for purpose.</Text>
+          </VStack>
+
+          <VStack align="start" spacing={1}>
+            <Text fontWeight="semibold">Legal and policy links</Text>
+            <Link href="https://example.org/terms" isExternal color="blue.700">Terms of use (placeholder)</Link>
+            <Link href="https://example.org/privacy" isExternal color="blue.700">Privacy notice (placeholder)</Link>
+          </VStack>
+        </SimpleGrid>
+      </Box>
     </Box>
   )
 }
