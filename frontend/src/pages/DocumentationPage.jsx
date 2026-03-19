@@ -114,9 +114,9 @@ function OverviewPanel() {
       </Para>
       <BulletList
         items={[
-          'Qualitative Indicators (QI) — relative ranking of alternatives per criterion with confidence levels.',
-          'Value Functions (VF) — mapping of objective criterion values to a [0, 1] preference scale.',
-          'Best-Worst Technique (BWT) — pairwise comparison matrix for deriving criterion importance weights.',
+          'Qualitative Indicators — elicitation of values for qualitative indicators.',
+          'Quantitative Indicators — traditional elicitation of value functions.',
+          'Weight Elicitation — based on the best-worst tradeoff method.',
         ]}
       />
 
@@ -126,7 +126,7 @@ function OverviewPanel() {
           '1. A practitioner creates a study session, defines criteria and alternatives, and enables the desired elicitation instruments.',
           '2. The practitioner generates one elicitation session code per stakeholder and shares the codes.',
           '3. Each stakeholder logs in with their code and completes the enabled elicitation steps.',
-          '4. The practitioner runs the UP-MAVT analysis: Step 1 derives criterion weights from BWT data; Steps 2–6 run a Monte Carlo simulation that propagates uncertainty through QI, VF, and weight distributions to produce ranked alternative scores.',
+          '4. The practitioner runs the UP-MAVT analysis: Step 1 derives criterion weights from Weight Elicitation data; Steps 2–6 run a Monte Carlo simulation that propagates uncertainty through Qualitative Indicators, Quantitative Indicators, and weight distributions to produce ranked alternative scores.',
           '5. Results (distributions, rankings, sensitivity) are available for export as CSV / JSON / ZIP.',
         ]}
       />
@@ -208,7 +208,7 @@ function RolesPanel() {
       <BulletList
         items={[
           'Receives a short alphanumeric code that maps to an elicitation session document in the sessions collection.',
-          'Can complete QI, VF, and/or BWT steps depending on which features the practitioner enabled.',
+          'Can complete Qualitative Indicators, Quantitative Indicators, and/or Weight Elicitation depending on which features the practitioner enabled.',
           'Session may be individually locked (criteria lock) or fully locked (session lock) by the practitioner.',
           'Has no visibility of other stakeholders or of the overall study configuration.',
         ]}
@@ -219,7 +219,7 @@ function RolesPanel() {
         items={[
           'Receives a code that maps to a study session document in the study_sessions collection.',
           'Defines the decision problem: criteria, alternatives, groups, distributions.',
-          'Configures enabled features (QI, VF, BWT) and value-function method (mid-splitting or free-edit).',
+          'Configures enabled features (Qualitative Indicators, Quantitative Indicators, Weight Elicitation) and value-function method (mid-splitting or free-edit).',
           'Creates and manages individual elicitation sessions for stakeholders.',
           'Runs the UP-MAVT analysis and exports results.',
         ]}
@@ -265,7 +265,7 @@ function ConceptsPanel() {
         estimate.
       </Para>
 
-      <SectionHeading>Qualitative Indicators (QI)</SectionHeading>
+      <SectionHeading>Qualitative Indicators</SectionHeading>
       <Para>
         Used when a criterion has no quantitative measurement. The stakeholder:
       </Para>
@@ -280,7 +280,7 @@ function ConceptsPanel() {
         confidence-weighted probabilities, producing a stochastic preference score.
       </Para>
 
-      <SectionHeading>Value Functions (VF)</SectionHeading>
+      <SectionHeading>Quantitative Indicators</SectionHeading>
       <Para>
         A value function maps a quantitative criterion value (e.g. cost in €) to a preference score in
         [0, 1]. Two function shapes are supported:
@@ -299,7 +299,7 @@ function ConceptsPanel() {
         ]}
       />
 
-      <SectionHeading>Best-Worst Technique (BWT)</SectionHeading>
+      <SectionHeading>Weight Elicitation (Best-Worst Tradeoff)</SectionHeading>
       <Para>
         The stakeholder identifies the most important (best) and least important (worst) criterion,
         then rates every other criterion relative to these anchors on a 1–9 scale. The rating data is
@@ -309,7 +309,7 @@ function ConceptsPanel() {
 
       <SectionHeading>Criterion weights</SectionHeading>
       <Para>
-        Weights are derived from BWT comparisons via a three-phase optimisation:
+        Weights are derived from Weight Elicitation comparisons via a three-phase optimisation:
       </Para>
       <BulletList
         items={[
@@ -327,8 +327,8 @@ function ConceptsPanel() {
       <SectionHeading>UP-MAVT analysis steps</SectionHeading>
       <BulletList
         items={[
-          'Step 1 — Compute weights from BWT data for all selected stakeholder sessions.',
-          'Step 2 — Sample QI scores and weight vectors; compute weighted-sum scores per alternative.',
+          'Step 1 — Compute weights from Weight Elicitation data for all selected stakeholder sessions.',
+          'Step 2 — Sample Qualitative Indicators scores and weight vectors; compute weighted-sum scores per alternative.',
           'Step 3 — Incorporate value functions; resample with distributional criterion values.',
           'Step 4 — Sensitivity analysis: vary one criterion at a time.',
           'Step 5 — Group-level aggregation and ranking.',
@@ -413,9 +413,9 @@ function ApiPanel() {
         <ApiRow method="PUT"    path="/api/session/<id>/lock"                 description="Toggle criteria lock." />
         <ApiRow method="PUT"    path="/api/session/<id>/lock-session"         description="Toggle full session lock." />
         <ApiRow method="PUT"    path="/api/session/<id>/criteria"             description="Update the criteria list." />
-        <ApiRow method="PUT"    path="/api/session/<id>/qualitative"          description="Save QI rankings and confidences." />
+        <ApiRow method="PUT"    path="/api/session/<id>/qualitative"          description="Save Qualitative Indicators rankings and confidences." />
         <ApiRow method="PUT"    path="/api/session/<id>/value"                description="Save value function breakpoints." />
-        <ApiRow method="PUT"    path="/api/session/<id>/bwt"                  description="Save BWT comparison data." />
+        <ApiRow method="PUT"    path="/api/session/<id>/bwt"                  description="Save Weight Elicitation comparison data." />
       </VStack>
 
       <SectionHeading>Study Sessions (Practitioner)</SectionHeading>
@@ -424,7 +424,7 @@ function ApiPanel() {
         <ApiRow method="GET"    path="/api/study-sessions"                              description="List all study sessions." />
         <ApiRow method="GET"    path="/api/study-session/<id>"                          description="Retrieve a study session." />
         <ApiRow method="GET"    path="/api/study-session/by-code/<code>"                description="Look up a study session by its code." />
-        <ApiRow method="PATCH"  path="/api/study-session/<id>"                         description="Update features, VF method, or metadata." />
+        <ApiRow method="PATCH"  path="/api/study-session/<id>"                         description="Update features, quantitative-indicator method, or metadata." />
         <ApiRow method="DELETE" path="/api/study-session/<id>"                          description="Delete a study session." />
         <ApiRow method="PUT"    path="/api/study-session/<id>/input"                   description="Save the input criteria / alternatives." />
         <ApiRow method="GET"    path="/api/study-session/<id>/input"                   description="Retrieve the saved input." />
@@ -440,7 +440,7 @@ function ApiPanel() {
       <VStack align="start" spacing={0} w="full" divider={<Divider />}>
         <ApiRow method="GET" path="/api/session/<id>/value-functions/export"      description="CSV of value-function breakpoints." />
         <ApiRow method="GET" path="/api/session/<id>/value-functions/export-json" description="JSON of value-function breakpoints." />
-        <ApiRow method="GET" path="/api/session/<id>/bwt/export"                  description="CSV of BWT comparison data." />
+        <ApiRow method="GET" path="/api/session/<id>/bwt/export"                  description="CSV of Weight Elicitation comparison data." />
         <ApiRow method="GET" path="/api/session/<id>/export-input"               description="CSV of input data per session." />
         <ApiRow method="GET" path="/api/session/<id>/qualitative/export"          description="CSV of qualitative indicator rankings." />
         <ApiRow method="GET" path="/api/session/<id>/pile/export"                 description="CSV of PILE analysis output." />
@@ -485,9 +485,9 @@ function FileStructurePanel() {
 │   │   ├── pages/
 │   │   │   ├── LoginPage.jsx               # Session code entry & role detection
 │   │   │   ├── DocumentationPage.jsx       # This page
-│   │   │   ├── QualitativeIndicatorsPage.jsx  # Stakeholder: QI tier-list
-│   │   │   ├── ValueFunctionsPage.jsx      # Stakeholder: VF definition
-│   │   │   ├── PileBwtPage.jsx             # Stakeholder: BWT pairwise
+│   │   │   ├── QualitativeIndicatorsPage.jsx  # Stakeholder: Qualitative Indicators tier-list
+│   │   │   ├── ValueFunctionsPage.jsx      # Stakeholder: Quantitative Indicators definition
+│   │   │   ├── PileBwtPage.jsx             # Stakeholder: Weight Elicitation pairwise
 │   │   │   ├── RecapPage.jsx               # Stakeholder: completion summary
 │   │   │   ├── InputPage.jsx               # Practitioner: criteria & alternatives
 │   │   │   ├── CaseStudyPage.jsx           # Practitioner: session management

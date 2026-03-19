@@ -89,7 +89,7 @@ describe('Navigation – stakeholder role', () => {
     })
     expect(screen.getByRole('button', { name: /qualitative indicators/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /quantitative indicators/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /weights/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /weight elicitation/i })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /overview/i })).toBeInTheDocument()
   })
 
@@ -102,7 +102,7 @@ describe('Navigation – stakeholder role', () => {
     })
     expect(screen.getByRole('button', { name: /qualitative indicators/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /quantitative indicators/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /weights/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /weight elicitation/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /overview/i })).toBeInTheDocument()
   })
 

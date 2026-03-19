@@ -63,7 +63,7 @@ function RecapPage({ sessionId, onNavigate }) {
   const missing = []
   if (!completion.qualitative) missing.push({ key: 'qualitative', label: 'Qualitative Indicators', page: 'qualitative' })
   if (!completion.valueFunctions) missing.push({ key: 'value', label: 'Quantitative Indicators', page: 'value' })
-  if (!completion.pileBwt) missing.push({ key: 'pile', label: 'Weights', page: 'pile' })
+  if (!completion.pileBwt) missing.push({ key: 'pile', label: 'Weight Elicitation', page: 'pile' })
 
   const isAllComplete = missing.length === 0
 
@@ -118,7 +118,7 @@ function RecapPage({ sessionId, onNavigate }) {
                 <ListItem>Input Definition: {getStatusLabel(completion.input)}</ListItem>
                 <ListItem>Qualitative Indicators: {getStatusLabel(completion.qualitative)}</ListItem>
                 <ListItem>Quantitative Indicators: {getStatusLabel(completion.valueFunctions)}</ListItem>
-                <ListItem>Weights: {getStatusLabel(completion.pileBwt)}</ListItem>
+                <ListItem>Weight Elicitation: {getStatusLabel(completion.pileBwt)}</ListItem>
               </List>
             </VStack>
           </>

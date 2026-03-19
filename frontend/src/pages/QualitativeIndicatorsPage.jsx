@@ -1261,7 +1261,7 @@ function QualitativeIndicatorsPage({ sessionId, onPageChange }) {
                   </Text>
                   {isBwtLockActive ? (
                     <Button size="xs" variant="outline" onClick={() => onPageChange?.('pile')}>
-                      Go to Weights to unlock
+                      Go to Weight Elicitation to unlock
                     </Button>
                   ) : (
                     <Text fontSize="xs" color="yellow.800">

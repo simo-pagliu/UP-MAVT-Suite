@@ -148,9 +148,9 @@ const buildProgress = (criteria, session) => {
   )
 
   const steps = [
-    { key: 'qi', label: 'QI', done: hasQualitativeIndicators },
-    { key: 'vf', label: 'VF', done: hasValueFunctions },
-    { key: 'bwt', label: 'Weights', done: hasBwt },
+    { key: 'qi', label: 'Qualitative Indicators', done: hasQualitativeIndicators },
+    { key: 'vf', label: 'Quantitative Indicators', done: hasValueFunctions },
+    { key: 'bwt', label: 'Weight Elicitation', done: hasBwt },
   ]
 
   const completed = steps.filter((s) => s.done).length
@@ -226,7 +226,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
       })
       toast({
         title: 'Features updated',
-        description: `${featureName === 'qi' ? 'QI' : featureName === 'vf' ? 'Quantitative Indicators' : 'Weight elicitation'} ${newFeatures[featureName] ? 'enabled' : 'disabled'}`,
+        description: `${featureName === 'qi' ? 'Qualitative Indicators' : featureName === 'vf' ? 'Quantitative Indicators' : 'Weight Elicitation'} ${newFeatures[featureName] ? 'enabled' : 'disabled'}`,
         status: 'success',
         duration: 2000,
         isClosable: true,
