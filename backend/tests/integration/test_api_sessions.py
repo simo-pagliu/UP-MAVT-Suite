@@ -262,6 +262,20 @@ class TestDetectSession:
         assert resp.status_code == 200
         assert resp.json['exists'] is False
 
+    def test_detects_stakeholder_session_by_uuid(self, client):
+        sid = create_session(client, 'uuid-test-code')
+        resp = client.get(f'/api/session/detect/{sid}')
+        assert resp.status_code == 200
+        assert resp.json['exists'] is True
+        assert resp.json['type'] == 'stakeholder'
+        assert resp.json['_id'] == sid
+        assert resp.json['code'] == 'uuid-test-code'
+
+    def test_uuid_lookup_unknown_returns_not_exists(self, client):
+        resp = client.get(f'/api/session/detect/{ObjectId()}')
+        assert resp.status_code == 200
+        assert resp.json['exists'] is False
+
 
 # ---------------------------------------------------------------------------
 # GET /api/session/<id>/export

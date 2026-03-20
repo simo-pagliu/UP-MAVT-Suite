@@ -480,11 +480,15 @@ class SessionService:
     def detect_type(self, code):
         """Determine whether a code belongs to a stakeholder or practitioner session.
 
-        Searches first in the sessions collection (stakeholder codes), then in
-        the study_sessions collection (practitioner codes).
+        Searches in this order:
+
+        1. Sessions collection by ``name`` (stakeholder short code).
+        2. Study-sessions collection by ``code`` (practitioner short code).
+        3. Sessions collection by ``_id`` (UUID/ObjectId direct lookup).
+        4. Study-sessions collection by ``_id`` (UUID/ObjectId direct lookup).
 
         Args:
-            code (str): The code to look up.
+            code (str): The short code *or* UUID (24-char hex ObjectId) to look up.
 
         Returns:
             dict: A result dict with the following keys:
@@ -494,7 +498,7 @@ class SessionService:
               (only present when ``exists`` is ``True``).
             * ``'_id'`` (str) – the document's ``_id`` as a hex string
               (only present when ``exists`` is ``True``).
-            * ``'code'`` (str) – the code that was searched
+            * ``'code'`` (str) – the human-readable session code
               (only present when ``exists`` is ``True``).
         """
         stakeholder = self._sessions.find_by_name(code)
@@ -505,6 +509,24 @@ class SessionService:
         practitioner = study_repo.find_by_code(code)
         if practitioner:
             return {'exists': True, 'type': 'practitioner', '_id': str(practitioner['_id']), 'code': code}
+        # Fall back to UUID (_id) lookup so that clients can use the document
+        # identifier directly instead of the human-readable short code.
+        stakeholder_by_id = self._sessions.find_by_id(code)
+        if stakeholder_by_id:
+            return {
+                'exists': True,
+                'type': 'stakeholder',
+                '_id': str(stakeholder_by_id['_id']),
+                'code': stakeholder_by_id.get('name', code),
+            }
+        practitioner_by_id = study_repo.find_by_id(code)
+        if practitioner_by_id:
+            return {
+                'exists': True,
+                'type': 'practitioner',
+                '_id': str(practitioner_by_id['_id']),
+                'code': practitioner_by_id.get('code', code),
+            }
         return {'exists': False}
 
     def delete(self, session_id):

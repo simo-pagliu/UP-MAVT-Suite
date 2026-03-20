@@ -355,3 +355,21 @@ class TestDetectType:
     def test_detects_missing_code(self, svc):
         result = svc.detect_type('nonexistent')
         assert result['exists'] is False
+
+    def test_detects_stakeholder_session_by_uuid(self, svc):
+        session_id = svc.create('mycode', VALID_CRITERIA)
+        result = svc.detect_type(session_id)
+        assert result['exists'] is True
+        assert result['type'] == 'stakeholder'
+        assert result['_id'] == session_id
+        assert result['code'] == 'mycode'
+
+    def test_detects_unknown_uuid_returns_not_exists(self, svc):
+        unknown_id = str(ObjectId())
+        result = svc.detect_type(unknown_id)
+        assert result['exists'] is False
+
+    def test_uuid_lookup_returns_name_as_code(self, svc):
+        session_id = svc.create('human-code', VALID_CRITERIA)
+        result = svc.detect_type(session_id)
+        assert result['code'] == 'human-code'

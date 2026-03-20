@@ -163,6 +163,29 @@ function App() {
     setStudyCode('')
   }
 
+  /**
+   * On mount, check for a ?uuid= query parameter and auto-login if present.
+   * This enables direct access via a shared URL (e.g. example.com/?uuid=<id>).
+   */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const uuid = params.get('uuid')
+    if (!uuid) return
+
+    axios.get(`${API_URL}/session/detect/${encodeURIComponent(uuid)}`)
+      .then(({ data }) => {
+        if (data.exists) {
+          handleLogin(data._id, data.code, data.type)
+          // Remove the uuid param from the URL without triggering a reload
+          const url = new URL(window.location.href)
+          url.searchParams.delete('uuid')
+          window.history.replaceState({}, '', url.toString())
+        }
+      })
+      .catch((err) => console.error('UUID auto-login failed:', err))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   const currentPage = currentRole === 'stakeholder' ? stakeholderPage : practitionerPage
 
   // Reset page if current page becomes disabled due to feature changes

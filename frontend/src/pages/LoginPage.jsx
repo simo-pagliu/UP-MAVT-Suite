@@ -27,7 +27,7 @@ function LoginPage({ onLogin, onDocumentation }) {
     if (!code.trim()) {
       toast({
         title: 'Request failed',
-        description: 'Please enter a session code',
+        description: 'Please enter a session code or UUID',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -164,18 +164,18 @@ function LoginPage({ onLogin, onDocumentation }) {
             <Box>
               <Heading size="md" mb={2}>Access Existing Session</Heading>
               <Text color="gray.600" fontSize="sm">
-                Enter your assigned session code to continue elicitation, or create a new case study if you are
+                Enter your assigned session code or UUID to continue elicitation, or create a new case study if you are
                 initiating a practitioner workflow.
               </Text>
             </Box>
 
             <Box>
               <FormLabel fontWeight="medium" mb={2}>
-                Session code
+                Session code or UUID
               </FormLabel>
               <HStack spacing={3}>
                 <Input
-                  placeholder="Enter session code"
+                  placeholder="Enter session code or UUID"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleDetectAndLogin()}
