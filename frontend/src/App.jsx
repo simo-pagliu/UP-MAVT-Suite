@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Box } from '@chakra-ui/react'
+import { useState, useEffect, useCallback } from 'react'
+import { Box, useToast } from '@chakra-ui/react'
 import axios from 'axios'
 import { API_URL } from './config'
 import Navigation from './components/Navigation'
@@ -35,6 +35,8 @@ function App() {
   const [studySessionId, setStudySessionId] = useState(null)
   const [studyCode, setStudyCode] = useState('')
 
+  const toast = useToast()
+
   /**
    * Fetches the enabled feature flags (qi, vf, bwt) for a given stakeholder
    * session by first resolving its parent study session and then reading the
@@ -66,7 +68,7 @@ function App() {
    * @param {string}      code - Human-readable session code.
    * @param {'stakeholder'|'practitioner'|'admin'} role - Authenticated role.
    */
-  const handleLogin = (id, code, role) => {
+  const handleLogin = useCallback((id, code, role) => {
     setIsLoggedIn(true)
     setCurrentRole(role)
     setCurrentSessionId(id)
@@ -87,7 +89,9 @@ function App() {
       setPractitionerPage('input-definition')
     }
     // For admin role, no additional setup needed
-  }
+  // fetchSessionFeatures is stable (only calls setState setters internally)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   /** Resets all session state and returns to the login screen. */
   const handleLogout = () => {
@@ -162,6 +166,43 @@ function App() {
     setStudySessionId(null)
     setStudyCode('')
   }
+
+  /**
+   * On mount, check for a ?uuid= query parameter and auto-login if present.
+   */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const uuid = params.get('uuid')
+    if (!uuid) return
+
+    axios.get(`${API_URL}/session/detect/${encodeURIComponent(uuid)}`)
+      .then(({ data }) => {
+        if (data.exists) {
+          handleLogin(data._id, data.code, data.type)
+          // Remove the uuid param from the URL without triggering a reload
+          const url = new URL(window.location.href)
+          url.searchParams.delete('uuid')
+          window.history.replaceState({}, '', url.toString())
+        } else {
+          toast({
+            title: 'Session not found',
+            description: 'The link code did not match any session.',
+            status: 'error',
+            duration: 5000,
+            isClosable: true,
+          })
+        }
+      })
+      .catch(() => {
+        toast({
+          title: 'Auto-login failed',
+          description: 'Could not load the session from the link code.',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        })
+      })
+  }, [handleLogin, toast])
 
   const currentPage = currentRole === 'stakeholder' ? stakeholderPage : practitionerPage
 
