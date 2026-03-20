@@ -477,7 +477,7 @@ class SessionService:
             self._serialize_session(s)
         return sessions
 
-    def detect_type(self, code):
+    def detect_type(self, session_id):
         """Determine whether an ID belongs to a stakeholder or practitioner session.
 
         Searches in this order:
@@ -486,7 +486,7 @@ class SessionService:
         2. Study-sessions collection by ``_id`` (ObjectId direct lookup).
 
         Args:
-            code (str): The session/study-session ID (24-char hex ObjectId) to look up.
+            session_id (str): The session/study-session ID (24-char hex ObjectId) to look up.
 
         Returns:
             dict: A result dict with the following keys:
@@ -501,21 +501,21 @@ class SessionService:
         """
         from app.repositories import StudySessionRepository
         study_repo = StudySessionRepository(self._db)
-        stakeholder_by_id = self._sessions.find_by_id(code)
+        stakeholder_by_id = self._sessions.find_by_id(session_id)
         if stakeholder_by_id:
             return {
                 'exists': True,
                 'type': 'stakeholder',
                 '_id': str(stakeholder_by_id['_id']),
-                'code': stakeholder_by_id.get('name', code),
+                'code': stakeholder_by_id.get('name', session_id),
             }
-        practitioner_by_id = study_repo.find_by_id(code)
+        practitioner_by_id = study_repo.find_by_id(session_id)
         if practitioner_by_id:
             return {
                 'exists': True,
                 'type': 'practitioner',
                 '_id': str(practitioner_by_id['_id']),
-                'code': practitioner_by_id.get('code', code),
+                'code': practitioner_by_id.get('code', session_id),
             }
         return {'exists': False}
 
