@@ -127,6 +127,7 @@ function LoginPage({ onLogin, onDocumentation }) {
         duration: 3000,
         isClosable: true,
       })
+    } finally {
       setLoading(false)
     }
   }
