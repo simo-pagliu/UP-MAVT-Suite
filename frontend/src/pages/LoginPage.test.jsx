@@ -25,7 +25,7 @@ describe('LoginPage – rendering', () => {
 
   it('shows Access Session tab by default', () => {
     renderLoginPage()
-    expect(screen.getByPlaceholderText(/enter session code or uuid/i)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/enter session code/i)).toBeInTheDocument()
   })
 
   it('shows Create Study tab when the Create Study button is clicked', async () => {

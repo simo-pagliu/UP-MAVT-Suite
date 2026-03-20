@@ -478,17 +478,15 @@ class SessionService:
         return sessions
 
     def detect_type(self, code):
-        """Determine whether a code belongs to a stakeholder or practitioner session.
+        """Determine whether an ID belongs to a stakeholder or practitioner session.
 
         Searches in this order:
 
-        1. Sessions collection by ``name`` (stakeholder short code).
-        2. Study-sessions collection by ``code`` (practitioner short code).
-        3. Sessions collection by ``_id`` (UUID/ObjectId direct lookup).
-        4. Study-sessions collection by ``_id`` (UUID/ObjectId direct lookup).
+        1. Sessions collection by ``_id`` (ObjectId direct lookup).
+        2. Study-sessions collection by ``_id`` (ObjectId direct lookup).
 
         Args:
-            code (str): The short code *or* UUID (24-char hex ObjectId) to look up.
+            code (str): The session/study-session ID (24-char hex ObjectId) to look up.
 
         Returns:
             dict: A result dict with the following keys:
@@ -498,19 +496,11 @@ class SessionService:
               (only present when ``exists`` is ``True``).
             * ``'_id'`` (str) – the document's ``_id`` as a hex string
               (only present when ``exists`` is ``True``).
-            * ``'code'`` (str) – the human-readable session code
+            * ``'code'`` (str) – the session/study code for display
               (only present when ``exists`` is ``True``).
         """
-        stakeholder = self._sessions.find_by_name(code)
-        if stakeholder:
-            return {'exists': True, 'type': 'stakeholder', '_id': str(stakeholder['_id']), 'code': code}
         from app.repositories import StudySessionRepository
         study_repo = StudySessionRepository(self._db)
-        practitioner = study_repo.find_by_code(code)
-        if practitioner:
-            return {'exists': True, 'type': 'practitioner', '_id': str(practitioner['_id']), 'code': code}
-        # Fall back to UUID (_id) lookup so that clients can use the document
-        # identifier directly instead of the human-readable short code.
         stakeholder_by_id = self._sessions.find_by_id(code)
         if stakeholder_by_id:
             return {

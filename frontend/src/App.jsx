@@ -169,7 +169,6 @@ function App() {
 
   /**
    * On mount, check for a ?uuid= query parameter and auto-login if present.
-   * This enables direct access via a shared URL (e.g. example.com/?uuid=<id>).
    */
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -187,7 +186,7 @@ function App() {
         } else {
           toast({
             title: 'Session not found',
-            description: 'The UUID in the URL did not match any session.',
+            description: 'The link code did not match any session.',
             status: 'error',
             duration: 5000,
             isClosable: true,
@@ -197,7 +196,7 @@ function App() {
       .catch(() => {
         toast({
           title: 'Auto-login failed',
-          description: 'Could not load the session from the provided UUID.',
+          description: 'Could not load the session from the link code.',
           status: 'error',
           duration: 5000,
           isClosable: true,

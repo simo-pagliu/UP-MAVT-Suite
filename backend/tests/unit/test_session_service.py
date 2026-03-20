@@ -346,16 +346,6 @@ class TestNormalizeQualitativeIndicators:
 # ---------------------------------------------------------------------------
 
 class TestDetectType:
-    def test_detects_stakeholder_session(self, svc):
-        svc.create('mycode', VALID_CRITERIA)
-        result = svc.detect_type('mycode')
-        assert result['exists'] is True
-        assert result['type'] == 'stakeholder'
-
-    def test_detects_missing_code(self, svc):
-        result = svc.detect_type('nonexistent')
-        assert result['exists'] is False
-
     def test_detects_stakeholder_session_by_uuid(self, svc):
         session_id = svc.create('mycode', VALID_CRITERIA)
         result = svc.detect_type(session_id)

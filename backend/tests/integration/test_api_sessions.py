@@ -251,17 +251,6 @@ class TestUpdateCriteria:
 # ---------------------------------------------------------------------------
 
 class TestDetectSession:
-    def test_detects_stakeholder_session(self, client):
-        create_session(client, 'my-code')
-        resp = client.get('/api/session/detect/my-code')
-        assert resp.status_code == 200
-        assert resp.json['type'] == 'stakeholder'
-
-    def test_returns_not_exists_for_unknown(self, client):
-        resp = client.get('/api/session/detect/unknown-code')
-        assert resp.status_code == 200
-        assert resp.json['exists'] is False
-
     def test_detects_stakeholder_session_by_uuid(self, client):
         sid = create_session(client, 'uuid-test-code')
         resp = client.get(f'/api/session/detect/{sid}')
