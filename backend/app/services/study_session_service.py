@@ -195,11 +195,15 @@ class StudySessionService:
             study['sessions'] = sessions
         return study
 
-    def create(self, code, title='', description=''):
+    def create(self, code, title='', description='', contact_email=''):
         """Create a new study session with the given practitioner code.
 
         Args:
             code (str): A unique identifier chosen by the practitioner.
+            title (str): Optional display title.
+            description (str): Optional description.
+            contact_email (str): Optional contact e-mail address of the
+                practitioner who created the study.
 
         Returns:
             str: The ``_id`` of the newly created study session as a hex string.
@@ -220,6 +224,7 @@ class StudySessionService:
             'vf_method': 'mid-splitting',
             'title': str(title or '').strip(),
             'description': str(description or '').strip(),
+            'contact_email': str(contact_email or '').strip(),
             'created_at': datetime.now(timezone.utc),
         }
         inserted_id = self._studies.insert(doc)
@@ -639,7 +644,7 @@ class StudySessionService:
         buf.seek(0)
         return buf, f'backup_{study.get("code", study_session_id)}.zip', 'application/zip'
 
-    def import_backup_zip(self, zip_bytes, on_conflict='abort'):
+    def import_backup_zip(self, zip_bytes, on_conflict='abort', contact_email=''):
         if on_conflict not in ('abort', 'regenerate'):
             raise ValidationError('Invalid on_conflict value')
 
@@ -669,6 +674,7 @@ class StudySessionService:
             requested_study_code,
             title=study_meta.get('title', ''),
             description=study_meta.get('description', ''),
+            contact_email=contact_email,
         )
 
         self.update_features(

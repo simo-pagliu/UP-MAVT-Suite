@@ -15,12 +15,14 @@ import {
   useToast,
 } from '@chakra-ui/react'
 import axios from 'axios'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { API_URL } from '../config'
 
 function LoginPage({ onLogin, onDocumentation }) {
   const [code, setCode] = useState('')
+  const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
+  const uploadFileRef = useRef(null)
   const toast = useToast()
 
   const handleDetectAndLogin = async () => {
