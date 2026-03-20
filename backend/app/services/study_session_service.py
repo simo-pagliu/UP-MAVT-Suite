@@ -185,6 +185,7 @@ class StudySessionService:
         study['criteria'] = criteria
         study['title'] = study.get('title', '')
         study['description'] = study.get('description', '')
+        study['creator_email'] = study.get('creator_email', '')
         if include_sessions:
             sessions = self._sessions.find_by_study_session_id(study_id)
             for s in sessions:
