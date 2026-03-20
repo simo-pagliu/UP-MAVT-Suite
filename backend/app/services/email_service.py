@@ -168,7 +168,12 @@ class EmailService:
             logger.info('EmailService: sent "%s" to %s', msg['Subject'], to)
             return {'status': 'sent'}
 
-        except Exception as exc:  # noqa: BLE001
+        except (
+            smtplib.SMTPException,
+            ConnectionError,
+            TimeoutError,
+            OSError,
+        ) as exc:
             logger.error(
                 'EmailService: failed to send "%s" to %s: %s',
                 msg['Subject'], to, exc, exc_info=True,

@@ -90,11 +90,8 @@ def notify_inactive_study_sessions():
             skipped.append({'code': study.get('code'), 'reason': 'no creator_email'})
             continue
         try:
-            zip_content, zip_filename, _ = svc.export_backup_zip(study['_id'])
-            if hasattr(zip_content, 'read'):
-                zip_bytes = zip_content.read()
-            else:
-                zip_bytes = zip_content
+            zip_buf, zip_filename, _ = svc.export_backup_zip(study['_id'])
+            zip_bytes = zip_buf.read() if hasattr(zip_buf, 'read') else zip_buf
         except Exception as exc:  # noqa: BLE001
             logger.error('Failed to generate backup for %s: %s', study.get('code'), exc)
             zip_bytes = None

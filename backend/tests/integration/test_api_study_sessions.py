@@ -429,12 +429,11 @@ class TestNotifyInactiveStudySessions:
         )
         resp = client.post('/api/admin/notify-inactive', json={'password': 'secret'})
         assert resp.status_code == 200
-        # SMTP not configured → skipped (not failed)
+        # SMTP not configured → email is skipped; entry goes into notified with status='skipped'
         notified_or_skipped = resp.json['notified'] + resp.json['skipped']
         matching = [e for e in notified_or_skipped if e.get('code') == 'OLD-STUDY-EMAIL']
         assert len(matching) == 1
-        # Since SMTP is not configured, it should be in notified with status 'skipped'
-        assert matching[0].get('status') in ('skipped', 'sent')
+        assert matching[0].get('status') == 'skipped'
 
     def test_response_shape(self, client, monkeypatch):
         monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
