@@ -584,6 +584,7 @@ class StudySessionService:
                 'code': study.get('code'),
                 'title': study.get('title', ''),
                 'description': study.get('description', ''),
+                'creator_email': study.get('creator_email', ''),
                 'features': study.get('features', {'qi': False, 'vf': False, 'bwt': False}),
                 'vf_method': study.get('vf_method', 'mid-splitting'),
                 'created_at': study.get('created_at').isoformat() if study.get('created_at') else None,
@@ -624,7 +625,7 @@ class StudySessionService:
 
                 session_payload = {
                     'name': session_name,
-                    'friendly_name': s.get('friendly_name', ''),
+                    'friendly_name': session.get('friendly_name', ''),
                     'qualitative_indicators': session.get('qualitative_indicators'),
                     'value_functions': session.get('value_functions'),
                     'bwt': session.get('bwt'),
@@ -656,7 +657,7 @@ class StudySessionService:
         buf.seek(0)
         return buf, f'backup_{study.get("code", study_session_id)}.zip', 'application/zip'
 
-    def import_backup_zip(self, zip_bytes, on_conflict='abort', contact_email=''):
+    def import_backup_zip(self, zip_bytes, on_conflict='abort', contact_email='', preserve_backup_email=False):
         if on_conflict not in ('abort', 'regenerate'):
             raise ValidationError('Invalid on_conflict value')
 
@@ -682,11 +683,14 @@ class StudySessionService:
             requested_study_code = self.generate_unique_study_code()
 
         study_meta = metadata.get('study') or {}
+        provided_contact_email = str(contact_email or '').strip()
+        backup_creator_email = str(study_meta.get('creator_email') or '').strip()
+        creator_email = backup_creator_email if preserve_backup_email else provided_contact_email
         study_session_id = self.create(
             requested_study_code,
             title=study_meta.get('title', ''),
             description=study_meta.get('description', ''),
-            contact_email=contact_email,
+            creator_email=creator_email,
         )
 
         self.update_features(
@@ -694,7 +698,9 @@ class StudySessionService:
             study_meta.get('features') or {'qi': False, 'vf': False, 'bwt': False},
             study_meta.get('vf_method'),
         )
-        self.update_input(study_session_id, input_payload.get('criteria') or [])
+        imported_criteria = input_payload.get('criteria')
+        if isinstance(imported_criteria, list) and imported_criteria:
+            self.update_input(study_session_id, imported_criteria)
 
         imported_sessions = []
         backup_name_to_new_session_id = {}

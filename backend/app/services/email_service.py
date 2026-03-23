@@ -21,6 +21,7 @@ warning, so the application can run without email support in development.
 import logging
 import os
 import smtplib
+from urllib.parse import quote
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -62,17 +63,22 @@ _BASE_HTML = """\
   <div class="container">
     <div class="header"><h1>{heading}</h1></div>
     <div class="body">{body}</div>
-    <div class="footer">This is an automated message from Elicitation Tools. Please do not reply.</div>
+    <div class="footer">This is an automated message from mcda-up.psi.ch. Please do not reply.</div>
   </div>
 </body>
 </html>
 """
 
-_PLAIN_FOOTER = "\n\n---\nThis is an automated message from Elicitation Tools. Please do not reply."
+_PLAIN_FOOTER = "\n\n---\nThis is an automated message from mcda-up.psi.ch. Please do not reply."
 
 
 def _html(subject, heading, body):
     return _BASE_HTML.format(subject=subject, heading=heading, body=body)
+
+
+def _uuid_link(base_url, uuid):
+    safe_uuid = quote(str(uuid or '').strip(), safe='')
+    return f'{base_url}/?uuid={safe_uuid}'
 
 
 # ---------------------------------------------------------------------------
@@ -184,33 +190,54 @@ class EmailService:
     # Public send methods
     # ------------------------------------------------------------------
 
-    def send_session_confirmation(self, to, code, study_session_id=None):
+    def send_email_verification_code(self, to, code):
+        """Send a one-time email verification code.
+
+        Args:
+            to (str): Recipient email address.
+            code (str): Six-digit verification code.
+
+        Returns:
+            dict: Delivery status dict.
+        """
+        subject = 'Your mcda-up.psi.ch verification code'
+        html_body = _html(
+            subject=subject,
+            heading='Verify Your Email Address',
+            body=f"""\
+<p>Use the following verification code to continue:</p>
+<p><span class="code">{code}</span></p>
+<p>This code will expire in 10 minutes.</p>""",
+        )
+        plain_body = (
+            f'Use this verification code to continue: {code}\n\n'
+            f'This code will expire in 10 minutes.'
+            + _PLAIN_FOOTER
+        )
+        msg = self._build_message(to, subject, html_body, plain_body)
+        return self._send(msg, to)
+
+    def send_session_confirmation(self, to, study_session_id):
         """Send a study-session creation confirmation to the practitioner.
 
         Args:
             to (str): Practitioner email address.
-            code (str): The newly created study session code.
-            study_session_id (str | None): Optional ID for building a direct
-                link to the session.
+            study_session_id (str): UUID of the created study session.
 
         Returns:
             dict: Delivery status dict (``'sent'``, ``'skipped'``, or
                 ``'failed'``).
         """
-        subject = f'Your Elicitation Study Session: {code}'
-        link = (
-            f'{self._base_url}/study-session/{study_session_id}'
-            if study_session_id
-            else self._base_url
-        )
+        subject = f'Your Elicitation Study Session UUID: {study_session_id}'
+        link = _uuid_link(self._base_url, study_session_id)
 
         html_body = _html(
             subject=subject,
             heading='Study Session Created',
             body=f"""\
-<p>Your new study session has been created successfully. Please keep the code
-below safe – you will need it to access your session.</p>
-<p><span class="code">{code}</span></p>
+<p>Your new study session has been created successfully. Please keep this UUID
+safe – you will need it to access your session.</p>
+<p><span class="code">{study_session_id}</span></p>
 <p>You can access your session directly using the link below:</p>
 <p><a class="button" href="{link}">Open Study Session</a></p>
 <p>If the button does not work, copy this link into your browser:<br>
@@ -218,7 +245,7 @@ below safe – you will need it to access your session.</p>
         )
         plain_body = (
             f'Your new study session has been created.\n\n'
-            f'Session code: {code}\n\n'
+            f'Session UUID: {study_session_id}\n\n'
             f'Access your session: {link}'
             + _PLAIN_FOOTER
         )
@@ -243,7 +270,7 @@ below safe – you will need it to access your session.</p>
             dict: Delivery status dict.
         """
         subject = f'Action Required: Study Session "{code}" Scheduled for Deletion'
-        restore_link = f'{self._base_url}/study-session/{study_session_id}'
+        restore_link = _uuid_link(self._base_url, study_session_id)
         months_str = f'{int(months_inactive)}'
 
         html_body = _html(
@@ -288,7 +315,7 @@ the deletion deadline:</p>
             dict: Delivery status dict.
         """
         subject = f'Elicitation Complete: {stakeholder_name} – Study {code}'
-        link = f'{self._base_url}/study-session/{study_session_id}'
+        link = _uuid_link(self._base_url, study_session_id)
 
         html_body = _html(
             subject=subject,

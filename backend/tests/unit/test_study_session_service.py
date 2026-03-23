@@ -296,6 +296,59 @@ class TestCreateCreatorEmail:
 
 
 # ---------------------------------------------------------------------------
+# import_backup_zip – creator_email overwrite/preserve
+# ---------------------------------------------------------------------------
+
+class TestImportBackupCreatorEmail:
+    def test_import_backup_overwrites_creator_email_from_contact_email(self, svc):
+        source_id = svc.create('SRC-BACKUP-EMAIL', creator_email='backup-owner@example.com')
+        svc.update_input(source_id, VALID_CRITERIA)
+        buf, _, _ = svc.export_backup_zip(source_id)
+
+        result = svc.import_backup_zip(
+            buf.getvalue(),
+            on_conflict='regenerate',
+            contact_email='current-login@example.com',
+        )
+
+        imported = svc._studies.find_by_id(result['study_session_id'])
+        assert imported['creator_email'] == 'current-login@example.com'
+
+    def test_import_backup_preserves_creator_email_when_flag_enabled(self, svc):
+        source_id = svc.create('SRC-BACKUP-PRESERVE', creator_email='backup-owner@example.com')
+        svc.update_input(source_id, VALID_CRITERIA)
+        buf, _, _ = svc.export_backup_zip(source_id)
+
+        result = svc.import_backup_zip(
+            buf.getvalue(),
+            on_conflict='regenerate',
+            contact_email='admin-current@example.com',
+            preserve_backup_email=True,
+        )
+
+        imported = svc._studies.find_by_id(result['study_session_id'])
+        assert imported['creator_email'] == 'backup-owner@example.com'
+
+
+class TestImportBackupEmptyCriteria:
+    def test_import_backup_allows_empty_criteria_with_metadata_only(self, svc):
+        source_id = svc.create('SRC-META-ONLY', title='Metadata Only Study')
+        # No criteria and no sessions: backup should still be importable.
+        buf, _, _ = svc.export_backup_zip(source_id)
+
+        result = svc.import_backup_zip(
+            buf.getvalue(),
+            on_conflict='regenerate',
+            contact_email='uploader@example.com',
+        )
+
+        imported = svc.get_by_id(result['study_session_id'])
+        assert imported['title'] == 'Metadata Only Study'
+        assert imported['creator_email'] == 'uploader@example.com'
+        assert svc.get_input(result['study_session_id']) == []
+
+
+# ---------------------------------------------------------------------------
 # complete_elicitation_session
 # ---------------------------------------------------------------------------
 

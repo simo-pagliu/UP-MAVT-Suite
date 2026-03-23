@@ -38,7 +38,7 @@ class TestEmailServiceSendSkipped:
 
     def test_send_session_confirmation_skipped(self, monkeypatch):
         svc = self._svc(monkeypatch)
-        result = svc.send_session_confirmation('user@example.com', 'ABC123')
+        result = svc.send_session_confirmation('user@example.com', 'sid-abc123')
         assert result['status'] == 'skipped'
 
     def test_send_inactivity_warning_skipped(self, monkeypatch):
@@ -79,7 +79,7 @@ class TestEmailServiceSendSuccess:
         svc = self._svc(monkeypatch)
         smtp_mock = self._mock_smtp()
         with patch('smtplib.SMTP', return_value=smtp_mock):
-            result = svc.send_session_confirmation('user@example.com', 'CODE42', 'sid-1')
+            result = svc.send_session_confirmation('user@example.com', 'sid-1')
         assert result['status'] == 'sent'
         smtp_mock.sendmail.assert_called_once()
 
@@ -104,7 +104,7 @@ class TestEmailServiceSendSuccess:
     def test_send_failure_returns_failed_status(self, monkeypatch):
         svc = self._svc(monkeypatch)
         with patch('smtplib.SMTP', side_effect=ConnectionRefusedError('refused')):
-            result = svc.send_session_confirmation('user@example.com', 'CODE')
+            result = svc.send_session_confirmation('user@example.com', 'sid-fail')
         assert result['status'] == 'failed'
         assert 'error' in result
 

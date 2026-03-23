@@ -357,7 +357,7 @@ function AdminPage(props, ref) {
 
     try {
       const response = await axios.post(
-        `${API_URL}/study-session/backup/import?on_conflict=${onConflict}`,
+        `${API_URL}/study-session/backup/import?on_conflict=${onConflict}&preserve_creator_email=1`,
         formData,
         { headers: { 'Content-Type': 'multipart/form-data' } },
       )

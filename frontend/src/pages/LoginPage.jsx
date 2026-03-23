@@ -21,12 +21,18 @@ import { API_URL } from '../config'
 function LoginPage({ onLogin, onDocumentation }) {
   const [code, setCode] = useState('')
   const [email, setEmail] = useState('')
+  const [entryValue, setEntryValue] = useState('')
+  const [verificationCodeSent, setVerificationCodeSent] = useState(false)
+  const [isEmailVerified, setIsEmailVerified] = useState(false)
+  const [verificationToken, setVerificationToken] = useState('')
+  const [verificationError, setVerificationError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [verificationLoading, setVerificationLoading] = useState(false)
   const uploadFileRef = useRef(null)
   const toast = useToast()
 
-  const validateEmail = () => {
-    if (!email.trim()) {
+  const validateEmailInput = (value) => {
+    if (!String(value || '').trim()) {
       toast({
         title: 'Request failed',
         description: 'Please enter an email address',
@@ -103,12 +109,20 @@ function LoginPage({ onLogin, onDocumentation }) {
   }
 
   const handleCreatePractitionerSession = async () => {
-    if (!validateEmail()) return
+    if (!email.trim()) {
+      setVerificationError('Enter and verify your email before creating the case study.')
+      return
+    }
+    if (!isEmailVerified || !verificationToken) {
+      setVerificationError('Verify the email code before creating the case study.')
+      return
+    }
     setLoading(true)
     try {
       const response = await axios.post(`${API_URL}/study-session`, {
         auto_generate: true,
-        contact_email: email.trim(),
+        creator_email: email.trim(),
+        email_verification_token: verificationToken,
       })
       const createdStudyId = response.data?.study_session_id || ''
       onLogin(createdStudyId, createdStudyId, 'practitioner')
@@ -133,16 +147,22 @@ function LoginPage({ onLogin, onDocumentation }) {
   }
 
   const handleUploadCaseStudy = async () => {
-    if (!validateEmail()) return
+    if (!email.trim() || !isEmailVerified) {
+      setVerificationError('Verify your email before uploading a case study backup.')
+      return
+    }
+
     const file = uploadFileRef.current?.files?.[0]
     if (!file) return
+
     setLoading(true)
     const formData = new FormData()
     formData.append('file', file)
     formData.append('contact_email', email.trim())
+
     try {
       const response = await axios.post(
-        `${API_URL}/study-session/backup/import?on_conflict=regenerate`,
+        `${API_URL}/study-session/backup/import?on_conflict=regenerate&preserve_creator_email=0`,
         formData,
         { headers: { 'Content-Type': 'multipart/form-data' } },
       )
@@ -169,6 +189,99 @@ function LoginPage({ onLogin, onDocumentation }) {
       }
       setLoading(false)
     }
+  }
+
+  const resetEmailVerificationState = () => {
+    setEntryValue('')
+    setVerificationCodeSent(false)
+    setIsEmailVerified(false)
+    setVerificationToken('')
+    setVerificationError('')
+  }
+
+  const handleBack = () => {
+    setEmail('')
+    resetEmailVerificationState()
+  }
+
+  const handleSendVerificationCode = async () => {
+    if (!validateEmailInput(entryValue)) return
+
+    const normalizedEmail = String(entryValue || '').trim()
+
+    setVerificationLoading(true)
+    setVerificationError('')
+    try {
+      await axios.post(`${API_URL}/email-verification/request`, {
+        email: normalizedEmail,
+      })
+      setEmail(normalizedEmail)
+      setEntryValue('')
+      setVerificationCodeSent(true)
+      setIsEmailVerified(false)
+      setVerificationToken('')
+    } catch (error) {
+      setVerificationError(error.response?.data?.error || 'Failed to send verification code')
+    } finally {
+      setVerificationLoading(false)
+    }
+  }
+
+  const handleConfirmVerificationCode = async () => {
+    if (!email.trim()) {
+      setVerificationError('Email missing. Click Back and enter your email again.')
+      return
+    }
+    if (!entryValue.trim()) {
+      setVerificationError('Enter the 6-digit verification code.')
+      return
+    }
+
+    setVerificationLoading(true)
+    setVerificationError('')
+    try {
+      const response = await axios.post(`${API_URL}/email-verification/confirm`, {
+        email: email.trim(),
+        code: entryValue.trim(),
+      })
+      setIsEmailVerified(true)
+      setVerificationToken(response.data?.verification_token || '')
+      setEntryValue(email)
+    } catch (error) {
+      setIsEmailVerified(false)
+      setVerificationToken('')
+      setVerificationError(error.response?.data?.error || 'Invalid verification code')
+    } finally {
+      setVerificationLoading(false)
+    }
+  }
+
+  const getPrimaryActionLabel = () => {
+    if (!verificationCodeSent) return 'Send code'
+    if (!isEmailVerified) return 'Verify code'
+    return 'Create case study'
+  }
+
+  const getPrimaryInstruction = () => {
+    if (!verificationCodeSent) {
+      return 'Enter your email, then click the button to send a verification code.'
+    }
+    if (!isEmailVerified) {
+      return 'Enter the verification code you received, then click the button to verify.'
+    }
+    return 'Choose whether to create a new case study or upload an existing ZIP backup.'
+  }
+
+  const handlePrimaryAction = async () => {
+    if (!verificationCodeSent) {
+      await handleSendVerificationCode()
+      return
+    }
+    if (!isEmailVerified) {
+      await handleConfirmVerificationCode()
+      return
+    }
+    await handleCreatePractitionerSession()
   }
 
   return (
@@ -261,27 +374,78 @@ function LoginPage({ onLogin, onDocumentation }) {
             <Divider />
 
             <VStack spacing={3} align="stretch">
-              <FormLabel fontWeight="medium" mb={0}>
-                Email address
-              </FormLabel>
-              <Input
-                placeholder="Enter email address"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                isDisabled={loading}
-                bg="white"
-              />
-              <Button colorScheme="blue" isLoading={loading} onClick={handleCreatePractitionerSession}>
-                Create case study
-              </Button>
-              <Button
-                variant="outline"
-                colorScheme="blue"
-                isLoading={loading}
-                onClick={() => uploadFileRef.current?.click()}
-              >
-                Upload case study (.zip)
-              </Button>
+              <Heading size="sm">Create New Case Study</Heading>
+              <Text color="gray.600" fontSize="sm">
+                No account is created in this process. Your email is only used for essential case-study
+                notifications such as session confirmation, elicitation progress updates, completion alerts,
+                and inactivity warnings to help reduce the risk of accidental data loss.
+              </Text>
+
+              <Text color="gray.600" fontSize="sm">
+                {getPrimaryInstruction()}
+              </Text>
+              {!isEmailVerified && (
+                <Input
+                  placeholder={!verificationCodeSent ? 'Email address' : 'Verification code'}
+                  value={entryValue}
+                  onChange={(e) => {
+                    const nextValue = e.target.value
+                    setEntryValue(nextValue)
+                    setVerificationError('')
+
+                    if (!verificationCodeSent) {
+                      setEmail(nextValue)
+                      resetEmailVerificationState()
+                      setEntryValue(nextValue)
+                    }
+                  }}
+                  onKeyDown={(e) => e.key === 'Enter' && handlePrimaryAction()}
+                  isDisabled={loading || verificationLoading}
+                  bg="white"
+                />
+              )}
+              {isEmailVerified && (
+                <Text color="green.700" fontSize="sm">
+                  Verified email: {email}
+                </Text>
+              )}
+              {verificationError && (
+                <Text color="red.600" fontSize="sm">
+                  {verificationError}
+                </Text>
+              )}
+              <HStack spacing={3}>
+                {verificationCodeSent && !isEmailVerified && (
+                  <Button
+                    variant="ghost"
+                    onClick={handleBack}
+                    isDisabled={loading || verificationLoading}
+                    w="50%"
+                  >
+                    Back
+                  </Button>
+                )}
+                {isEmailVerified && (
+                  <Button
+                    variant="outline"
+                    colorScheme="blue"
+                    onClick={() => uploadFileRef.current?.click()}
+                    isDisabled={loading || verificationLoading}
+                    w="50%"
+                  >
+                    Upload case study (.zip)
+                  </Button>
+                )}
+                <Button
+                  colorScheme="blue"
+                  variant={isEmailVerified ? 'solid' : 'outline'}
+                  isLoading={loading || verificationLoading}
+                  onClick={handlePrimaryAction}
+                  w={verificationCodeSent ? '50%' : '100%'}
+                >
+                  {getPrimaryActionLabel()}
+                </Button>
+              </HStack>
               <Input
                 ref={uploadFileRef}
                 type="file"

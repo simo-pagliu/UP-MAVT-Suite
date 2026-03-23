@@ -1,4 +1,5 @@
 """Integration tests for study session HTTP endpoints."""
+import io
 import pytest
 from bson.objectid import ObjectId
 
@@ -329,6 +330,28 @@ class TestCreateStudySessionWithEmail:
         study_id = resp.json['study_session_id']
         study_resp = client.get(f'/api/study-session/{study_id}')
         assert study_resp.json.get('creator_email') == 'owner@example.com'
+
+
+class TestImportStudyBackupWithEmail:
+    def test_import_with_contact_email_returns_email_status(self, client, monkeypatch):
+        monkeypatch.delenv('SMTP_HOST', raising=False)
+
+        # Build a valid backup payload from an existing study.
+        source_id = create_study(client, 'SRC-IMPORT-EMAIL')
+        export_resp = client.get(f'/api/study-session/{source_id}/backup/export')
+        assert export_resp.status_code == 200
+
+        import_resp = client.post(
+            '/api/study-session/backup/import?on_conflict=regenerate&preserve_creator_email=0',
+            data={
+                'file': (io.BytesIO(export_resp.data), 'backup.zip'),
+                'contact_email': 'owner@example.com',
+            },
+            content_type='multipart/form-data',
+        )
+
+        assert import_resp.status_code == 201
+        assert import_resp.json.get('email_status') == 'skipped'
 
 
 # ---------------------------------------------------------------------------

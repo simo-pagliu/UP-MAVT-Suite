@@ -5,7 +5,14 @@ import logging
 import os
 
 from app.exceptions import ServiceError
-from app.services import SessionService, StudySessionService, ExportService, WorkflowService, EmailService
+from app.services import (
+    SessionService,
+    StudySessionService,
+    ExportService,
+    WorkflowService,
+    EmailService,
+    EmailVerificationService,
+)
 
 bp = Blueprint('api', __name__, url_prefix='/api')
 logger = logging.getLogger(__name__)
@@ -34,6 +41,57 @@ def health_check():
         return jsonify({'status': 'ok', 'database': 'connected'}), 200
     except Exception as e:
         return jsonify({'status': 'error', 'database': 'disconnected', 'error': str(e)}), 503
+
+
+# --------------------------------------------------------------------------- #
+# Email verification
+# --------------------------------------------------------------------------- #
+@bp.route('/email-verification/request', methods=['POST'])
+def request_email_verification_code():
+    data = request.json or {}
+    email = str(data.get('email') or '').strip()
+    verification_svc = EmailVerificationService(current_app.db)
+
+    issued = verification_svc.issue_code(email)
+    if not issued.get('ok'):
+        return jsonify({'error': issued.get('error', 'Invalid request')}), 400
+
+    email_svc = EmailService()
+    send_result = email_svc.send_email_verification_code(issued['email'], issued['code'])
+    status = send_result.get('status')
+
+    if status == 'sent':
+        return jsonify({
+            'status': 'sent',
+            'expires_in_seconds': issued['expires_in_seconds'],
+        }), 200
+
+    if status == 'skipped':
+        return jsonify({
+            'error': 'Email sending is not configured on the server (SMTP_HOST missing)',
+        }), 503
+
+    return jsonify({
+        'error': send_result.get('error', 'Failed to send verification email'),
+    }), 502
+
+
+@bp.route('/email-verification/confirm', methods=['POST'])
+def confirm_email_verification_code():
+    data = request.json or {}
+    email = str(data.get('email') or '').strip()
+    code = str(data.get('code') or '').strip()
+
+    verification_svc = EmailVerificationService(current_app.db)
+    confirmed = verification_svc.confirm_code(email, code)
+    if not confirmed.get('ok'):
+        return jsonify({'error': confirmed.get('error', 'Invalid verification code')}), 400
+
+    return jsonify({
+        'status': 'verified',
+        'verification_token': confirmed['verification_token'],
+        'token_expires_in_seconds': confirmed['token_expires_in_seconds'],
+    }), 200
 
 
 # --------------------------------------------------------------------------- #
@@ -284,7 +342,15 @@ def create_study_session():
     auto_generate = bool(data.get('auto_generate', False))
     if not code and auto_generate:
         code = svc.generate_unique_study_code()
-    creator_email = str(data.get('creator_email') or '').strip()
+    # Backward compatibility: older frontend payloads used contact_email.
+    creator_email = str(data.get('creator_email') or data.get('contact_email') or '').strip()
+    if creator_email:
+        verification_token = str(data.get('email_verification_token') or '').strip()
+        verification_svc = EmailVerificationService(current_app.db)
+        if not verification_svc.consume_verification_token(creator_email, verification_token):
+            return jsonify({
+                'error': 'Email verification required. Request and confirm a verification code first.',
+            }), 400
     study_session_id = svc.create(
         code,
         title=data.get('title', ''),
@@ -294,7 +360,7 @@ def create_study_session():
     email_status = None
     if creator_email:
         email_svc = EmailService()
-        result = email_svc.send_session_confirmation(creator_email, code, study_session_id)
+        result = email_svc.send_session_confirmation(creator_email, study_session_id)
         email_status = result.get('status')
     response = {'study_session_id': study_session_id, 'code': code}
     if email_status is not None:
@@ -409,9 +475,30 @@ def import_study_backup():
 
     on_conflict = request.args.get('on_conflict', 'abort')
     contact_email = request.form.get('contact_email', '')
-    result = StudySessionService(current_app.db).import_backup_zip(
-        zip_bytes, on_conflict=on_conflict, contact_email=contact_email
+    preserve_creator_email = str(request.args.get('preserve_creator_email', '')).strip().lower() in (
+        '1',
+        'true',
+        'yes',
+        'on',
     )
+    study_svc = StudySessionService(current_app.db)
+    result = study_svc.import_backup_zip(
+        zip_bytes,
+        on_conflict=on_conflict,
+        contact_email=contact_email,
+        preserve_backup_email=preserve_creator_email,
+    )
+    email_status = None
+    imported_study = study_svc.get_by_id(result.get('study_session_id'))
+    creator_email = str(imported_study.get('creator_email') or '').strip()
+    if creator_email:
+        email_result = EmailService().send_session_confirmation(
+            creator_email,
+            result.get('study_session_id'),
+        )
+        email_status = email_result.get('status')
+    if email_status is not None:
+        result['email_status'] = email_status
     return jsonify(result), 201
 
 
