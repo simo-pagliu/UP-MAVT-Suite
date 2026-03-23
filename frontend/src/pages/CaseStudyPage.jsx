@@ -8,7 +8,6 @@ import {
   Badge,
   Box,
   Button,
-  Checkbox,
   FormControl,
   FormLabel,
   HStack,
@@ -175,8 +174,6 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
   const [friendlyNames, setFriendlyNames] = useState({})
   const [criteria, setCriteria] = useState([])
   const [loading, setLoading] = useState(false)
-  const [features, setFeatures] = useState({ qi: false, vf: false, bwt: false })
-  const [savingFeatures, setSavingFeatures] = useState(false)
   const [savingFriendlyNameById, setSavingFriendlyNameById] = useState({})
   const [pendingDeleteId, setPendingDeleteId] = useState(null)
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onClose: onDeleteClose } = useDisclosure()
@@ -201,13 +198,6 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
         }, {})
       )
       setCriteria(Array.isArray(data.criteria) ? data.criteria : [])
-      
-      // Also fetch features
-      const studyResponse = await axios.get(`${API_URL}/study-session/${studySessionId}`)
-      const studyData = studyResponse.data
-      if (studyData && studyData.features) {
-        setFeatures(studyData.features)
-      }
     } catch (error) {
       toast({
         title: 'Request failed',
@@ -224,38 +214,6 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
   useEffect(() => {
     loadSessions()
   }, [studySessionId])
-
-  const handleFeatureToggle = async (featureName) => {
-    const newFeatures = { ...features, [featureName]: !features[featureName] }
-    setFeatures(newFeatures)
-    
-    // Save to backend
-    setSavingFeatures(true)
-    try {
-      await axios.patch(`${API_URL}/study-session/${studySessionId}`, {
-        features: newFeatures
-      })
-      toast({
-        title: 'Features updated',
-        description: `${featureName === 'qi' ? 'QI' : featureName === 'vf' ? 'Quantitative Indicators' : 'Weight elicitation'} ${newFeatures[featureName] ? 'enabled' : 'disabled'}`,
-        status: 'success',
-        duration: 2000,
-        isClosable: true,
-      })
-    } catch (error) {
-      // Revert on error
-      setFeatures(features)
-      toast({
-        title: 'Request failed',
-        description: error.response?.data?.error || 'Failed to update features',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      })
-    } finally {
-      setSavingFeatures(false)
-    }
-  }
 
   const sessionRows = useMemo(() => {
     return sessions.map((session) => ({
@@ -629,47 +587,6 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
             </Button>
           </HStack>
         </HStack>
-
-        <Box borderWidth={1} borderRadius="md" p={4} bg="blue.50">
-          <VStack spacing={4} align="stretch">
-            <Text fontWeight="semibold">Features</Text>
-            <Text fontSize="sm" color="gray.600">
-              Select which analysis components are required for the elicitation sessions
-            </Text>
-            <HStack spacing={6}>
-              <Checkbox
-                isChecked={features.qi}
-                onChange={() => handleFeatureToggle('qi')}
-                isDisabled={savingFeatures}
-              >
-                <VStack align="start" spacing={0}>
-                  <Text fontWeight="medium">Qualitative Indicators</Text>
-                  <Text fontSize="xs" color="gray.600">Requires complete input with alternatives</Text>
-                </VStack>
-              </Checkbox>
-              <Checkbox
-                isChecked={features.vf}
-                onChange={() => handleFeatureToggle('vf')}
-                isDisabled={savingFeatures}
-              >
-                <VStack align="start" spacing={0}>
-                  <Text fontWeight="medium">Quantitative Indicators</Text>
-                  <Text fontSize="xs" color="gray.600">Criteria with optional min/max</Text>
-                </VStack>
-              </Checkbox>
-              <Checkbox
-                isChecked={features.bwt}
-                onChange={() => handleFeatureToggle('bwt')}
-                isDisabled={savingFeatures}
-              >
-                <VStack align="start" spacing={0}>
-                  <Text fontWeight="medium">Weight Elicitation</Text>
-                  <Text fontSize="xs" color="gray.600">Criteria with optional min/max</Text>
-                </VStack>
-              </Checkbox>
-            </HStack>
-          </VStack>
-        </Box>
 
         <Box borderWidth={1} borderRadius="md" p={4} bg="gray.50">
           <VStack spacing={3} align="stretch">
