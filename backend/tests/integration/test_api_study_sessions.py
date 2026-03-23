@@ -298,3 +298,149 @@ class TestWorkflowStatus:
         assert resp.json['weights'] is None
         for step_num in ['2', '3', '4', '5', '6']:
             assert resp.json['steps'][step_num]['completed'] is False
+
+
+# ---------------------------------------------------------------------------
+# POST /api/study-session  (creator_email + email_status)
+# ---------------------------------------------------------------------------
+
+class TestCreateStudySessionWithEmail:
+    def test_create_with_creator_email_returns_email_status(self, client, monkeypatch):
+        monkeypatch.delenv('SMTP_HOST', raising=False)
+        resp = client.post('/api/study-session', json={
+            'code': 'EMAIL-STUDY',
+            'creator_email': 'owner@example.com',
+        })
+        assert resp.status_code == 201
+        assert resp.json['study_session_id']
+        assert resp.json['email_status'] == 'skipped'
+
+    def test_create_without_creator_email_no_email_status(self, client):
+        resp = client.post('/api/study-session', json={'code': 'NO-EMAIL'})
+        assert resp.status_code == 201
+        assert 'email_status' not in resp.json
+
+    def test_create_stores_creator_email(self, client, monkeypatch):
+        monkeypatch.delenv('SMTP_HOST', raising=False)
+        resp = client.post('/api/study-session', json={
+            'code': 'STORED-EMAIL',
+            'creator_email': 'owner@example.com',
+        })
+        study_id = resp.json['study_session_id']
+        study_resp = client.get(f'/api/study-session/{study_id}')
+        assert study_resp.json.get('creator_email') == 'owner@example.com'
+
+
+# ---------------------------------------------------------------------------
+# POST /api/session/<id>/complete
+# ---------------------------------------------------------------------------
+
+class TestCompleteElicitationSession:
+    def test_complete_returns_completed_status(self, client):
+        sid = create_study(client, 'COMPLETE-STUDY-1')
+        set_input(client, sid)
+        esid = create_elicitation_session(client, sid, 'EXPERT-A')
+        resp = client.post(f'/api/session/{esid}/complete')
+        assert resp.status_code == 200
+        assert resp.json['status'] == 'completed'
+        assert resp.json['session_locked'] is True
+
+    def test_complete_sends_email_when_creator_email_set(self, client, monkeypatch):
+        monkeypatch.delenv('SMTP_HOST', raising=False)
+        # Create study with a creator email
+        resp = client.post('/api/study-session', json={
+            'code': 'EMAIL-NOTIFY-STUDY',
+            'creator_email': 'practitioner@example.com',
+        })
+        sid = resp.json['study_session_id']
+        set_input(client, sid)
+        esid = create_elicitation_session(client, sid, 'EXPERT-B')
+        complete_resp = client.post(f'/api/session/{esid}/complete')
+        assert complete_resp.status_code == 200
+        # SMTP not configured so email_status is skipped
+        assert complete_resp.json['email_status'] == 'skipped'
+
+    def test_complete_no_email_when_no_creator_email(self, client):
+        sid = create_study(client, 'NO-EMAIL-STUDY-1')
+        set_input(client, sid)
+        esid = create_elicitation_session(client, sid, 'EXPERT-C')
+        resp = client.post(f'/api/session/{esid}/complete')
+        assert resp.status_code == 200
+        assert 'email_status' not in resp.json
+
+    def test_complete_not_found_returns_404(self, client):
+        from bson.objectid import ObjectId
+        resp = client.post(f'/api/session/{ObjectId()}/complete')
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /api/admin/notify-inactive
+# ---------------------------------------------------------------------------
+
+class TestNotifyInactiveStudySessions:
+    def test_requires_password(self, client):
+        resp = client.post('/api/admin/notify-inactive', json={})
+        assert resp.status_code == 400
+        assert resp.json['success'] is False
+
+    def test_wrong_password_returns_401(self, client, monkeypatch):
+        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
+        resp = client.post('/api/admin/notify-inactive', json={'password': 'wrong'})
+        assert resp.status_code == 401
+
+    def test_correct_password_returns_200(self, client, monkeypatch):
+        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
+        resp = client.post('/api/admin/notify-inactive', json={'password': 'secret'})
+        assert resp.status_code == 200
+        assert resp.json['success'] is True
+
+    def test_inactive_sessions_no_email_are_skipped(self, client, monkeypatch, mock_db):
+        from datetime import datetime, timezone, timedelta
+        from bson.objectid import ObjectId
+        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
+        monkeypatch.delenv('SMTP_HOST', raising=False)
+        # Create a study with no creator_email
+        create_resp = client.post('/api/study-session', json={'code': 'OLD-STUDY-NOEMAIL'})
+        sid = create_resp.json['study_session_id']
+        old_date = datetime.now(timezone.utc) - timedelta(days=400)
+        mock_db.study_sessions.update_one(
+            {'_id': ObjectId(sid)},
+            {'$set': {'last_modified_at': old_date}},
+        )
+        resp = client.post('/api/admin/notify-inactive', json={'password': 'secret'})
+        assert resp.status_code == 200
+        assert any(s['code'] == 'OLD-STUDY-NOEMAIL' for s in resp.json['skipped'])
+
+    def test_inactive_sessions_with_email_are_notified(self, client, monkeypatch, mock_db):
+        from datetime import datetime, timezone, timedelta
+        from bson.objectid import ObjectId
+        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
+        monkeypatch.delenv('SMTP_HOST', raising=False)
+        create_resp = client.post('/api/study-session', json={
+            'code': 'OLD-STUDY-EMAIL',
+            'creator_email': 'owner@example.com',
+        })
+        sid = create_resp.json['study_session_id']
+        old_date = datetime.now(timezone.utc) - timedelta(days=400)
+        mock_db.study_sessions.update_one(
+            {'_id': ObjectId(sid)},
+            {'$set': {'last_modified_at': old_date}},
+        )
+        resp = client.post('/api/admin/notify-inactive', json={'password': 'secret'})
+        assert resp.status_code == 200
+        # SMTP not configured → email is skipped; entry goes into notified with status='skipped'
+        notified_or_skipped = resp.json['notified'] + resp.json['skipped']
+        matching = [e for e in notified_or_skipped if e.get('code') == 'OLD-STUDY-EMAIL']
+        assert len(matching) == 1
+        assert matching[0].get('status') == 'skipped'
+
+    def test_response_shape(self, client, monkeypatch):
+        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
+        resp = client.post('/api/admin/notify-inactive', json={'password': 'secret'})
+        assert resp.status_code == 200
+        data = resp.json
+        assert 'inactive_count' in data
+        assert 'notified' in data
+        assert 'skipped' in data
+        assert 'failed' in data

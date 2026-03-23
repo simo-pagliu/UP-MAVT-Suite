@@ -266,3 +266,105 @@ class TestDelete:
         svc.delete(study_with_input)
         # Input collection should be empty after deletion
         assert mock_db.inputs.count_documents({}) == 0
+
+
+# ---------------------------------------------------------------------------
+# create – creator_email and last_modified_at
+# ---------------------------------------------------------------------------
+
+class TestCreateCreatorEmail:
+    def test_create_stores_creator_email(self, svc):
+        sid = svc.create('EMAIL-STUDY', creator_email='owner@example.com')
+        # Access raw document to verify stored value
+        doc = svc._studies.find_by_id(sid)
+        assert doc['creator_email'] == 'owner@example.com'
+
+    def test_create_strips_creator_email_whitespace(self, svc):
+        sid = svc.create('TRIM-STUDY', creator_email='  owner@example.com  ')
+        doc = svc._studies.find_by_id(sid)
+        assert doc['creator_email'] == 'owner@example.com'
+
+    def test_create_defaults_creator_email_to_empty_string(self, svc):
+        sid = svc.create('NO-EMAIL-STUDY')
+        doc = svc._studies.find_by_id(sid)
+        assert doc['creator_email'] == ''
+
+    def test_create_sets_last_modified_at(self, svc):
+        sid = svc.create('MODIFIED-STUDY')
+        doc = svc._studies.find_by_id(sid)
+        assert doc.get('last_modified_at') is not None
+
+
+# ---------------------------------------------------------------------------
+# complete_elicitation_session
+# ---------------------------------------------------------------------------
+
+class TestCompleteElicitationSession:
+    def test_complete_locks_session(self, svc, study_with_input):
+        session_id = svc.create_elicitation_session(study_with_input, 'S1')
+        result = svc.complete_elicitation_session(session_id)
+        assert result['session']['session_locked'] is True
+
+    def test_complete_returns_study_context(self, svc, study_with_input):
+        session_id = svc.create_elicitation_session(study_with_input, 'S2')
+        result = svc.complete_elicitation_session(session_id)
+        assert result['study'] is not None
+        assert result['study']['code'] == 'STUDY-001'
+
+    def test_complete_not_found_raises(self, svc):
+        from app.exceptions import NotFoundError
+        with pytest.raises(NotFoundError):
+            svc.complete_elicitation_session(str(ObjectId()))
+
+    def test_complete_standalone_session_returns_no_study(self, svc, mock_db):
+        """A standalone session (not linked to a study) should return study=None."""
+        session_svc = SessionService(mock_db)
+        sid = session_svc.create('standalone', VALID_CRITERIA)
+        result = svc.complete_elicitation_session(sid)
+        assert result['study'] is None
+
+
+# ---------------------------------------------------------------------------
+# get_inactive_study_sessions
+# ---------------------------------------------------------------------------
+
+class TestGetInactiveStudySessions:
+    def test_returns_empty_when_all_recent(self, svc):
+        svc.create('RECENT-STUDY')
+        inactive = svc.get_inactive_study_sessions(months=12)
+        assert inactive == []
+
+    def test_returns_old_sessions(self, svc, mock_db):
+        from datetime import datetime, timezone, timedelta
+        sid = svc.create('OLD-STUDY')
+        old_date = datetime.now(timezone.utc) - timedelta(days=400)
+        mock_db.study_sessions.update_one(
+            {'_id': ObjectId(sid)},
+            {'$set': {'last_modified_at': old_date}},
+        )
+        inactive = svc.get_inactive_study_sessions(months=12)
+        assert len(inactive) == 1
+        assert inactive[0]['code'] == 'OLD-STUDY'
+        assert inactive[0]['months_inactive'] > 12
+
+    def test_months_inactive_key_present(self, svc, mock_db):
+        from datetime import datetime, timezone, timedelta
+        sid = svc.create('OLD-STUDY-2')
+        old_date = datetime.now(timezone.utc) - timedelta(days=500)
+        mock_db.study_sessions.update_one(
+            {'_id': ObjectId(sid)},
+            {'$set': {'last_modified_at': old_date}},
+        )
+        inactive = svc.get_inactive_study_sessions(months=12)
+        assert 'months_inactive' in inactive[0]
+
+    def test_falls_back_to_created_at_when_no_last_modified(self, svc, mock_db):
+        from datetime import datetime, timezone, timedelta
+        sid = svc.create('OLD-FALLBACK')
+        old_date = datetime.now(timezone.utc) - timedelta(days=400)
+        mock_db.study_sessions.update_one(
+            {'_id': ObjectId(sid)},
+            {'$set': {'created_at': old_date}, '$unset': {'last_modified_at': ''}},
+        )
+        inactive = svc.get_inactive_study_sessions(months=12)
+        assert any(s['code'] == 'OLD-FALLBACK' for s in inactive)

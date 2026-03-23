@@ -185,6 +185,7 @@ class StudySessionService:
         study['criteria'] = criteria
         study['title'] = study.get('title', '')
         study['description'] = study.get('description', '')
+        study['creator_email'] = study.get('creator_email', '')
         if include_sessions:
             sessions = self._sessions.find_by_study_session_id(study_id)
             for s in sessions:
@@ -196,15 +197,16 @@ class StudySessionService:
             study['sessions'] = sessions
         return study
 
-    def create(self, code, title='', description='', contact_email=''):
+    def create(self, code, title='', description='', creator_email=''):
         """Create a new study session with the given practitioner code.
 
         Args:
             code (str): A unique identifier chosen by the practitioner.
             title (str): Optional display title.
             description (str): Optional description.
-            contact_email (str): Optional contact e-mail address of the
-                practitioner who created the study.
+            creator_email (str): Optional practitioner email address stored
+                for future notifications (e.g. inactivity warnings and
+                elicitation-completion alerts).
 
         Returns:
             str: The ``_id`` of the newly created study session as a hex string.
@@ -218,6 +220,7 @@ class StudySessionService:
             raise ValidationError('Study code is required')
         if self._studies.find_by_code(code):
             raise ConflictError('Study code already exists')
+        now = datetime.now(timezone.utc)
         doc = {
             'code': code,
             'input_id': None,
@@ -225,8 +228,9 @@ class StudySessionService:
             'vf_method': 'mid-splitting',
             'title': str(title or '').strip(),
             'description': str(description or '').strip(),
-            'contact_email': str(contact_email or '').strip(),
-            'created_at': datetime.now(timezone.utc),
+            'creator_email': str(creator_email or '').strip(),
+            'created_at': now,
+            'last_modified_at': now,
         }
         inserted_id = self._studies.insert(doc)
         return str(inserted_id)
@@ -248,6 +252,7 @@ class StudySessionService:
             update_doc['description'] = description.strip()
 
         if update_doc:
+            update_doc['last_modified_at'] = datetime.now(timezone.utc)
             self._studies.update(study_session_id, update_doc)
 
         updated = self._studies.find_by_id(study_session_id)
@@ -334,6 +339,7 @@ class StudySessionService:
         if normalized_method:
             update_doc['vf_method'] = normalized_method
         if update_doc:
+            update_doc['last_modified_at'] = datetime.now(timezone.utc)
             self._studies.update(study_session_id, update_doc)
         updated = self._studies.find_by_id(study_session_id)
         if not updated:
@@ -392,6 +398,7 @@ class StudySessionService:
         else:
             new_id = self._inputs.insert({'criteria': criteria, 'created_at': now, 'updated_at': now})
             self._studies.update(study_session_id, {'input_id': new_id})
+        self._studies.update(study_session_id, {'last_modified_at': now})
 
     def get_input(self, study_session_id):
         """Return the criteria list for a study session's shared input document.
@@ -742,3 +749,73 @@ class StudySessionService:
             'code': requested_study_code,
             'imported_sessions': imported_sessions,
         }
+
+    # ------------------------------------------------------------------
+    # Email-notification helpers
+    # ------------------------------------------------------------------
+
+    def complete_elicitation_session(self, session_id):
+        """Mark an elicitation session as complete and return relevant context.
+
+        Sets ``session_locked = True`` on the session document so the
+        stakeholder can no longer submit changes.  Returns the session and its
+        parent study session so the caller can send an email notification.
+
+        Args:
+            session_id: The elicitation session's ``_id`` (string or ObjectId).
+
+        Returns:
+            dict: A dict with keys ``'session'`` (the updated elicitation
+            session) and ``'study'`` (the parent study session, or ``None``
+            when the session is not linked to a study).
+
+        Raises:
+            NotFoundError: When the elicitation session does not exist.
+        """
+        session = self._sessions.find_by_id(session_id)
+        if not session:
+            raise NotFoundError('Session not found')
+        self._sessions.update(session_id, {'session_locked': True})
+        session['session_locked'] = True
+        session['_id'] = str(session['_id'])
+
+        study = None
+        study_session_id = session.get('study_session_id')
+        if study_session_id:
+            study = self._studies.find_by_id(str(study_session_id))
+            if study:
+                study['_id'] = str(study['_id'])
+
+        return {'session': session, 'study': study}
+
+    def get_inactive_study_sessions(self, months=12):
+        """Return study sessions that have been inactive for *months* or more.
+
+        A session is considered inactive when its ``last_modified_at``
+        timestamp is more than *months* months in the past.  Sessions created
+        before ``last_modified_at`` was tracked fall back to ``created_at``.
+
+        Args:
+            months (int): Inactivity threshold in months (default: ``12``).
+
+        Returns:
+            list[dict]: Serialised study session documents with an extra
+            ``'months_inactive'`` key.
+        """
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
+        studies = self._studies.find_all()
+        inactive = []
+        for study in studies:
+            last_activity = study.get('last_modified_at') or study.get('created_at')
+            if last_activity is None:
+                continue
+            if last_activity.tzinfo is None:
+                last_activity = last_activity.replace(tzinfo=timezone.utc)
+            if last_activity <= cutoff:
+                delta_days = (datetime.now(timezone.utc) - last_activity).days
+                months_inactive = delta_days / 30.0
+                serialised = self._serialize_study(study)
+                serialised['months_inactive'] = months_inactive
+                inactive.append(serialised)
+        return inactive

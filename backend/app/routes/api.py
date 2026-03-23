@@ -5,7 +5,7 @@ import logging
 import os
 
 from app.exceptions import ServiceError
-from app.services import SessionService, StudySessionService, ExportService, WorkflowService
+from app.services import SessionService, StudySessionService, ExportService, WorkflowService, EmailService
 
 bp = Blueprint('api', __name__, url_prefix='/api')
 logger = logging.getLogger(__name__)
@@ -51,6 +51,73 @@ def admin_login():
     if hmac.compare_digest(str(password), str(admin_password)):
         return jsonify({'success': True}), 200
     return jsonify({'success': False, 'error': 'Invalid password'}), 401
+
+
+@bp.route('/admin/notify-inactive', methods=['POST'])
+def notify_inactive_study_sessions():
+    """Send inactivity warning emails for study sessions inactive for 12+ months.
+
+    Accepts an optional JSON body:
+    * ``months`` (int, default 12) – inactivity threshold in months.
+    * ``password`` (str, required) – admin password for authorisation.
+
+    For each inactive study session that has a ``creator_email`` stored, a
+    warning email with a ZIP backup attachment is sent.  The response
+    summarises how many sessions were notified and any failures.
+    """
+    data = request.json or {}
+    password = data.get('password')
+    if not password:
+        return jsonify({'success': False, 'error': 'Password is required'}), 400
+    admin_password = os.getenv('ADMIN_PASSWORD')
+    if not admin_password:
+        return jsonify({'success': False, 'error': 'ADMIN_PASSWORD is not configured on the server'}), 500
+    if not hmac.compare_digest(str(password), str(admin_password)):
+        return jsonify({'success': False, 'error': 'Invalid password'}), 401
+
+    months = int(data.get('months', 12))
+    svc = StudySessionService(current_app.db)
+    email_svc = EmailService()
+    inactive_sessions = svc.get_inactive_study_sessions(months=months)
+
+    notified = []
+    skipped = []
+    failed = []
+
+    for study in inactive_sessions:
+        creator_email = study.get('creator_email', '').strip()
+        if not creator_email:
+            skipped.append({'code': study.get('code'), 'reason': 'no creator_email'})
+            continue
+        try:
+            zip_buf, zip_filename, _ = svc.export_backup_zip(study['_id'])
+            zip_bytes = zip_buf.read() if hasattr(zip_buf, 'read') else zip_buf
+        except Exception as exc:  # noqa: BLE001
+            logger.error('Failed to generate backup for %s: %s', study.get('code'), exc)
+            zip_bytes = None
+            zip_filename = f'backup_{study.get("code", study["_id"])}.zip'
+
+        result = email_svc.send_inactivity_warning(
+            creator_email,
+            code=study.get('code', ''),
+            study_session_id=study['_id'],
+            months_inactive=study.get('months_inactive', months),
+            zip_bytes=zip_bytes or b'',
+            zip_filename=zip_filename,
+        )
+        entry = {'code': study.get('code'), 'email': creator_email, 'status': result.get('status')}
+        if result.get('status') == 'failed':
+            failed.append(entry)
+        else:
+            notified.append(entry)
+
+    return jsonify({
+        'success': True,
+        'inactive_count': len(inactive_sessions),
+        'notified': notified,
+        'skipped': skipped,
+        'failed': failed,
+    }), 200
 
 
 # --------------------------------------------------------------------------- #
@@ -175,6 +242,37 @@ def update_bwt(session_id):
     return jsonify({'status': 'updated'}), 200
 
 
+@bp.route('/session/<session_id>/complete', methods=['POST'])
+def complete_elicitation_session(session_id):
+    """Mark an elicitation session as complete and notify the practitioner.
+
+    When the linked study session has a ``creator_email`` stored, a completion
+    notification email is sent to the practitioner.
+    """
+    svc = StudySessionService(current_app.db)
+    result = svc.complete_elicitation_session(session_id)
+    session = result['session']
+    study = result.get('study')
+
+    email_status = None
+    if study:
+        practitioner_email = study.get('creator_email', '').strip()
+        if practitioner_email:
+            email_svc = EmailService()
+            send_result = email_svc.send_session_completed(
+                practitioner_email,
+                stakeholder_name=session.get('name', session_id),
+                code=study.get('code', ''),
+                study_session_id=str(study.get('_id', '')),
+            )
+            email_status = send_result.get('status')
+
+    response = {'status': 'completed', 'session_locked': True}
+    if email_status is not None:
+        response['email_status'] = email_status
+    return jsonify(response), 200
+
+
 # --------------------------------------------------------------------------- #
 # Study sessions
 # --------------------------------------------------------------------------- #
@@ -186,13 +284,22 @@ def create_study_session():
     auto_generate = bool(data.get('auto_generate', False))
     if not code and auto_generate:
         code = svc.generate_unique_study_code()
+    creator_email = str(data.get('creator_email') or '').strip()
     study_session_id = svc.create(
         code,
         title=data.get('title', ''),
         description=data.get('description', ''),
-        contact_email=data.get('contact_email', ''),
+        creator_email=creator_email,
     )
-    return jsonify({'study_session_id': study_session_id, 'code': code}), 201
+    email_status = None
+    if creator_email:
+        email_svc = EmailService()
+        result = email_svc.send_session_confirmation(creator_email, code, study_session_id)
+        email_status = result.get('status')
+    response = {'study_session_id': study_session_id, 'code': code}
+    if email_status is not None:
+        response['email_status'] = email_status
+    return jsonify(response), 201
 
 
 @bp.route('/study-sessions', methods=['GET'])
