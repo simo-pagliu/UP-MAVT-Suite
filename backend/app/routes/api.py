@@ -400,13 +400,71 @@ def import_study_backup():
         return jsonify({'error': 'Uploaded file is empty'}), 400
 
     on_conflict = request.args.get('on_conflict', 'abort')
-    result = StudySessionService(current_app.db).import_backup_zip(zip_bytes, on_conflict=on_conflict)
+    contact_email = request.form.get('contact_email', '')
+    result = StudySessionService(current_app.db).import_backup_zip(
+        zip_bytes, on_conflict=on_conflict, contact_email=contact_email
+    )
     return jsonify(result), 201
 
 
-# --------------------------------------------------------------------------- #
-# Export routes
-# --------------------------------------------------------------------------- #
+def _build_example_zip(name, title, description):
+    """Build a minimal placeholder backup ZIP for example case studies."""
+    import json as _json
+    import zipfile as _zipfile
+
+    metadata = {
+        'version': 2,
+        'exported_at': '2024-01-01T00:00:00+00:00',
+        'study': {
+            'code': name,
+            'title': title,
+            'description': description,
+            'features': {'qi': True, 'vf': True, 'bwt': True},
+            'vf_method': 'mid-splitting',
+            'created_at': '2024-01-01T00:00:00+00:00',
+        },
+        'sessions': [],
+        'workflow': {
+            'workflow_preferences': {},
+            'computed_weights': {},
+            'step_2_results': None,
+            'step_3_results': None,
+            'step_4_results': None,
+            'step_5_results': None,
+            'step_6_results': None,
+        },
+    }
+    buf = io.BytesIO()
+    with _zipfile.ZipFile(buf, 'w', _zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr('metadata.json', _json.dumps(metadata, indent=2))
+        zf.writestr('input/input.json', _json.dumps({'criteria': []}, indent=2))
+    buf.seek(0)
+    return buf
+
+
+@bp.route('/example-case-study/1', methods=['GET'])
+def download_example_case_study_1():
+    """Download a placeholder example case study ZIP."""
+    buf = _build_example_zip(
+        'EXAMPLE1',
+        'Example Case Study 1',
+        'Placeholder example case study. Replace with a real case study ZIP.',
+    )
+    return _send(buf, 'example_case_study_1.zip', 'application/zip')
+
+
+@bp.route('/example-case-study/2', methods=['GET'])
+def download_example_case_study_2():
+    """Download a placeholder example case study ZIP."""
+    buf = _build_example_zip(
+        'EXAMPLE2',
+        'Example Case Study 2',
+        'Placeholder example case study. Replace with a real case study ZIP.',
+    )
+    return _send(buf, 'example_case_study_2.zip', 'application/zip')
+
+
+
 @bp.route('/session/<session_id>/value-functions/export', methods=['GET'])
 def export_value_functions_csv(session_id):
     content, filename, mime = ExportService(current_app.db).export_value_functions_csv(session_id)

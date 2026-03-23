@@ -480,9 +480,19 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
               </Button>
             </HStack>
           </VStack>
-          <Button leftIcon={<RepeatIcon />} variant="outline" size="sm" onClick={loadSessions} isLoading={loading}>
-            Refresh
-          </Button>
+          <HStack>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleDownload(`/study-session/${studySessionId}/backup/export`, `case_study_${studyCode || studySessionId}.zip`)}
+              isLoading={loading}
+            >
+              Download case study ZIP
+            </Button>
+            <Button leftIcon={<RepeatIcon />} variant="outline" size="sm" onClick={loadSessions} isLoading={loading}>
+              Refresh
+            </Button>
+          </HStack>
         </HStack>
 
         <Box borderWidth={1} borderRadius="md" p={4} bg="blue.50">

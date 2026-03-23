@@ -15,13 +15,29 @@ import {
   useToast,
 } from '@chakra-ui/react'
 import axios from 'axios'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { API_URL } from '../config'
 
 function LoginPage({ onLogin, onDocumentation }) {
   const [code, setCode] = useState('')
+  const [email, setEmail] = useState('')
   const [loading, setLoading] = useState(false)
+  const uploadFileRef = useRef(null)
   const toast = useToast()
+
+  const validateEmail = () => {
+    if (!email.trim()) {
+      toast({
+        title: 'Request failed',
+        description: 'Please enter an email address',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+      return false
+    }
+    return true
+  }
 
   const handleDetectAndLogin = async () => {
     if (!code.trim()) {
@@ -87,9 +103,13 @@ function LoginPage({ onLogin, onDocumentation }) {
   }
 
   const handleCreatePractitionerSession = async () => {
+    if (!validateEmail()) return
     setLoading(true)
     try {
-      const response = await axios.post(`${API_URL}/study-session`, { auto_generate: true })
+      const response = await axios.post(`${API_URL}/study-session`, {
+        auto_generate: true,
+        contact_email: email.trim(),
+      })
       const generatedCode = response.data?.code || ''
       onLogin(response.data.study_session_id, generatedCode, 'practitioner')
       toast({
@@ -107,6 +127,46 @@ function LoginPage({ onLogin, onDocumentation }) {
         duration: 3000,
         isClosable: true,
       })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleUploadCaseStudy = async () => {
+    if (!validateEmail()) return
+    const file = uploadFileRef.current?.files?.[0]
+    if (!file) return
+    setLoading(true)
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('contact_email', email.trim())
+    try {
+      const response = await axios.post(
+        `${API_URL}/study-session/backup/import?on_conflict=regenerate`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+      )
+      const generatedCode = response.data?.code || ''
+      onLogin(response.data.study_session_id, generatedCode, 'practitioner')
+      toast({
+        title: 'Case study uploaded',
+        description: `Study code: ${generatedCode}`,
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      })
+    } catch (error) {
+      toast({
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to upload case study',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+    } finally {
+      if (uploadFileRef.current) {
+        uploadFileRef.current.value = ''
+      }
       setLoading(false)
     }
   }
@@ -156,6 +216,15 @@ function LoginPage({ onLogin, onDocumentation }) {
                 Read the publication (placeholder)
               </Link>
             </HStack>
+            <VStack align="start" spacing={1}>
+              <Text fontWeight="semibold">Example case studies</Text>
+              <Link href={`${API_URL}/example-case-study/1`} color="blue.700">
+                Download example case study 1
+              </Link>
+              <Link href={`${API_URL}/example-case-study/2`} color="blue.700">
+                Download example case study 2
+              </Link>
+            </VStack>
           </VStack>
         </GridItem>
 
@@ -192,9 +261,34 @@ function LoginPage({ onLogin, onDocumentation }) {
             <Divider />
 
             <VStack spacing={3} align="stretch">
+              <FormLabel fontWeight="medium" mb={0}>
+                Email address
+              </FormLabel>
+              <Input
+                placeholder="Enter email address"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                isDisabled={loading}
+                bg="white"
+              />
               <Button colorScheme="blue" isLoading={loading} onClick={handleCreatePractitionerSession}>
                 Create case study
               </Button>
+              <Button
+                variant="outline"
+                colorScheme="blue"
+                isLoading={loading}
+                onClick={() => uploadFileRef.current?.click()}
+              >
+                Upload case study (.zip)
+              </Button>
+              <Input
+                ref={uploadFileRef}
+                type="file"
+                accept=".zip"
+                display="none"
+                onChange={handleUploadCaseStudy}
+              />
             </VStack>
           </VStack>
         </GridItem>

@@ -651,7 +651,7 @@ class StudySessionService:
         buf.seek(0)
         return buf, f'backup_{study.get("code", study_session_id)}.zip', 'application/zip'
 
-    def import_backup_zip(self, zip_bytes, on_conflict='abort'):
+    def import_backup_zip(self, zip_bytes, on_conflict='abort', contact_email=''):
         if on_conflict not in ('abort', 'regenerate'):
             raise ValidationError('Invalid on_conflict value')
 
@@ -681,6 +681,7 @@ class StudySessionService:
             requested_study_code,
             title=study_meta.get('title', ''),
             description=study_meta.get('description', ''),
+            contact_email=contact_email,
         )
 
         self.update_features(
