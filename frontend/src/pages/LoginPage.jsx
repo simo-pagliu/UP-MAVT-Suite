@@ -43,7 +43,7 @@ function LoginPage({ onLogin, onDocumentation }) {
     if (!code.trim()) {
       toast({
         title: 'Request failed',
-        description: 'Please enter a session code',
+        description: 'Please enter a session UUID',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -72,7 +72,7 @@ function LoginPage({ onLogin, onDocumentation }) {
       if (!data.exists) {
         toast({
           title: 'Not found',
-          description: 'No session found for this code',
+          description: 'No session found for this UUID',
           status: 'error',
           duration: 3000,
           isClosable: true,
@@ -82,7 +82,7 @@ function LoginPage({ onLogin, onDocumentation }) {
       }
 
       // Login with detected type
-      onLogin(data._id, data.code, data.type)
+      onLogin(data._id, data._id, data.type)
       toast({
         title: 'Session loaded',
         description: `${data.type === 'stakeholder' ? 'Stakeholder' : 'Practitioner'} session ready`,
@@ -110,11 +110,11 @@ function LoginPage({ onLogin, onDocumentation }) {
         auto_generate: true,
         contact_email: email.trim(),
       })
-      const generatedCode = response.data?.code || ''
-      onLogin(response.data.study_session_id, generatedCode, 'practitioner')
+      const createdStudyId = response.data?.study_session_id || ''
+      onLogin(createdStudyId, createdStudyId, 'practitioner')
       toast({
         title: 'Study session created',
-        description: `Study code: ${generatedCode}`,
+        description: `Study ID: ${createdStudyId}`,
         status: 'success',
         duration: 3000,
         isClosable: true,
@@ -146,11 +146,11 @@ function LoginPage({ onLogin, onDocumentation }) {
         formData,
         { headers: { 'Content-Type': 'multipart/form-data' } },
       )
-      const generatedCode = response.data?.code || ''
-      onLogin(response.data.study_session_id, generatedCode, 'practitioner')
+      const importedStudyId = response.data?.study_session_id || ''
+      onLogin(importedStudyId, importedStudyId, 'practitioner')
       toast({
         title: 'Case study uploaded',
-        description: `Study code: ${generatedCode}`,
+        description: `Study ID: ${importedStudyId}`,
         status: 'success',
         duration: 3000,
         isClosable: true,
@@ -233,18 +233,18 @@ function LoginPage({ onLogin, onDocumentation }) {
             <Box>
               <Heading size="md" mb={2}>Access Existing Session</Heading>
               <Text color="gray.600" fontSize="sm">
-                Enter your assigned session code to continue elicitation, or create a new case study if you are
+                Enter your session UUID to continue elicitation, or create a new case study if you are
                 initiating a practitioner workflow.
               </Text>
             </Box>
 
             <Box>
               <FormLabel fontWeight="medium" mb={2}>
-                Session code
+                Session UUID
               </FormLabel>
               <HStack spacing={3}>
                 <Input
-                  placeholder="Enter session code"
+                  placeholder="Enter session UUID"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleDetectAndLogin()}

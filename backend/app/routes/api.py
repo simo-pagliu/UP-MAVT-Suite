@@ -119,6 +119,14 @@ def toggle_full_session_lock(session_id):
     return jsonify({'session_locked': new_locked}), 200
 
 
+@bp.route('/session/<session_id>/friendly-name', methods=['PUT'])
+def update_session_friendly_name(session_id):
+    data = request.json or {}
+    friendly_name = data.get('friendly_name', '')
+    updated = SessionService(current_app.db).update_friendly_name(session_id, friendly_name)
+    return jsonify(updated), 200
+
+
 @bp.route('/session/<session_id>/qualitative', methods=['PUT'])
 def update_qualitative(session_id):
     data = request.json

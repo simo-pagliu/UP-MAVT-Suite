@@ -191,6 +191,7 @@ class StudySessionService:
                 s['_id'] = str(s['_id'])
                 s['study_session_id'] = self._studies._str_id(s.get('study_session_id'))
                 s['input_id'] = self._studies._str_id(s.get('input_id'))
+                s['friendly_name'] = str(s.get('friendly_name') or '').strip()
                 s['computed_weights'] = self._serialize_computed_weights(study)
             study['sessions'] = sessions
         return study
@@ -497,6 +498,7 @@ class StudySessionService:
         self._session_svc.validate_input_for_features(criteria, features)
         doc = {
             'name': name,
+            'friendly_name': '',
             'input_id': input_id,
             'study_session_id': ObjectId(study_session_id),
             'qualitative_indicators': None,
@@ -539,6 +541,7 @@ class StudySessionService:
             s['_id'] = str(s['_id'])
             s['study_session_id'] = self._studies._str_id(s.get('study_session_id'))
             s['input_id'] = self._studies._str_id(s.get('input_id'))
+            s['friendly_name'] = str(s.get('friendly_name') or '').strip()
             s['computed_weights'] = self._serialize_computed_weights(study)
         return {
             'study_session_id': str(study['_id']) if isinstance(study.get('_id'), ObjectId) else study.get('_id'),
@@ -581,6 +584,7 @@ class StudySessionService:
             'sessions': [
                 {
                     'name': s.get('name'),
+                    'friendly_name': s.get('friendly_name', ''),
                     'created_at': s.get('created_at').isoformat() if s.get('created_at') else None,
                 }
                 for s in sessions
@@ -613,6 +617,7 @@ class StudySessionService:
 
                 session_payload = {
                     'name': session_name,
+                    'friendly_name': s.get('friendly_name', ''),
                     'qualitative_indicators': session.get('qualitative_indicators'),
                     'value_functions': session.get('value_functions'),
                     'bwt': session.get('bwt'),
@@ -699,6 +704,7 @@ class StudySessionService:
 
             created_session_id = self.create_elicitation_session(study_session_id, requested_name)
             self._sessions.update(created_session_id, {
+                'friendly_name': str(payload.get('friendly_name') or '').strip(),
                 'qualitative_indicators': payload.get('qualitative_indicators'),
                 'value_functions': payload.get('value_functions'),
                 'bwt': payload.get('bwt'),

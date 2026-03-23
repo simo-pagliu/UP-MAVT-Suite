@@ -325,6 +325,7 @@ class SessionService:
             session['input_id'] = self._sessions._str_id(session.get('input_id'))
         if 'study_session_id' in session:
             session['study_session_id'] = self._sessions._str_id(session.get('study_session_id'))
+        session['friendly_name'] = str(session.get('friendly_name') or '').strip()
         session['criteria'] = self.resolve_session_criteria(session)
         return session
 
@@ -419,6 +420,7 @@ class SessionService:
         criteria = self.validate_criteria(criteria)
         doc = {
             'name': name,
+            'friendly_name': '',
             'criteria': criteria,
             'qualitative_indicators': None,
             'value_functions': None,
@@ -599,6 +601,32 @@ class SessionService:
             payload = {'criteria': criteria, 'value_functions': value_functions, 'qualitative_indicators': qualitative_indicators}
 
         self._sessions.update(session_id, payload)
+
+    def update_friendly_name(self, session_id, friendly_name):
+        """Update the practitioner-facing friendly name of a session.
+
+        Args:
+            session_id: The session's ``_id`` (string or ObjectId).
+            friendly_name (str): Friendly label shown in practitioner/admin UIs.
+
+        Returns:
+            dict: Updated serialized session document.
+
+        Raises:
+            NotFoundError: When the session does not exist.
+            ValidationError: When *friendly_name* is not a string.
+        """
+        session = self._sessions.find_by_id(session_id)
+        if not session:
+            raise NotFoundError('Session not found')
+        if not isinstance(friendly_name, str):
+            raise ValidationError('Friendly name must be a string')
+
+        self._sessions.update(session_id, {'friendly_name': friendly_name.strip()})
+        updated = self._sessions.find_by_id(session_id)
+        if not updated:
+            raise NotFoundError('Session not found')
+        return self._serialize_session(updated)
 
     def toggle_lock(self, session_id):
         """Toggle the input-lock flag on a session.

@@ -33,7 +33,6 @@ function App() {
 
   // Practitioner session credentials
   const [studySessionId, setStudySessionId] = useState(null)
-  const [studyCode, setStudyCode] = useState('')
 
   const toast = useToast()
 
@@ -65,7 +64,7 @@ function App() {
    * stakeholders — fetches the feature flags.
    *
    * @param {string|null} id   - Session ID (stakeholder) or study-session ID (practitioner). Null for admin.
-   * @param {string}      code - Human-readable session code.
+    * @param {string}      code - Session identifier label.
    * @param {'stakeholder'|'practitioner'|'admin'} role - Authenticated role.
    */
   const handleLogin = useCallback((id, code, role) => {
@@ -85,7 +84,6 @@ function App() {
     } else if (role === 'practitioner') {
       // For practitioner, the id is the study session id
       setStudySessionId(id)
-      setStudyCode(code)
       setPractitionerPage('input-definition')
     }
     // For admin role, no additional setup needed
@@ -102,7 +100,6 @@ function App() {
     setSessionId(null)
     setSessionCode('')
     setStudySessionId(null)
-    setStudyCode('')
     setStakeholderPage('qualitative')
     setPractitionerPage('input-definition')
     setShowDocumentation(false)
@@ -134,7 +131,7 @@ function App() {
    * feature flags so the navigation reflects the correct enabled steps.
    *
    * @param {string}      id   - Stakeholder elicitation session ID.
-   * @param {string|null} code - Session code (may be empty for admin-created sessions).
+    * @param {string|null} code - Session identifier label.
    */
   const handleSessionAccessed = (id, code) => {
     setSessionId(id)
@@ -154,17 +151,15 @@ function App() {
    * Stores the accessed practitioner study session.
    *
    * @param {string}      id   - Study session ID.
-   * @param {string|null} code - Study code displayed in the UI.
+   * @param {string|null} code - Deprecated legacy code (ignored).
    */
   const handleStudySessionAccessed = (id, code) => {
     setStudySessionId(id)
-    setStudyCode(code || '')
   }
 
   /** Clears the active practitioner study session. */
   const handleStudySessionCleared = () => {
     setStudySessionId(null)
-    setStudyCode('')
   }
 
   /**
@@ -178,7 +173,7 @@ function App() {
     axios.get(`${API_URL}/session/detect/${encodeURIComponent(uuid)}`)
       .then(({ data }) => {
         if (data.exists) {
-          handleLogin(data._id, data.code, data.type)
+          handleLogin(data._id, data._id, data.type)
           // Remove the uuid param from the URL without triggering a reload
           const url = new URL(window.location.href)
           url.searchParams.delete('uuid')
@@ -186,7 +181,7 @@ function App() {
         } else {
           toast({
             title: 'Session not found',
-            description: 'The link code did not match any session.',
+            description: 'The link UUID did not match any session.',
             status: 'error',
             duration: 5000,
             isClosable: true,
@@ -196,7 +191,7 @@ function App() {
       .catch(() => {
         toast({
           title: 'Auto-login failed',
-          description: 'Could not load the session from the link code.',
+          description: 'Could not load the session from the link UUID.',
           status: 'error',
           duration: 5000,
           isClosable: true,
@@ -269,7 +264,6 @@ function App() {
               {currentPage === 'case-study' && (
                 <CaseStudyPage
                   studySessionId={studySessionId}
-                  studyCode={studyCode}
                   onStudyAccessed={handleStudySessionAccessed}
                   onClearStudy={handleStudySessionCleared}
                 />

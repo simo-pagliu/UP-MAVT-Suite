@@ -144,9 +144,7 @@ function InputPage({ studySessionId }, ref) {
       try {
         const studyResponse = await axios.get(`${API_URL}/study-session/${studySessionId}`)
         const study = studyResponse.data
-        if (study.code) {
-          setName(study.code)
-        }
+        setName(studySessionId)
         setMetadataDefaults({
           title: study.title || '',
           description: study.description || '',
