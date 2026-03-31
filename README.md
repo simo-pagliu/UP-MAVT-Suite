@@ -1,36 +1,136 @@
 # UP-MAVT Suite
-Presentation of the software and purpose, link to the publication
 
-## Deployment
-The UP-MAVT Suite is availble online at (LINK), hosted by PSI in Switerland. If you desire to improve on this code you might want to deploy it locally: The current repo provides everything required for a deployment with docker compose. Once installed docker follownig the official doc (REF), you can run all by using docker compose up --build -d
+Open-source software for Multi-Criteria Decision Analysis under uncertainty, based on the UP-MAVT methodology.
 
-### Note for production deployment
-To deploy in a production enviroment we suggest to separatly build docker images and tag them to properly version them. **It is also important to build the frontend properly without the development enviroment**:
-#### Backend
+This repository contains a full web deployment with a frontend, backend API, worker, and MongoDB database.
+
+## What this repository provides
+
+- A Docker Compose deployment of the UP-MAVT Suite
+- Stakeholder-facing elicitation workflows in the web interface
+- A backend API for study, session, and task orchestration
+- A worker process for computational tasks
+	- Step 1: weight computation
+	- Steps 2-6: Monte Carlo simulations
+
+## Architecture
+
+The stack is composed of four services:
+
+- frontend: React + Vite (development target in Compose)
+- backend: Flask API
+- worker: Python process that polls tasks and executes computations
+- mongo: MongoDB 7.0 database
+
+The worker uses MongoDB as shared storage and executes two core analysis modules in worker/scripts:
+
+- weight_space_definition.py
+- upmavt.py
+
+## Prerequisites
+
+- Docker
+- Docker Compose
+
+## Quick start (local deployment)
+
+1. Create an environment file from the example:
+
 ```bash
-cd ./UP-MAVT-Suite/backend
-sudo docker build -t up-mavt-suite-backend .
+cp .env.example .env
 ```
 
-#### Frontend (production build)
+2. Edit .env and set secure values, especially:
+
+- ADMIN_PASSWORD
+- SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_USE_TLS
+- EMAIL_FROM
+- APP_BASE_URL
+
+3. Build and start all services:
+
 ```bash
-cd ./UP-MAVT-Suite/frontend
-sudo docker build --target production -t up-mavt-suite-frontend .
+docker compose up --build -d
 ```
 
-#### Worker
+4. Open the frontend:
+
+- http://localhost:3000
+
+By default in docker-compose.yml, service ports are:
+
+- frontend: 3000
+- backend: 5000
+- mongo: 27017
+
+## Service configuration summary
+
+### Backend
+
+- Container exposes port 5000
+- Reads .env via env_file
+- Uses MONGO_URI=mongodb://mongo:27017/elicitation
+
+### Worker
+
+- Connects to MongoDB through the same MONGO_URI
+- Restarts unless stopped
+
+### Frontend
+
+- In Compose, it builds from the Dockerfile dev target
+- Uses VITE_API_URL=http://localhost:5000/api in Compose runtime env
+
+## Production image builds
+
+For production workflows, build service images explicitly.
+
+### Backend
+
 ```bash
-cd ./UP-MAVT-Suite/worker
-sudo docker build -t up-mavt-suite-worker .
+cd backend
+docker build -t up-mavt-suite-backend .
 ```
 
-## User Manual
-Here we explain what user have to do to use this software
+### Frontend (production target)
+
+```bash
+cd frontend
+docker build --target production -t up-mavt-suite-frontend .
+```
+
+### Worker
+
+```bash
+cd worker
+docker build -t up-mavt-suite-worker .
+```
+
+Note:
+
+- Frontend production image uses nginx and serves the built dist assets.
+- The frontend Dockerfile supports a build argument VITE_API_URL (default: /api).
+
+## Development notes
+
+- Frontend scripts (from frontend/package.json):
+	- npm run dev
+	- npm run build
+	- npm run preview
+	- npm run test
+
+- Backend entrypoint runs run.py and starts Flask on 0.0.0.0:5000.
 
 ## Examples
-You can find example case studies in the examples folder.
-To use then, download them and upload the file in the UI (follow instruction X.X)
-example_1.zip contains the validation case study from (DOI)
-example_2.zip is a variation of the validation case study with added uncertanty and a secon stakeholder
-example_3.zip is a larger case study with hierarchical strucure from the author's master thesis (REF)
-(examples 1 and 2 are presented in this software publication (DOI))
+
+The examples folder currently contains:
+
+- example_1.zip 
+- example_2.zip
+- example_3.zip
+
+These archives are example case studies for the UI workflow. Examples 1 and 2 are presented in this software publication and are based on the work of PLACEHOLDER. The third example has a hierarchical structure and was developed alongside the UP-MAVT methodology in this master's thesis PLACEHOLDER.
+
+## Publication
+
+Add the final publication link and DOI here when available.
