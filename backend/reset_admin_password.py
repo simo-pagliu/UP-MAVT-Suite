@@ -42,7 +42,7 @@ def reset_password(mongo_uri: str = None) -> str:
     new_password = secrets.token_urlsafe(16)
     password_hash = generate_password_hash(new_password)
 
-    db.admin.update_one(
+    db.users.update_one(
         {'role': 'admin'},
         {'$set': {'password_hash': password_hash}},
         upsert=True,

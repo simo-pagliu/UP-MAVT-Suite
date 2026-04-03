@@ -119,7 +119,7 @@ class TestAuthenticateWithDb:
     def test_bootstrap_stores_hash_in_db(self, mock_db, monkeypatch):
         monkeypatch.setenv('ADMIN_PASSWORD', 'mypassword')
         AuthenticationService(mock_db).authenticate('mypassword')
-        stored = mock_db.admin.find_one({'role': 'admin'})
+        stored = mock_db.users.find_one({'role': 'admin'})
         assert stored is not None
         assert AuthenticationService._is_hashed(stored['password_hash'])
 
@@ -131,7 +131,7 @@ class TestAuthenticateWithDb:
     def test_uses_db_hash_over_env_when_db_has_hash(self, mock_db, monkeypatch):
         # Pre-seed a hash in the DB for 'dbpassword'.
         db_hash = generate_password_hash('dbpassword')
-        mock_db.admin.insert_one({'role': 'admin', 'password_hash': db_hash})
+        mock_db.users.insert_one({'role': 'admin', 'password_hash': db_hash})
         # Even if env has a different password, the DB value wins.
         monkeypatch.setenv('ADMIN_PASSWORD', 'envpassword')
         svc = AuthenticationService(mock_db)

@@ -32,7 +32,7 @@ import os
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from app.repositories import AdminRepository
+from app.repositories import UsersRepository
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ class AuthenticationService:
 
         The returned string should be stored as the ``ADMIN_PASSWORD``
         environment variable or written directly to the database via
-        :meth:`AdminRepository.set_password_hash`.
+        :meth:`UsersRepository.set_password_hash`.
 
         Args:
             plain_password: The plain-text password to hash.
@@ -132,7 +132,7 @@ class AuthenticationService:
             ``True`` if authentication succeeds, ``False`` otherwise.
         """
         if self._db is not None:
-            repo = AdminRepository(self._db)
+            repo = UsersRepository(self._db)
             stored = repo.find_password_hash()
             if stored is None:
                 # Bootstrap: read from env, hash, and persist to DB.

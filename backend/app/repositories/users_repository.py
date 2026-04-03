@@ -1,15 +1,16 @@
-"""Admin repository.
+"""Users repository.
 
-Provides :class:`AdminRepository`, which manages the single admin user document
-stored in the ``admin`` MongoDB collection.  This repository is the source of
-truth for the admin password hash once the system has been bootstrapped.
+Provides :class:`UsersRepository`, which manages user documents stored in the
+``users`` MongoDB collection.  Currently this repository is used to persist
+the admin password hash, acting as the single source of truth once the system
+has been bootstrapped.
 """
 
 from .base import BaseRepository
 
 
-class AdminRepository(BaseRepository):
-    """Data-access object for the ``admin`` MongoDB collection."""
+class UsersRepository(BaseRepository):
+    """Data-access object for the ``users`` MongoDB collection."""
 
     def __init__(self, db):
         """Initialise the repository with a database handle.
@@ -17,7 +18,7 @@ class AdminRepository(BaseRepository):
         Args:
             db: A PyMongo (or mongomock) database object.
         """
-        self._col = db.admin
+        self._col = db.users
 
     def find_password_hash(self):
         """Return the stored admin password hash, or ``None`` if not set.
@@ -41,3 +42,4 @@ class AdminRepository(BaseRepository):
             {'$set': {'password_hash': password_hash}},
             upsert=True,
         )
+

@@ -44,13 +44,13 @@ class TestResetPassword:
             lambda uri: _MockClient(mock_db),
         )
         new_password = mod.reset_password('mongodb://localhost/elicitation')
-        doc = mock_db.admin.find_one({'role': 'admin'})
+        doc = mock_db.users.find_one({'role': 'admin'})
         assert doc is not None
         assert check_password_hash(doc['password_hash'], new_password)
 
     def test_overwrites_existing_hash(self, mock_db, monkeypatch):
         from werkzeug.security import generate_password_hash
-        mock_db.admin.insert_one({'role': 'admin', 'password_hash': generate_password_hash('oldpass')})
+        mock_db.users.insert_one({'role': 'admin', 'password_hash': generate_password_hash('oldpass')})
 
         mod = self._import_reset()
         monkeypatch.setattr(
@@ -58,7 +58,7 @@ class TestResetPassword:
             lambda uri: _MockClient(mock_db),
         )
         new_password = mod.reset_password('mongodb://localhost/elicitation')
-        doc = mock_db.admin.find_one({'role': 'admin'})
+        doc = mock_db.users.find_one({'role': 'admin'})
         assert check_password_hash(doc['password_hash'], new_password)
         assert not check_password_hash(doc['password_hash'], 'oldpass')
 
