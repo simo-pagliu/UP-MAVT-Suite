@@ -99,7 +99,7 @@ class StudySessionRepository(BaseRepository):
         """
         return list(self._col.find({
             '$or': [
-                {'last_modified_at': {'$lte': cutoff}},
+                {'last_modified_at': {'$exists': True, '$ne': None, '$lte': cutoff}},
                 {
                     '$and': [
                         {'$or': [{'last_modified_at': {'$exists': False}}, {'last_modified_at': None}]},
