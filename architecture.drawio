@@ -1,20 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<mxfile host="app.diagrams.net" modified="2026-03-05T21:05:41.250Z" agent="mcp" version="21.6.6">
+<mxfile host="app.diagrams.net" modified="2026-04-03T11:00:00.000Z" agent="mcp" version="21.6.6">
   <diagram id="elicitation-architecture" name="UP-MAVT Suite Architecture">
-    <mxGraphModel dx="1422" dy="762" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1300" math="0" shadow="0">
+    <mxGraphModel dx="1422" dy="762" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1450" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
 
         <!-- ========== TITLE ========== -->
-        <mxCell id="title" value="&lt;b&gt;UP-MAVT Suite — System Architecture&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:11px;&quot;&gt;(local/ folder excluded — standalone analysis scripts, not part of the Docker deployment)&lt;/font&gt;"
+        <mxCell id="title" value="UP-MAVT Suite — System Architecture&lt;br/&gt;(local/ folder excluded — standalone analysis scripts, not part of the Docker deployment)"
           style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=18;"
           vertex="1" parent="1">
           <mxGeometry x="400" y="10" width="1100" height="50" as="geometry" />
         </mxCell>
 
         <!-- ========== USER / BROWSER ========== -->
-        <mxCell id="browser" value="&lt;b&gt;User / Browser&lt;/b&gt;"
+        <mxCell id="browser" value="User / Browser"
           style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontSize=13;strokeWidth=2;"
           vertex="1" parent="1">
           <mxGeometry x="150" y="70" width="200" height="70" as="geometry" />
@@ -24,17 +24,17 @@
         <mxCell id="docker-bg" value=""
           style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;strokeWidth=2;opacity=30;verticalAlign=top;"
           vertex="1" parent="1">
-          <mxGeometry x="20" y="180" width="1860" height="1060" as="geometry" />
+          <mxGeometry x="20" y="180" width="1860" height="1200" as="geometry" />
         </mxCell>
-        <mxCell id="docker-label" value="&lt;b&gt;Docker Compose — docker-compose.yml — elicitation-network (bridge)&lt;/b&gt;"
-          style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;fontStyle=1;fontColor=#6c8ebf;"
+        <mxCell id="docker-label" value="Docker Compose — docker-compose.yml — elicitation-network (bridge)"
+          style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=12;fontColor=#6c8ebf;"
           vertex="1" parent="1">
           <mxGeometry x="40" y="188" width="700" height="24" as="geometry" />
         </mxCell>
 
         <!-- ========== FRONTEND ========== -->
-        <mxCell id="frontend" value="&lt;b&gt;Frontend&lt;/b&gt;&lt;br/&gt;React + Vite + Chakra UI&lt;br/&gt;Port: 3000"
-          style="swimlane;fontStyle=1;startSize=65;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;align=center;strokeWidth=2;"
+        <mxCell id="frontend" value="Frontend&#xa;React + Vite + Chakra UI&#xa;Port: 3000"
+          style="swimlane;startSize=65;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;align=center;strokeWidth=2;"
           vertex="1" parent="1">
           <mxGeometry x="50" y="230" width="390" height="900" as="geometry" />
         </mxCell>
@@ -48,7 +48,7 @@
 
         <!-- Frontend: Pages -->
         <mxCell id="fe-pages" value="Pages"
-          style="swimlane;startSize=25;fillColor=#e2efda;strokeColor=#82b366;fontSize=11;fontStyle=1;"
+          style="swimlane;startSize=25;fillColor=#e2efda;strokeColor=#82b366;fontSize=11;"
           vertex="1" parent="frontend">
           <mxGeometry x="20" y="135" width="350" height="480" as="geometry" />
         </mxCell>
@@ -108,14 +108,14 @@
           <mxGeometry x="10" y="325" width="330" height="28" as="geometry" />
         </mxCell>
         <mxCell id="fe-tests" value="test/ (Vitest)"
-          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9ffe0;strokeColor=#82b366;fontSize=10;fontStyle=2;"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9ffe0;strokeColor=#82b366;fontSize=10;"
           vertex="1" parent="fe-pages">
           <mxGeometry x="10" y="370" width="330" height="28" as="geometry" />
         </mxCell>
 
         <!-- Frontend: Components -->
         <mxCell id="fe-components" value="Components"
-          style="swimlane;startSize=25;fillColor=#e2efda;strokeColor=#82b366;fontSize=11;fontStyle=1;"
+          style="swimlane;startSize=25;fillColor=#e2efda;strokeColor=#82b366;fontSize=11;"
           vertex="1" parent="frontend">
           <mxGeometry x="20" y="635" width="350" height="165" as="geometry" />
         </mxCell>
@@ -134,6 +134,11 @@
           vertex="1" parent="fe-components">
           <mxGeometry x="10" y="80" width="155" height="28" as="geometry" />
         </mxCell>
+        <mxCell id="fe-c4" value="QuestionPrompt"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f9ffe0;strokeColor=#82b366;fontSize=10;"
+          vertex="1" parent="fe-components">
+          <mxGeometry x="185" y="80" width="155" height="28" as="geometry" />
+        </mxCell>
 
         <!-- Frontend: config.js -->
         <mxCell id="fe-config" value="config.js (VITE_API_URL → API_URL)"
@@ -143,10 +148,10 @@
         </mxCell>
 
         <!-- ========== BACKEND ========== -->
-        <mxCell id="backend" value="&lt;b&gt;Backend&lt;/b&gt;&lt;br/&gt;Flask + PyMongo&lt;br/&gt;Port: 5000"
-          style="swimlane;fontStyle=1;startSize=65;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;align=center;strokeWidth=2;"
+        <mxCell id="backend" value="Backend&#xa;Flask + PyMongo&#xa;Port: 5000"
+          style="swimlane;startSize=65;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;align=center;strokeWidth=2;"
           vertex="1" parent="1">
-          <mxGeometry x="510" y="230" width="450" height="900" as="geometry" />
+          <mxGeometry x="510" y="230" width="450" height="1100" as="geometry" />
         </mxCell>
 
         <!-- Backend: run.py -->
@@ -158,51 +163,66 @@
 
         <!-- Backend: Routes -->
         <mxCell id="be-routes" value="Routes  (routes/api.py)"
-          style="swimlane;startSize=25;fillColor=#fffacd;strokeColor=#d6b656;fontSize=11;fontStyle=1;"
+          style="swimlane;startSize=25;fillColor=#fffacd;strokeColor=#d6b656;fontSize=11;"
           vertex="1" parent="backend">
-          <mxGeometry x="20" y="135" width="410" height="220" as="geometry" />
+          <mxGeometry x="20" y="135" width="410" height="285" as="geometry" />
         </mxCell>
-        <mxCell id="be-r0" value="Session Detection:  GET /api/session/detect/&lt;code&gt;"
+        <mxCell id="be-r-health" value="Health:  GET /api/health"
           style="text;html=1;align=left;fontSize=10;"
           vertex="1" parent="be-routes">
           <mxGeometry x="10" y="30" width="390" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="be-r1" value="Admin:  POST /api/admin/login"
+        <mxCell id="be-r-email" value="Email Verification:  POST /api/email-verification/request, /confirm"
           style="text;html=1;align=left;fontSize=10;"
           vertex="1" parent="be-routes">
           <mxGeometry x="10" y="55" width="390" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="be-r2" value="Sessions:  CRUD  /api/session(s)  —  lock, qualitative, value, bwt"
+        <mxCell id="be-r0" value="Session Detection:  GET /api/session/detect/&lt;code&gt;"
           style="text;html=1;align=left;fontSize=10;"
           vertex="1" parent="be-routes">
           <mxGeometry x="10" y="80" width="390" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="be-r3" value="Study Sessions:  CRUD  /api/study-session(s)  —  elicitation sessions,  reset-sessions / reset-weights / reset-step"
+        <mxCell id="be-r1" value="Admin:  POST /api/admin/login — notify-inactive, delete-inactive"
           style="text;html=1;align=left;fontSize=10;"
           vertex="1" parent="be-routes">
           <mxGeometry x="10" y="105" width="390" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="be-r4" value="Export:  CSV / JSON / ZIP  (value functions, BWT, pile, summary, weight-solutions, ...)"
+        <mxCell id="be-r2" value="Sessions:  CRUD  /api/session(s)  —  lock, criteria, qualitative, value, bwt, complete"
           style="text;html=1;align=left;fontSize=10;"
           vertex="1" parent="be-routes">
           <mxGeometry x="10" y="130" width="390" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="be-r5" value="Workflow:  compute-weights,  run-step,  task status / cancel,  active-task"
+        <mxCell id="be-r3" value="Study Sessions:  CRUD  /api/study-session(s)  —  elicitation sessions,  reset-sessions / reset-weights / reset-step / selective-reset"
           style="text;html=1;align=left;fontSize=10;"
           vertex="1" parent="be-routes">
           <mxGeometry x="10" y="155" width="390" height="20" as="geometry" />
         </mxCell>
-        <mxCell id="be-r6" value="Results:  weight-space,  weight-solutions,  step-results,  workflow-status"
+        <mxCell id="be-r4" value="Export:  CSV / JSON / ZIP  (value functions, BWT, pile, summary, weight-solutions, workflow-export, backup, ...)"
           style="text;html=1;align=left;fontSize=10;"
           vertex="1" parent="be-routes">
           <mxGeometry x="10" y="180" width="390" height="20" as="geometry" />
         </mxCell>
+        <mxCell id="be-r5" value="Workflow:  compute-weights,  run-step,  task status / cancel,  active-task,  workflow-preferences"
+          style="text;html=1;align=left;fontSize=10;"
+          vertex="1" parent="be-routes">
+          <mxGeometry x="10" y="205" width="390" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="be-r6" value="Results:  weight-space,  weight-solutions,  step-results,  workflow-status"
+          style="text;html=1;align=left;fontSize=10;"
+          vertex="1" parent="be-routes">
+          <mxGeometry x="10" y="230" width="390" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="be-r-example" value="Example Case Studies:  GET /api/example-case-study/1, /2"
+          style="text;html=1;align=left;fontSize=10;"
+          vertex="1" parent="be-routes">
+          <mxGeometry x="10" y="255" width="390" height="20" as="geometry" />
+        </mxCell>
 
         <!-- Backend: Services -->
         <mxCell id="be-services" value="Services"
-          style="swimlane;startSize=25;fillColor=#fffacd;strokeColor=#d6b656;fontSize=11;fontStyle=1;"
+          style="swimlane;startSize=25;fillColor=#fffacd;strokeColor=#d6b656;fontSize=11;"
           vertex="1" parent="backend">
-          <mxGeometry x="20" y="375" width="410" height="195" as="geometry" />
+          <mxGeometry x="20" y="440" width="410" height="255" as="geometry" />
         </mxCell>
         <mxCell id="be-s1" value="SessionService"
           style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffff88;strokeColor=#d6b656;fontSize=10;"
@@ -224,17 +244,32 @@
           vertex="1" parent="be-services">
           <mxGeometry x="215" y="80" width="185" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="be-s-note" value="WorkflowService creates Task documents → picked up by Worker"
-          style="text;html=1;align=center;fontSize=10;fontStyle=2;"
+        <mxCell id="be-s5" value="AuthenticationService"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffff88;strokeColor=#d6b656;fontSize=10;"
           vertex="1" parent="be-services">
-          <mxGeometry x="10" y="130" width="390" height="20" as="geometry" />
+          <mxGeometry x="10" y="125" width="185" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="be-s6" value="EmailService"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffff88;strokeColor=#d6b656;fontSize=10;"
+          vertex="1" parent="be-services">
+          <mxGeometry x="215" y="125" width="185" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="be-s7" value="EmailVerificationService"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffff88;strokeColor=#d6b656;fontSize=10;"
+          vertex="1" parent="be-services">
+          <mxGeometry x="10" y="170" width="390" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="be-s-note" value="WorkflowService creates Task documents → picked up by Worker"
+          style="text;html=1;align=center;fontSize=10;"
+          vertex="1" parent="be-services">
+          <mxGeometry x="10" y="215" width="390" height="20" as="geometry" />
         </mxCell>
 
         <!-- Backend: Repositories -->
         <mxCell id="be-repos" value="Repositories"
-          style="swimlane;startSize=25;fillColor=#fffacd;strokeColor=#d6b656;fontSize=11;fontStyle=1;"
+          style="swimlane;startSize=25;fillColor=#fffacd;strokeColor=#d6b656;fontSize=11;"
           vertex="1" parent="backend">
-          <mxGeometry x="20" y="590" width="410" height="200" as="geometry" />
+          <mxGeometry x="20" y="715" width="410" height="200" as="geometry" />
         </mxCell>
         <mxCell id="be-rep1" value="SessionRepository"
           style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffff88;strokeColor=#d6b656;fontSize=10;"
@@ -256,27 +291,37 @@
           vertex="1" parent="be-repos">
           <mxGeometry x="215" y="80" width="185" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="be-rep5" value="BaseRepository"
+        <mxCell id="be-rep5" value="UsersRepository"
           style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffff88;strokeColor=#d6b656;fontSize=10;"
           vertex="1" parent="be-repos">
-          <mxGeometry x="113" y="135" width="185" height="30" as="geometry" />
+          <mxGeometry x="10" y="125" width="185" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="be-rep6" value="BaseRepository"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffff88;strokeColor=#d6b656;fontSize=10;"
+          vertex="1" parent="be-repos">
+          <mxGeometry x="215" y="125" width="185" height="30" as="geometry" />
         </mxCell>
 
-        <!-- Backend: exceptions + tests -->
+        <!-- Backend: exceptions + tests + reset tool -->
         <mxCell id="be-exc" value="exceptions.py (ServiceError)"
           style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffacd;strokeColor=#d6b656;fontSize=10;"
           vertex="1" parent="backend">
-          <mxGeometry x="20" y="810" width="410" height="35" as="geometry" />
+          <mxGeometry x="20" y="935" width="410" height="35" as="geometry" />
         </mxCell>
         <mxCell id="be-tests" value="tests/ (pytest)"
-          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffacd;strokeColor=#d6b656;fontSize=10;fontStyle=2;"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffacd;strokeColor=#d6b656;fontSize=10;"
           vertex="1" parent="backend">
-          <mxGeometry x="20" y="860" width="410" height="35" as="geometry" />
+          <mxGeometry x="20" y="985" width="410" height="35" as="geometry" />
+        </mxCell>
+        <mxCell id="be-reset" value="reset_admin_password.py (CLI tool)"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fffacd;strokeColor=#d6b656;fontSize=10;"
+          vertex="1" parent="backend">
+          <mxGeometry x="20" y="1035" width="410" height="35" as="geometry" />
         </mxCell>
 
         <!-- ========== WORKER ========== -->
-        <mxCell id="worker" value="&lt;b&gt;Worker&lt;/b&gt;&lt;br/&gt;Python + PyMongo&lt;br/&gt;Polls MongoDB every 2 s (FIFO)"
-          style="swimlane;fontStyle=1;startSize=65;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;align=center;strokeWidth=2;"
+        <mxCell id="worker" value="Worker&#xa;Python + PyMongo&#xa;Polls MongoDB every 2 s (FIFO)"
+          style="swimlane;startSize=65;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;align=center;strokeWidth=2;"
           vertex="1" parent="1">
           <mxGeometry x="1030" y="230" width="420" height="560" as="geometry" />
         </mxCell>
@@ -290,7 +335,7 @@
 
         <!-- Worker: Task Handlers -->
         <mxCell id="w-handlers" value="Task Handlers"
-          style="swimlane;startSize=25;fillColor=#ffcccc;strokeColor=#b85450;fontSize=11;fontStyle=1;"
+          style="swimlane;startSize=25;fillColor=#ffcccc;strokeColor=#b85450;fontSize=11;"
           vertex="1" parent="worker">
           <mxGeometry x="20" y="135" width="380" height="100" as="geometry" />
         </mxCell>
@@ -307,45 +352,45 @@
 
         <!-- Worker: Scripts -->
         <mxCell id="w-scripts" value="scripts/"
-          style="swimlane;startSize=25;fillColor=#ffcccc;strokeColor=#b85450;fontSize=11;fontStyle=1;"
+          style="swimlane;startSize=25;fillColor=#ffcccc;strokeColor=#b85450;fontSize=11;"
           vertex="1" parent="worker">
           <mxGeometry x="20" y="255" width="380" height="255" as="geometry" />
         </mxCell>
-        <mxCell id="w-s1" value="weight_space_definition.py&lt;br/&gt;compute_weights()"
+        <mxCell id="w-s1" value="weight_space_definition.py&#xa;compute_weights()"
           style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6e6;strokeColor=#b85450;fontSize=10;"
           vertex="1" parent="w-scripts">
           <mxGeometry x="10" y="35" width="175" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="w-s2" value="upmavt.py&lt;br/&gt;run_upmavt()"
+        <mxCell id="w-s2" value="upmavt.py&#xa;run_upmavt()"
           style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6e6;strokeColor=#b85450;fontSize=10;"
           vertex="1" parent="w-scripts">
           <mxGeometry x="200" y="35" width="170" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="w-s3" value="load_DB.py&lt;br/&gt;load_input_data(), load_session_data(), load_computed_weights()&lt;br/&gt;save_computed_weights(), save_step_results()&lt;br/&gt;build_value_functions_from_session(), build_alternatives_with_qualitative(), ..."
+        <mxCell id="w-s3" value="load_DB.py&#xa;load_input_data(), load_session_data(), load_computed_weights()&#xa;save_computed_weights(), save_step_results()&#xa;build_value_functions_from_session(), build_alternatives_with_qualitative(), ..."
           style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6e6;strokeColor=#b85450;fontSize=10;"
           vertex="1" parent="w-scripts">
           <mxGeometry x="10" y="100" width="360" height="70" as="geometry" />
         </mxCell>
         <mxCell id="w-logger" value="TaskLogger  (streams console output to DB)"
-          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6e6;strokeColor=#b85450;fontSize=10;fontStyle=2;"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6e6;strokeColor=#b85450;fontSize=10;"
           vertex="1" parent="w-scripts">
           <mxGeometry x="10" y="190" width="360" height="28" as="geometry" />
         </mxCell>
 
         <!-- ========== MONGODB ========== -->
-        <mxCell id="mongo" value="&lt;b&gt;MongoDB&lt;/b&gt;&lt;br/&gt;image: mongo:7.0&lt;br/&gt;Port: 27017  |  DB: elicitation"
-          style="swimlane;fontStyle=1;startSize=65;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;align=center;strokeWidth=2;"
+        <mxCell id="mongo" value="MongoDB&#xa;image: mongo:7.0&#xa;Port: 27017  |  DB: elicitation"
+          style="swimlane;startSize=65;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;align=center;strokeWidth=2;"
           vertex="1" parent="1">
-          <mxGeometry x="1030" y="860" width="420" height="340" as="geometry" />
+          <mxGeometry x="1030" y="860" width="420" height="390" as="geometry" />
         </mxCell>
 
         <!-- MongoDB: Collections -->
         <mxCell id="mongo-cols" value="Collections"
-          style="swimlane;startSize=25;fillColor=#e8d5f0;strokeColor=#9673a6;fontSize=11;fontStyle=1;"
+          style="swimlane;startSize=25;fillColor=#e8d5f0;strokeColor=#9673a6;fontSize=11;"
           vertex="1" parent="mongo">
-          <mxGeometry x="20" y="80" width="380" height="215" as="geometry" />
+          <mxGeometry x="20" y="80" width="380" height="265" as="geometry" />
         </mxCell>
-        <mxCell id="mc-1" value="&lt;b&gt;sessions&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:9px;&quot;&gt;standalone &amp; study-linked elicitation sessions&lt;br/&gt;(study-linked docs carry study_session_id)&lt;/font&gt;"
+        <mxCell id="mc-1" value="sessions&#xa;standalone &amp; study-linked elicitation sessions (study-linked docs carry study_session_id)"
           style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5ff;strokeColor=#9673a6;fontSize=10;"
           vertex="1" parent="mongo-cols">
           <mxGeometry x="10" y="35" width="355" height="38" as="geometry" />
@@ -360,50 +405,55 @@
           vertex="1" parent="mongo-cols">
           <mxGeometry x="195" y="85" width="170" height="28" as="geometry" />
         </mxCell>
-        <mxCell id="mc-4" value="&lt;b&gt;tasks&lt;/b&gt;&lt;br/&gt;&lt;font style=&quot;font-size:9px;&quot;&gt;background job queue (compute_weights, run_step)&lt;br/&gt;polled by Worker; status: pending → running → completed/failed/cancelled&lt;/font&gt;"
+        <mxCell id="mc-5" value="users"
           style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5ff;strokeColor=#9673a6;fontSize=10;"
           vertex="1" parent="mongo-cols">
-          <mxGeometry x="10" y="125" width="355" height="38" as="geometry" />
+          <mxGeometry x="10" y="125" width="170" height="28" as="geometry" />
+        </mxCell>
+        <mxCell id="mc-4" value="tasks&#xa;background job queue (compute_weights, run_step) — polled by Worker; status: pending → running → completed/failed/cancelled"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5ff;strokeColor=#9673a6;fontSize=10;"
+          vertex="1" parent="mongo-cols">
+          <mxGeometry x="10" y="165" width="355" height="38" as="geometry" />
         </mxCell>
         <mxCell id="mc-vol" value="Volume: mongo_data  (persistent)"
-          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5ff;strokeColor=#9673a6;fontSize=10;fontStyle=2;"
+          style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5ff;strokeColor=#9673a6;fontSize=10;"
           vertex="1" parent="mongo-cols">
-          <mxGeometry x="10" y="165" width="355" height="28" as="geometry" />
+          <mxGeometry x="10" y="215" width="355" height="28" as="geometry" />
         </mxCell>
 
         <!-- ========== EDGES ========== -->
 
         <!-- Browser → Frontend (HTTP :3000) -->
         <mxCell id="e-browser-fe" value="HTTP :3000"
-          style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#82b366;strokeWidth=2;fontStyle=1;fontSize=10;endArrow=block;endFill=1;"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#82b366;strokeWidth=2;fontSize=10;endArrow=block;endFill=1;"
           edge="1" source="browser" target="frontend" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
         <!-- Frontend → Backend (REST API :5000) -->
         <mxCell id="e-fe-be" value="REST API (axios)  :5000"
-          style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#d6b656;strokeWidth=2;fontStyle=1;fontSize=10;endArrow=block;endFill=1;"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#d6b656;strokeWidth=2;fontSize=10;endArrow=block;endFill=1;"
           edge="1" source="frontend" target="backend" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
         <!-- Backend → MongoDB (pymongo reads/writes) -->
         <mxCell id="e-be-mongo" value="pymongo  :27017"
-          style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.8;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#9673a6;strokeWidth=2;fontStyle=1;fontSize=10;endArrow=block;endFill=1;"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.8;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;strokeColor=#9673a6;strokeWidth=2;fontSize=10;endArrow=block;endFill=1;"
           edge="1" source="backend" target="mongo" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
         <!-- Backend → Worker (task queue via MongoDB) -->
-        <mxCell id="e-be-worker" value="Creates Task doc in DB&lt;br/&gt;(async task queue)"
-          style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.2;exitDx=0;exitDy=0;entryX=0;entryY=0.2;entryDx=0;entryDy=0;dashed=1;strokeColor=#b85450;strokeWidth=2;fontStyle=2;fontSize=10;endArrow=block;endFill=1;"
+        <mxCell id="e-be-worker" value="Creates Task doc in DB&#xa;(async task queue)"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=1;exitY=0.2;exitDx=0;exitDy=0;entryX=0;entryY=0.2;entryDx=0;entryDy=0;dashed=1;strokeColor=#b85450;strokeWidth=2;fontSize=10;endArrow=block;endFill=1;"
           edge="1" source="backend" target="worker" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
 
         <!-- Worker → MongoDB (polls tasks + saves results) -->
-        <mxCell id="e-worker-mongo" value="pymongo  :27017&lt;br/&gt;(polls tasks, saves results)"
-          style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#9673a6;strokeWidth=2;fontStyle=1;fontSize=10;endArrow=block;endFill=1;"
+        <mxCell id="e-worker-mongo" value="pymongo  :27017&#xa;(polls tasks, saves results)"
+          style="edgeStyle=orthogonalEdgeStyle;html=1;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;strokeColor=#9673a6;strokeWidth=2;fontSize=10;endArrow=block;endFill=1;"
           edge="1" source="worker" target="mongo" parent="1">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
