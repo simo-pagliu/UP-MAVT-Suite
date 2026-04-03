@@ -86,6 +86,29 @@ class StudySessionRepository(BaseRepository):
             return 0
         return self._col.delete_one({'_id': oid}).deleted_count
 
+    def find_inactive_since(self, cutoff):
+        """Return study sessions with no activity since *cutoff*.
+
+        Uses ``last_modified_at`` when present, falling back to ``created_at``.
+
+        Args:
+            cutoff (datetime): UTC-aware cutoff datetime.
+
+        Returns:
+            list[dict]: Matching study session documents.
+        """
+        return list(self._col.find({
+            '$or': [
+                {'last_modified_at': {'$lte': cutoff}},
+                {
+                    '$and': [
+                        {'$or': [{'last_modified_at': {'$exists': False}}, {'last_modified_at': None}]},
+                        {'created_at': {'$lte': cutoff}},
+                    ]
+                },
+            ]
+        }))
+
     def unset_fields(self, study_session_id, field_names):
         """Remove specific fields from a study session document using ``$unset``.
 

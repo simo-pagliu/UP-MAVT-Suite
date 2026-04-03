@@ -296,7 +296,7 @@ class TestCreateCreatorEmail:
 
 
 # ---------------------------------------------------------------------------
-# import_backup_zip – creator_email overwrite/preserve
+# import_study_case – creator_email overwrite/preserve
 # ---------------------------------------------------------------------------
 
 class TestImportBackupCreatorEmail:
@@ -305,7 +305,7 @@ class TestImportBackupCreatorEmail:
         svc.update_input(source_id, VALID_CRITERIA)
         buf, _, _ = svc.export_backup_zip(source_id)
 
-        result = svc.import_backup_zip(
+        result = svc.import_study_case(
             buf.getvalue(),
             on_conflict='regenerate',
             contact_email='current-login@example.com',
@@ -319,7 +319,7 @@ class TestImportBackupCreatorEmail:
         svc.update_input(source_id, VALID_CRITERIA)
         buf, _, _ = svc.export_backup_zip(source_id)
 
-        result = svc.import_backup_zip(
+        result = svc.import_study_case(
             buf.getvalue(),
             on_conflict='regenerate',
             contact_email='admin-current@example.com',
@@ -336,7 +336,7 @@ class TestImportBackupEmptyCriteria:
         # No criteria and no sessions: backup should still be importable.
         buf, _, _ = svc.export_backup_zip(source_id)
 
-        result = svc.import_backup_zip(
+        result = svc.import_study_case(
             buf.getvalue(),
             on_conflict='regenerate',
             contact_email='uploader@example.com',

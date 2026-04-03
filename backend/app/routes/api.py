@@ -1,6 +1,10 @@
 from flask import Blueprint, request, jsonify, current_app, send_file
+import hmac
 import io
+import json
 import logging
+import os
+import zipfile
 
 from app.exceptions import ServiceError
 from app.services import (
@@ -414,8 +418,7 @@ def create_study_session():
     auto_generate = bool(data.get('auto_generate', False))
     if not code and auto_generate:
         code = svc.generate_unique_study_code()
-    # Backward compatibility: older frontend payloads used contact_email.
-    creator_email = str(data.get('creator_email') or data.get('contact_email') or '').strip()
+    creator_email = str(data.get('creator_email') or '').strip()
     if creator_email:
         verification_token = str(data.get('email_verification_token') or '').strip()
         verification_svc = EmailVerificationService(current_app.db)
@@ -537,7 +540,7 @@ def export_study_backup(study_session_id):
 
 
 @bp.route('/study-session/backup/import', methods=['POST'])
-def import_study_backup():
+def upload_case_study():
     upload = request.files.get('file')
     if upload is None:
         return jsonify({'error': 'Missing file upload'}), 400
@@ -554,7 +557,7 @@ def import_study_backup():
         'on',
     )
     study_svc = StudySessionService(current_app.db)
-    result = study_svc.import_backup_zip(
+    result = study_svc.import_study_case(
         zip_bytes,
         on_conflict=on_conflict,
         contact_email=contact_email,
@@ -574,45 +577,10 @@ def import_study_backup():
     return jsonify(result), 201
 
 
-def _build_example_zip(name, title, description):
-    """Build a minimal placeholder backup ZIP for example case studies."""
-    import json as _json
-    import zipfile as _zipfile
-
-    metadata = {
-        'version': 2,
-        'exported_at': '2024-01-01T00:00:00+00:00',
-        'study': {
-            'code': name,
-            'title': title,
-            'description': description,
-            'features': {'qi': True, 'vf': True, 'bwt': True},
-            'vf_method': 'mid-splitting',
-            'created_at': '2024-01-01T00:00:00+00:00',
-        },
-        'sessions': [],
-        'workflow': {
-            'workflow_preferences': {},
-            'computed_weights': {},
-            'step_2_results': None,
-            'step_3_results': None,
-            'step_4_results': None,
-            'step_5_results': None,
-            'step_6_results': None,
-        },
-    }
-    buf = io.BytesIO()
-    with _zipfile.ZipFile(buf, 'w', _zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr('metadata.json', _json.dumps(metadata, indent=2))
-        zf.writestr('input/input.json', _json.dumps({'criteria': []}, indent=2))
-    buf.seek(0)
-    return buf
-
-
 @bp.route('/example-case-study/1', methods=['GET'])
 def download_example_case_study_1():
     """Download a placeholder example case study ZIP."""
-    buf = _build_example_zip(
+    buf = StudySessionService.build_example_case_study_zip(
         'EXAMPLE1',
         'Example Case Study 1',
         'Placeholder example case study. Replace with a real case study ZIP.',
@@ -623,7 +591,7 @@ def download_example_case_study_1():
 @bp.route('/example-case-study/2', methods=['GET'])
 def download_example_case_study_2():
     """Download a placeholder example case study ZIP."""
-    buf = _build_example_zip(
+    buf = StudySessionService.build_example_case_study_zip(
         'EXAMPLE2',
         'Example Case Study 2',
         'Placeholder example case study. Replace with a real case study ZIP.',

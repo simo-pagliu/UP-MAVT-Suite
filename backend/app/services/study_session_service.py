@@ -657,7 +657,7 @@ class StudySessionService:
         buf.seek(0)
         return buf, f'backup_{study.get("code", study_session_id)}.zip', 'application/zip'
 
-    def import_backup_zip(self, zip_bytes, on_conflict='abort', contact_email='', preserve_backup_email=False):
+    def import_study_case(self, zip_bytes, on_conflict='abort', contact_email='', preserve_backup_email=False):
         if on_conflict not in ('abort', 'regenerate'):
             raise ValidationError('Invalid on_conflict value')
 
@@ -757,6 +757,51 @@ class StudySessionService:
         }
 
     # ------------------------------------------------------------------
+    # Example case study helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def build_example_case_study_zip(name, title, description):
+        """Build a minimal placeholder backup ZIP for an example case study.
+
+        Args:
+            name (str): Study code for the example.
+            title (str): Human-readable title.
+            description (str): Short description.
+
+        Returns:
+            io.BytesIO: In-memory ZIP buffer positioned at the start.
+        """
+        metadata = {
+            'version': 2,
+            'exported_at': '2024-01-01T00:00:00+00:00',
+            'study': {
+                'code': name,
+                'title': title,
+                'description': description,
+                'features': {'qi': True, 'vf': True, 'bwt': True},
+                'vf_method': 'mid-splitting',
+                'created_at': '2024-01-01T00:00:00+00:00',
+            },
+            'sessions': [],
+            'workflow': {
+                'workflow_preferences': {},
+                'computed_weights': {},
+                'step_2_results': None,
+                'step_3_results': None,
+                'step_4_results': None,
+                'step_5_results': None,
+                'step_6_results': None,
+            },
+        }
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr('metadata.json', json.dumps(metadata, indent=2))
+            zf.writestr('input/input.json', json.dumps({'criteria': []}, indent=2))
+        buf.seek(0)
+        return buf
+
+    # ------------------------------------------------------------------
     # Email-notification helpers
     # ------------------------------------------------------------------
 
@@ -809,8 +854,9 @@ class StudySessionService:
             ``'months_inactive'`` key.
         """
         from datetime import timedelta
-        cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
-        studies = self._studies.find_all()
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(days=months * 30)
+        studies = self._studies.find_inactive_since(cutoff)
         inactive = []
         for study in studies:
             last_activity = study.get('last_modified_at') or study.get('created_at')
@@ -818,12 +864,11 @@ class StudySessionService:
                 continue
             if last_activity.tzinfo is None:
                 last_activity = last_activity.replace(tzinfo=timezone.utc)
-            if last_activity <= cutoff:
-                delta_days = (datetime.now(timezone.utc) - last_activity).days
-                months_inactive = delta_days / 30.0
-                serialised = self._serialize_study(study)
-                serialised['months_inactive'] = months_inactive
-                inactive.append(serialised)
+            delta_days = (now - last_activity).days
+            months_inactive = delta_days / 30.0
+            serialised = self._serialize_study(study)
+            serialised['months_inactive'] = months_inactive
+            inactive.append(serialised)
         return inactive
 
     def delete_inactive_study_sessions(self, months=12):
