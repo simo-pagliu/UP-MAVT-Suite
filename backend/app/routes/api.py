@@ -4,7 +4,7 @@ import logging
 
 from app.exceptions import ServiceError
 from app.services import (
-    AdminService,
+    AuthenticationService,
     SessionService,
     StudySessionService,
     ExportService,
@@ -102,7 +102,7 @@ def admin_login():
     password = data.get('password')
     if not password:
         return jsonify({'success': False, 'error': 'Password is required'}), 400
-    if AdminService().authenticate(password):
+    if AuthenticationService().authenticate(password):
         return jsonify({'success': True}), 200
     return jsonify({'success': False, 'error': 'Invalid password'}), 401
 
@@ -123,7 +123,7 @@ def notify_inactive_study_sessions():
     password = data.get('password')
     if not password:
         return jsonify({'success': False, 'error': 'Password is required'}), 400
-    if not AdminService().authenticate(password):
+    if not AuthenticationService().authenticate(password):
         return jsonify({'success': False, 'error': 'Invalid password'}), 401
 
     months = int(data.get('months', 12))
