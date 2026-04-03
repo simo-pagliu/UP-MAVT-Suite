@@ -229,8 +229,16 @@ function App() {
         onLogout={handleLogout}
         onDocumentation={handleDocumentation}
       />
-      {/* Login Page - Landing page (full width, no boxed container) */}
-      {!isLoggedIn && <LoginPage onLogin={handleLogin} onDocumentation={handleDocumentation} />}
+      {/* Login/Documentation for unauthenticated users */}
+      {!isLoggedIn && !showDocumentation && (
+        <LoginPage onLogin={handleLogin} onDocumentation={handleDocumentation} />
+      )}
+
+      {!isLoggedIn && showDocumentation && (
+        <Box py={8} px={{ base: 4, md: 8 }}>
+          <DocumentationPage />
+        </Box>
+      )}
 
       {isLoggedIn && (
         <Box py={8} px={{ base: 4, md: 8 }}>

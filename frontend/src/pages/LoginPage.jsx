@@ -308,7 +308,7 @@ function LoginPage({ onLogin, onDocumentation }) {
               <Box bg="blue.50" borderRadius="md" p={4} borderWidth={1} borderColor="blue.100">
                 <Text fontWeight="semibold" mb={1}>2. Elicit preferences</Text>
                 <Text fontSize="sm" color="gray.600">
-                  Stakeholders complete qualitative, value-function, and weight elicitation steps.
+                  Stakeholders complete Qualitative Indicators, Quantitative Indicators, and Weight Elicitation steps.
                 </Text>
               </Box>
               <Box bg="blue.50" borderRadius="md" p={4} borderWidth={1} borderColor="blue.100">

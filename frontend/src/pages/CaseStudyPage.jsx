@@ -148,9 +148,9 @@ const buildProgress = (criteria, session) => {
   )
 
   const steps = [
-    { key: 'qi', label: 'QI', done: hasQualitativeIndicators },
-    { key: 'vf', label: 'VF', done: hasValueFunctions },
-    { key: 'bwt', label: 'Weights', done: hasBwt },
+    { key: 'qi', label: 'Qualitative Indicators', done: hasQualitativeIndicators },
+    { key: 'vf', label: 'Quantitative Indicators', done: hasValueFunctions },
+    { key: 'bwt', label: 'Weight Elicitation', done: hasBwt },
   ]
 
   const completed = steps.filter((s) => s.done).length
@@ -214,6 +214,38 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
   useEffect(() => {
     loadSessions()
   }, [studySessionId])
+
+  const handleFeatureToggle = async (featureName) => {
+    const newFeatures = { ...features, [featureName]: !features[featureName] }
+    setFeatures(newFeatures)
+    
+    // Save to backend
+    setSavingFeatures(true)
+    try {
+      await axios.patch(`${API_URL}/study-session/${studySessionId}`, {
+        features: newFeatures
+      })
+      toast({
+        title: 'Features updated',
+        description: `${featureName === 'qi' ? 'Qualitative Indicators' : featureName === 'vf' ? 'Quantitative Indicators' : 'Weight Elicitation'} ${newFeatures[featureName] ? 'enabled' : 'disabled'}`,
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
+      })
+    } catch (error) {
+      // Revert on error
+      setFeatures(features)
+      toast({
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to update features',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+    } finally {
+      setSavingFeatures(false)
+    }
+  }
 
   const sessionRows = useMemo(() => {
     return sessions.map((session) => ({

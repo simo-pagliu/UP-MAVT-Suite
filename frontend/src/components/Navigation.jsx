@@ -16,7 +16,7 @@ function Navigation({
     { id: 'recap', label: 'Overview', requiresSession: true },
     { id: 'qualitative', label: 'Qualitative Indicators', requiresSession: true, featureKey: 'qi' },
     { id: 'value', label: 'Quantitative Indicators', requiresSession: true, featureKey: 'vf' },
-    { id: 'pile', label: 'Weights', requiresSession: true, featureKey: 'bwt' },
+    { id: 'pile', label: 'Weight Elicitation', requiresSession: true, featureKey: 'bwt' },
   ]
 
   // Filter pages based on enabled features
@@ -88,7 +88,7 @@ function Navigation({
         
         <Spacer />
         
-        {isLoggedIn && currentRole !== 'admin' && (
+        {currentRole !== 'admin' && (
           <IconButton
             aria-label="Documentation"
             icon={<InfoIcon />}

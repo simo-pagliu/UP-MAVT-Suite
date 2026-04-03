@@ -1107,7 +1107,7 @@ function InputPage({ studySessionId }, ref) {
                                 textAlign="center"
                               >
                                 <Text fontSize="sm" color="gray.500">
-                                  (QI Page)
+                                  (Qualitative Indicators page)
                                 </Text>
                               </Box>
                             ) : isLocked ? (

@@ -617,8 +617,8 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       if (hasIntraW) resetGroups.push('intra-W')
       
       toast({
-        title: 'Weight elicitation partially reset',
-        description: `Reset groups: ${resetGroups.join(', ')} after QI/VF changes.`,
+        title: 'Weight Elicitation partially reset',
+        description: `Reset groups: ${resetGroups.join(', ')} after Qualitative Indicators / Quantitative Indicators changes.`,
         status: 'warning',
         isClosable: true,
       })
@@ -752,7 +752,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     if (!bwtLockActive) {
       toast({
         title: 'Lock required',
-        description: 'Please lock QI/VF from the banner above before editing weight elicitation.',
+        description: 'Please lock Qualitative Indicators and Quantitative Indicators from the banner above before editing Weight Elicitation.',
         status: 'info',
         isClosable: true,
       })
@@ -775,7 +775,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       setStep('select-criteria')
       toast({
         title: 'Unlocked',
-        description: 'QI/VF can now be edited. Existing BWT comparisons were kept.',
+        description: 'Qualitative Indicators and Quantitative Indicators can now be edited. Existing Weight Elicitation comparisons were kept.',
         status: 'warning',
         isClosable: true,
       })
@@ -1192,7 +1192,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     if (!bwtLockActive) {
       toast({
         title: 'Lock required',
-        description: 'Please lock QI/VF from the banner above before starting weight elicitation.',
+        description: 'Please lock Qualitative Indicators and Quantitative Indicators from the banner above before starting Weight Elicitation.',
         status: 'info',
         isClosable: true,
       })
@@ -1213,15 +1213,15 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       setBwtLockActive(true)
       syncBwtSignatures()
       toast({
-        title: 'QI/VF locked',
-        description: 'You can now start weight elicitation.',
+        title: 'Qualitative and Quantitative Indicators locked',
+        description: 'You can now start Weight Elicitation.',
         status: 'success',
         isClosable: true,
       })
     } catch (error) {
       toast({
         title: 'Request failed',
-        description: error.response?.data?.error || 'Failed to lock QI/VF',
+        description: error.response?.data?.error || 'Failed to lock Qualitative Indicators and Quantitative Indicators',
         status: 'error',
         isClosable: true,
       })
@@ -2220,7 +2220,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               </ResponsiveContainer>
             ) : (
               <Text color="gray.500" textAlign="center" py={8}>
-                No VF data
+                No Quantitative Indicators data
               </Text>
             )}
           </Box>
@@ -2244,7 +2244,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         overflowY="auto"
       >
         <VStack spacing={4} align="stretch" mb={6}>
-          <Heading size="md">Weights</Heading>
+          <Heading size="md">Weight Elicitation</Heading>
           <Text fontSize="sm" color="gray.600">
             Perform pairwise comparisons to determine criterion weights.
           </Text>
@@ -2453,10 +2453,10 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               <InfoIcon color="blue.600" />
               <VStack align="start" spacing={2} flex={1}>
                 <Text fontSize="sm" color="blue.800" fontWeight="semibold">
-                  To work on weight elicitation, you need to lock QI and VF pages. Weight elicitation remains editable while locked.
+                  To work on Weight Elicitation, you need to lock Qualitative Indicators and Quantitative Indicators pages. Weight Elicitation remains editable while locked.
                 </Text>
                 <Button size="xs" colorScheme="blue" onClick={handleLockForBwt} isLoading={saving}>
-                  Lock QI/VF to continue
+                  Lock Qualitative and Quantitative Indicators to continue
                 </Button>
               </VStack>
             </HStack>
@@ -2467,16 +2467,16 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               <CheckCircleIcon color="green.600" />
               <VStack align="start" spacing={2} flex={1}>
                 <Text fontSize="sm" color="green.800" fontWeight="semibold">
-                  QI and VF are locked. You can now work on weight elicitation.
+                  Qualitative Indicators and Quantitative Indicators are locked. You can now work on Weight Elicitation.
                 </Text>
                 {!showUnlockConfirm ? (
                   <Button size="xs" variant="outline" colorScheme="green" onClick={() => setShowUnlockConfirm(true)} isLoading={saving}>
-                    Unlock for QI/VF edits
+                    Unlock for Qualitative and Quantitative edits
                   </Button>
                 ) : (
                   <HStack spacing={2}>
                     <Text fontSize="xs" color="green.800">
-                      This will re-enable QI and VF editing. Continue?
+                      This will re-enable Qualitative Indicators and Quantitative Indicators editing. Continue?
                     </Text>
                     <Button size="xs" colorScheme="green" onClick={handleUnlockForModification} isLoading={saving}>
                       Yes, unlock
