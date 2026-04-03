@@ -421,3 +421,61 @@ class TestGetInactiveStudySessions:
         )
         inactive = svc.get_inactive_study_sessions(months=12)
         assert any(s['code'] == 'OLD-FALLBACK' for s in inactive)
+
+
+# ---------------------------------------------------------------------------
+# delete_inactive_study_sessions
+# ---------------------------------------------------------------------------
+
+class TestDeleteInactiveStudySessions:
+    def _make_old_study(self, svc, mock_db, code, days=400, creator_email=''):
+        from datetime import datetime, timezone, timedelta
+        sid = svc.create(code, creator_email=creator_email)
+        old_date = datetime.now(timezone.utc) - timedelta(days=days)
+        mock_db.study_sessions.update_one(
+            {'_id': ObjectId(sid)},
+            {'$set': {'last_modified_at': old_date}},
+        )
+        return sid
+
+    def test_returns_empty_when_no_inactive(self, svc):
+        svc.create('RECENT')
+        deleted = svc.delete_inactive_study_sessions(months=12)
+        assert deleted == []
+
+    def test_deletes_inactive_session(self, svc, mock_db):
+        sid = self._make_old_study(svc, mock_db, 'OLD-DEL')
+        deleted = svc.delete_inactive_study_sessions(months=12)
+        assert any(d['code'] == 'OLD-DEL' for d in deleted)
+        assert mock_db.study_sessions.find_one({'_id': ObjectId(sid)}) is None
+
+    def test_deleted_result_has_expected_keys(self, svc, mock_db):
+        self._make_old_study(svc, mock_db, 'OLD-KEYS', creator_email='p@example.com')
+        deleted = svc.delete_inactive_study_sessions(months=12)
+        entry = deleted[0]
+        assert 'code' in entry
+        assert 'creator_email' in entry
+        assert 'months_inactive' in entry
+        assert entry['creator_email'] == 'p@example.com'
+
+    def test_deletes_child_elicitation_sessions(self, svc, mock_db):
+        from app.services.session_service import SessionService
+        sid = self._make_old_study(svc, mock_db, 'OLD-WITH-SESSIONS')
+        # Inject an elicitation session directly since create_elicitation_session
+        # requires input criteria to be defined.
+        from datetime import datetime, timezone
+        mock_db.sessions.insert_one({
+            'name': 'SH-1',
+            'study_session_id': ObjectId(sid),
+            'created_at': datetime.now(timezone.utc),
+        })
+        assert mock_db.sessions.count_documents({'study_session_id': ObjectId(sid)}) == 1
+        svc.delete_inactive_study_sessions(months=12)
+        assert mock_db.sessions.count_documents({'study_session_id': ObjectId(sid)}) == 0
+
+    def test_recent_sessions_not_deleted(self, svc, mock_db):
+        sid_recent = svc.create('KEEP-ME')
+        sid_old = self._make_old_study(svc, mock_db, 'DELETE-ME')
+        deleted = svc.delete_inactive_study_sessions(months=12)
+        assert any(d['code'] == 'DELETE-ME' for d in deleted)
+        assert mock_db.study_sessions.find_one({'_id': ObjectId(sid_recent)}) is not None
