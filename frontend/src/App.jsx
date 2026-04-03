@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { Box } from '@chakra-ui/react'
+import { useState, useEffect, useCallback } from 'react'
+import { Box, useToast } from '@chakra-ui/react'
 import axios from 'axios'
 import { API_URL } from './config'
 import Navigation from './components/Navigation'
@@ -33,7 +33,8 @@ function App() {
 
   // Practitioner session credentials
   const [studySessionId, setStudySessionId] = useState(null)
-  const [studyCode, setStudyCode] = useState('')
+
+  const toast = useToast()
 
   /**
    * Fetches the enabled feature flags (qi, vf, bwt) for a given stakeholder
@@ -63,10 +64,10 @@ function App() {
    * stakeholders — fetches the feature flags.
    *
    * @param {string|null} id   - Session ID (stakeholder) or study-session ID (practitioner). Null for admin.
-   * @param {string}      code - Human-readable session code.
+    * @param {string}      code - Session identifier label.
    * @param {'stakeholder'|'practitioner'|'admin'} role - Authenticated role.
    */
-  const handleLogin = (id, code, role) => {
+  const handleLogin = useCallback((id, code, role) => {
     setIsLoggedIn(true)
     setCurrentRole(role)
     setCurrentSessionId(id)
@@ -83,11 +84,12 @@ function App() {
     } else if (role === 'practitioner') {
       // For practitioner, the id is the study session id
       setStudySessionId(id)
-      setStudyCode(code)
       setPractitionerPage('input-definition')
     }
     // For admin role, no additional setup needed
-  }
+  // fetchSessionFeatures is stable (only calls setState setters internally)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   /** Resets all session state and returns to the login screen. */
   const handleLogout = () => {
@@ -98,7 +100,6 @@ function App() {
     setSessionId(null)
     setSessionCode('')
     setStudySessionId(null)
-    setStudyCode('')
     setStakeholderPage('qualitative')
     setPractitionerPage('input-definition')
     setShowDocumentation(false)
@@ -130,7 +131,7 @@ function App() {
    * feature flags so the navigation reflects the correct enabled steps.
    *
    * @param {string}      id   - Stakeholder elicitation session ID.
-   * @param {string|null} code - Session code (may be empty for admin-created sessions).
+    * @param {string|null} code - Session identifier label.
    */
   const handleSessionAccessed = (id, code) => {
     setSessionId(id)
@@ -150,18 +151,53 @@ function App() {
    * Stores the accessed practitioner study session.
    *
    * @param {string}      id   - Study session ID.
-   * @param {string|null} code - Study code displayed in the UI.
+   * @param {string|null} code - Deprecated legacy code (ignored).
    */
   const handleStudySessionAccessed = (id, code) => {
     setStudySessionId(id)
-    setStudyCode(code || '')
   }
 
   /** Clears the active practitioner study session. */
   const handleStudySessionCleared = () => {
     setStudySessionId(null)
-    setStudyCode('')
   }
+
+  /**
+   * On mount, check for a ?uuid= query parameter and auto-login if present.
+   */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const uuid = params.get('uuid')
+    if (!uuid) return
+
+    axios.get(`${API_URL}/session/detect/${encodeURIComponent(uuid)}`)
+      .then(({ data }) => {
+        if (data.exists) {
+          handleLogin(data._id, data._id, data.type)
+          // Remove the uuid param from the URL without triggering a reload
+          const url = new URL(window.location.href)
+          url.searchParams.delete('uuid')
+          window.history.replaceState({}, '', url.toString())
+        } else {
+          toast({
+            title: 'Session not found',
+            description: 'The link UUID did not match any session.',
+            status: 'error',
+            duration: 5000,
+            isClosable: true,
+          })
+        }
+      })
+      .catch(() => {
+        toast({
+          title: 'Auto-login failed',
+          description: 'Could not load the session from the link UUID.',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        })
+      })
+  }, [handleLogin, toast])
 
   const currentPage = currentRole === 'stakeholder' ? stakeholderPage : practitionerPage
 
@@ -228,7 +264,6 @@ function App() {
               {currentPage === 'case-study' && (
                 <CaseStudyPage
                   studySessionId={studySessionId}
-                  studyCode={studyCode}
                   onStudyAccessed={handleStudySessionAccessed}
                   onClearStudy={handleStudySessionCleared}
                 />

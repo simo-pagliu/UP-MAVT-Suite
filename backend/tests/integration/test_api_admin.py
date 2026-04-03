@@ -1,6 +1,7 @@
 """Integration tests for the admin API endpoints."""
 import os
 import pytest
+from werkzeug.security import generate_password_hash
 
 
 class TestAdminLogin:
@@ -23,10 +24,102 @@ class TestAdminLogin:
 
     def test_login_no_json_body(self, client):
         resp = client.post('/api/admin/login', data='not json', content_type='text/plain')
-        assert resp.status_code in (400, 415)
+        assert resp.status_code == 400
 
     def test_default_password_is_admin123(self, client, monkeypatch):
         # Unset env var so the default is used
         monkeypatch.delenv('ADMIN_PASSWORD', raising=False)
         resp = client.post('/api/admin/login', json={'password': 'admin123'})
         assert resp.status_code == 200
+
+
+class TestDeleteInactiveStudySessions:
+    """Integration tests for the /admin/delete-inactive endpoint."""
+
+    def _create_old_study(self, client, mock_db, code, days=400):
+        """Create a study session then backdate its last_modified_at."""
+        from datetime import datetime, timezone, timedelta
+        from bson.objectid import ObjectId
+        resp = client.post('/api/study-session', json={'code': code})
+        sid = resp.json['study_session_id']
+        old_date = datetime.now(timezone.utc) - timedelta(days=days)
+        mock_db.study_sessions.update_one(
+            {'_id': ObjectId(sid)},
+            {'$set': {'last_modified_at': old_date}},
+        )
+        return sid
+
+    def test_requires_password(self, client):
+        resp = client.post('/api/admin/delete-inactive', json={})
+        assert resp.status_code == 400
+        assert resp.json['success'] is False
+
+    def test_wrong_password_returns_401(self, client, monkeypatch):
+        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
+        resp = client.post('/api/admin/delete-inactive', json={'password': 'wrong'})
+        assert resp.status_code == 401
+
+    def test_correct_password_returns_200(self, client, monkeypatch):
+        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
+        resp = client.post('/api/admin/delete-inactive', json={'password': 'secret'})
+        assert resp.status_code == 200
+        assert resp.json['success'] is True
+
+    def test_response_shape(self, client, monkeypatch):
+        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
+        resp = client.post('/api/admin/delete-inactive', json={'password': 'secret'})
+        assert resp.status_code == 200
+        data = resp.json
+        assert 'inactive_count' in data
+        assert 'deleted_count' in data
+        assert 'deleted' in data
+        assert 'email_results' in data
+
+    def test_inactive_session_is_deleted(self, client, monkeypatch, mock_db):
+        from bson.objectid import ObjectId
+        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
+        sid = self._create_old_study(client, mock_db, 'OLD-TO-DELETE')
+        resp = client.post('/api/admin/delete-inactive', json={
+            'password': 'secret',
+            'send_backup_email': False,
+        })
+        assert resp.status_code == 200
+        assert resp.json['deleted_count'] >= 1
+        deleted_codes = [d['code'] for d in resp.json['deleted']]
+        assert 'OLD-TO-DELETE' in deleted_codes
+        assert mock_db.study_sessions.find_one({'_id': ObjectId(sid)}) is None
+
+    def test_recent_session_is_not_deleted(self, client, monkeypatch, mock_db):
+        from bson.objectid import ObjectId
+        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
+        resp_recent = client.post('/api/study-session', json={'code': 'KEEP-RECENT'})
+        sid_recent = resp_recent.json['study_session_id']
+        # Also create an old session so something gets deleted (shows the endpoint ran)
+        self._create_old_study(client, mock_db, 'DELETE-OLD-BUT-NOT-RECENT')
+        resp = client.post('/api/admin/delete-inactive', json={
+            'password': 'secret',
+            'send_backup_email': False,
+        })
+        assert resp.status_code == 200
+        assert mock_db.study_sessions.find_one({'_id': ObjectId(sid_recent)}) is not None
+
+    def test_no_inactive_sessions_returns_zero_deleted(self, client, monkeypatch):
+        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
+        resp = client.post('/api/admin/delete-inactive', json={'password': 'secret'})
+        assert resp.status_code == 200
+        assert resp.json['deleted_count'] == 0
+        assert resp.json['deleted'] == []
+    def test_login_with_hashed_password(self, client, monkeypatch):
+        hashed = generate_password_hash('securepass')
+        monkeypatch.setenv('ADMIN_PASSWORD', hashed)
+        resp = client.post('/api/admin/login', json={'password': 'securepass'})
+        assert resp.status_code == 200
+        assert resp.json['success'] is True
+
+    def test_login_wrong_password_against_hash(self, client, monkeypatch):
+        hashed = generate_password_hash('securepass')
+        monkeypatch.setenv('ADMIN_PASSWORD', hashed)
+        resp = client.post('/api/admin/login', json={'password': 'wrongpass'})
+        assert resp.status_code == 401
+        assert resp.json['success'] is False
+

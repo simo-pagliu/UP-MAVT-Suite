@@ -30,7 +30,7 @@ import {
   Tooltip,
   Progress,
 } from '@chakra-ui/react'
-import { LockIcon, UnlockIcon, DeleteIcon, DownloadIcon, ArrowUpIcon, ChevronDownIcon, ChevronRightIcon } from '@chakra-ui/icons'
+import { LockIcon, UnlockIcon, DeleteIcon, DownloadIcon, ArrowUpIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon } from '@chakra-ui/icons'
 import { useRef, Fragment } from 'react'
 import axios from 'axios'
 import { API_URL } from '../config'
@@ -199,7 +199,7 @@ function AdminPage(props, ref) {
       })
 
       sessionDetails.push({
-        name: session?.name || 'Session',
+        label: session?.friendly_name || session?._id || 'Session',
         steps: sessionSteps
       })
     })
@@ -311,6 +311,44 @@ function AdminPage(props, ref) {
     window.open(`${API_URL}/study-session/${studyId}/backup/export`, '_blank')
   }
 
+  const buildUuidLink = (uuid) => {
+    const url = new URL(window.location.href)
+    url.searchParams.set('uuid', uuid)
+    return url.toString()
+  }
+
+  const handleCopyStudyLink = async (studyId) => {
+    if (!studyId) {
+      toast({
+        title: 'Request failed',
+        description: 'No case study ID available to copy',
+        status: 'error',
+        duration: 2000,
+        isClosable: true,
+      })
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(buildUuidLink(studyId))
+      toast({
+        title: 'Completed',
+        description: 'Case study link copied',
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
+      })
+    } catch {
+      toast({
+        title: 'Request failed',
+        description: 'Failed to copy case study link',
+        status: 'error',
+        duration: 2000,
+        isClosable: true,
+      })
+    }
+  }
+
   const uploadCaseStudy = async (onConflict = 'abort') => {
     const file = backupFileInputRef.current?.files?.[0]
     if (!file) return
@@ -319,13 +357,13 @@ function AdminPage(props, ref) {
 
     try {
       const response = await axios.post(
-        `${API_URL}/study-session/backup/import?on_conflict=${onConflict}`,
+        `${API_URL}/study-session/backup/import?on_conflict=${onConflict}&preserve_creator_email=1`,
         formData,
         { headers: { 'Content-Type': 'multipart/form-data' } },
       )
       toast({
         title: 'Case study imported',
-        description: `Study code: ${response.data?.code || 'created'}`,
+        description: `Study ID: ${response.data?.study_session_id || 'created'}`,
         status: 'success',
         duration: 3000,
         isClosable: true,
@@ -334,7 +372,7 @@ function AdminPage(props, ref) {
     } catch (error) {
       const message = error.response?.data?.error || 'Failed to import case study'
       if (message.toLowerCase().includes('conflict') && onConflict === 'abort') {
-        const shouldRegenerate = window.confirm('Code conflict detected. Generate new codes and continue import?')
+        const shouldRegenerate = window.confirm('Identifier conflict detected. Regenerate identifiers and continue import?')
         if (shouldRegenerate) {
           await uploadCaseStudy('regenerate')
           return
@@ -424,7 +462,7 @@ function AdminPage(props, ref) {
             <Thead>
               <Tr>
                 <Th width="40px"></Th>
-                <Th>Case Study</Th>
+                <Th>Case Study ID</Th>
                 <Th>Date Created</Th>
                 <Th>Status</Th>
                 <Th>Progress</Th>
@@ -453,7 +491,19 @@ function AdminPage(props, ref) {
                       </Td>
                       <Td>
                         <VStack align="start" spacing={0}>
-                          <Text fontWeight="bold">{study.code}</Text>
+                          <HStack spacing={1}>
+                            <Text fontWeight="bold">{study._id || 'N/A'}</Text>
+                            <Tooltip label={study._id ? 'Copy case study link' : 'No case study ID'} hasArrow>
+                              <IconButton
+                                aria-label="Copy case study link"
+                                icon={<CopyIcon />}
+                                size="xs"
+                                variant="ghost"
+                                onClick={() => handleCopyStudyLink(study._id)}
+                                isDisabled={!study._id}
+                              />
+                            </Tooltip>
+                          </HStack>
                           {study.title ? <Text fontSize="sm">{study.title}</Text> : null}
                           {study.description ? (
                             <Text fontSize="xs" color="gray.600" noOfLines={2} maxW="360px">
@@ -485,7 +535,7 @@ function AdminPage(props, ref) {
                             <VStack align="stretch" spacing={1}>
                               {(Array.isArray(progress?.sessionDetails) ? progress.sessionDetails : []).map((session, idx) => (
                                 <Box key={idx}>
-                                  <Text fontWeight="bold" fontSize="xs">{session.name}:</Text>
+                                  <Text fontWeight="bold" fontSize="xs">{session.label}:</Text>
                                   {(Array.isArray(session?.steps) ? session.steps : []).map((step, stepIdx) => (
                                     <Text key={stepIdx} fontSize="xs" pl={2}>
                                       {step.completed ? '✓' : '✗'} {step.label}
@@ -555,7 +605,10 @@ function AdminPage(props, ref) {
                         >
                           <Td></Td>
                           <Td pl={8} fontSize="sm">
-                            <Text color="gray.700">↳ {session.name}</Text>
+                            <VStack align="start" spacing={0}>
+                              <Text color="gray.700">↳ {session.friendly_name || 'Unnamed session'}</Text>
+                              <Text color="gray.500" fontSize="xs">ID: {session._id}</Text>
+                            </VStack>
                           </Td>
                           <Td fontSize="sm">{formatDate(session.created_at)}</Td>
                           <Td>

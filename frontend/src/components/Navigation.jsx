@@ -47,8 +47,8 @@ function Navigation({
       <HStack spacing={6} align="center" wrap="wrap">
         <HStack spacing={3} align="center">
           <Image
-            src="/psi-logo-placeholder.svg"
-            alt="PSI logo placeholder"
+            src="/psi_01_sn.svg"
+            alt="PSI logo"
             boxSize={{ base: '34px', md: '40px' }}
             objectFit="contain"
           />

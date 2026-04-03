@@ -8,7 +8,6 @@ import {
   Badge,
   Box,
   Button,
-  Checkbox,
   FormControl,
   FormLabel,
   HStack,
@@ -28,11 +27,12 @@ import {
   Thead,
   Tr,
   Text,
+  Tooltip,
   VStack,
   useDisclosure,
   useToast,
 } from '@chakra-ui/react'
-import { DeleteIcon, LockIcon, UnlockIcon, HamburgerIcon, RepeatIcon } from '@chakra-ui/icons'
+import { DeleteIcon, LockIcon, UnlockIcon, HamburgerIcon, RepeatIcon, CopyIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { API_URL } from '../config'
@@ -168,16 +168,17 @@ const buildProgress = (criteria, session) => {
   }
 }
 
-function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStudy }) {
+function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
   const [code, setCode] = useState('')
   const [sessions, setSessions] = useState([])
+  const [friendlyNames, setFriendlyNames] = useState({})
   const [criteria, setCriteria] = useState([])
   const [loading, setLoading] = useState(false)
-  const [features, setFeatures] = useState({ qi: false, vf: false, bwt: false })
-  const [savingFeatures, setSavingFeatures] = useState(false)
+  const [savingFriendlyNameById, setSavingFriendlyNameById] = useState({})
   const [pendingDeleteId, setPendingDeleteId] = useState(null)
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onClose: onDeleteClose } = useDisclosure()
   const deleteCancelRef = useRef()
+  const friendlyNameAutoSaveTimersRef = useRef({})
   const toast = useToast()
 
   const canCreateSession = Boolean(studySessionId)
@@ -188,15 +189,15 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
     try {
       const response = await axios.get(`${API_URL}/study-session/${studySessionId}/elicitation-sessions`)
       const data = response.data
-      setSessions(Array.isArray(data.sessions) ? data.sessions : [])
+      const loadedSessions = Array.isArray(data.sessions) ? data.sessions : []
+      setSessions(loadedSessions)
+      setFriendlyNames(
+        loadedSessions.reduce((acc, session) => {
+          acc[session._id] = session.friendly_name || ''
+          return acc
+        }, {})
+      )
       setCriteria(Array.isArray(data.criteria) ? data.criteria : [])
-      
-      // Also fetch features
-      const studyResponse = await axios.get(`${API_URL}/study-session/${studySessionId}`)
-      const studyData = studyResponse.data
-      if (studyData && studyData.features) {
-        setFeatures(studyData.features)
-      }
     } catch (error) {
       toast({
         title: 'Request failed',
@@ -214,38 +215,6 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
     loadSessions()
   }, [studySessionId])
 
-  const handleFeatureToggle = async (featureName) => {
-    const newFeatures = { ...features, [featureName]: !features[featureName] }
-    setFeatures(newFeatures)
-    
-    // Save to backend
-    setSavingFeatures(true)
-    try {
-      await axios.patch(`${API_URL}/study-session/${studySessionId}`, {
-        features: newFeatures
-      })
-      toast({
-        title: 'Features updated',
-        description: `${featureName === 'qi' ? 'QI' : featureName === 'vf' ? 'Quantitative Indicators' : 'Weight elicitation'} ${newFeatures[featureName] ? 'enabled' : 'disabled'}`,
-        status: 'success',
-        duration: 2000,
-        isClosable: true,
-      })
-    } catch (error) {
-      // Revert on error
-      setFeatures(features)
-      toast({
-        title: 'Request failed',
-        description: error.response?.data?.error || 'Failed to update features',
-        status: 'error',
-        duration: 3000,
-        isClosable: true,
-      })
-    } finally {
-      setSavingFeatures(false)
-    }
-  }
-
   const sessionRows = useMemo(() => {
     return sessions.map((session) => ({
       ...session,
@@ -257,7 +226,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
     if (!code.trim()) {
       toast({
         title: 'Request failed',
-        description: 'Please enter a study code',
+        description: 'Please enter a study UUID',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -267,13 +236,13 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
 
     setLoading(true)
     try {
-      const response = await axios.get(`${API_URL}/study-session/by-code/${encodeURIComponent(code)}`)
+      const response = await axios.get(`${API_URL}/session/detect/${encodeURIComponent(code)}`)
       const data = response.data
 
-      if (!data.exists) {
+      if (!data.exists || data.type !== 'practitioner') {
         toast({
           title: 'Not found',
-          description: 'No study session found for this code',
+          description: 'No study session found for this UUID',
           status: 'error',
           duration: 3000,
           isClosable: true,
@@ -281,7 +250,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
         return
       }
 
-      onStudyAccessed(data._id, data.code || code)
+      onStudyAccessed(data._id, null)
       toast({
         title: 'Study session loaded',
         status: 'success',
@@ -305,11 +274,11 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
     setLoading(true)
     try {
       const response = await axios.post(`${API_URL}/study-session`, { auto_generate: true })
-      const generatedCode = response.data?.code || ''
-      onStudyAccessed(response.data.study_session_id, generatedCode)
+      const createdStudyId = response.data?.study_session_id || ''
+      onStudyAccessed(createdStudyId, null)
       toast({
         title: 'Study session created',
-        description: `Study code: ${generatedCode}`,
+        description: `Study ID: ${createdStudyId}`,
         status: 'success',
         duration: 3000,
         isClosable: true,
@@ -333,7 +302,7 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
       const response = await axios.post(`${API_URL}/study-session/${studySessionId}/elicitation-session`, { auto_generate: true })
       toast({
         title: 'Session created',
-        description: `Session code: ${response.data?.name || 'generated'}`,
+        description: `Session ID: ${response.data?.session_id || 'generated'}`,
         status: 'success',
         duration: 3000,
         isClosable: true,
@@ -407,6 +376,72 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
     }
   }
 
+  const handleSaveFriendlyName = async (sessionId, valueOverride = null) => {
+    setSavingFriendlyNameById((prev) => ({ ...prev, [sessionId]: true }))
+    try {
+      const friendlyName = (valueOverride ?? friendlyNames[sessionId] ?? '').trim()
+      const currentFriendlyName = String(
+        sessions.find((session) => session._id === sessionId)?.friendly_name || ''
+      ).trim()
+
+      if (friendlyName === currentFriendlyName) {
+        return
+      }
+
+      await axios.put(`${API_URL}/session/${sessionId}/friendly-name`, {
+        friendly_name: friendlyName,
+      })
+
+      setSessions((prev) => prev.map((session) => (
+        session._id === sessionId
+          ? { ...session, friendly_name: friendlyName }
+          : session
+      )))
+
+      setFriendlyNames((prev) => ({ ...prev, [sessionId]: friendlyName }))
+    } catch (error) {
+      toast({
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to save friendly name',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+    } finally {
+      setSavingFriendlyNameById((prev) => ({ ...prev, [sessionId]: false }))
+    }
+  }
+
+  const scheduleFriendlyNameAutoSave = (sessionId, value) => {
+    if (friendlyNameAutoSaveTimersRef.current[sessionId]) {
+      clearTimeout(friendlyNameAutoSaveTimersRef.current[sessionId])
+    }
+
+    friendlyNameAutoSaveTimersRef.current[sessionId] = setTimeout(() => {
+      handleSaveFriendlyName(sessionId, value)
+    }, 600)
+  }
+
+  const flushFriendlyNameAutoSave = (sessionId, value) => {
+    if (friendlyNameAutoSaveTimersRef.current[sessionId]) {
+      clearTimeout(friendlyNameAutoSaveTimersRef.current[sessionId])
+      delete friendlyNameAutoSaveTimersRef.current[sessionId]
+    }
+    handleSaveFriendlyName(sessionId, value)
+  }
+
+  const handleFriendlyNameChange = (sessionId, value) => {
+    setFriendlyNames((prev) => ({ ...prev, [sessionId]: value }))
+    scheduleFriendlyNameAutoSave(sessionId, value)
+  }
+
+  useEffect(() => {
+    return () => {
+      Object.values(friendlyNameAutoSaveTimersRef.current).forEach((timerId) => clearTimeout(timerId))
+      friendlyNameAutoSaveTimersRef.current = {}
+    }
+  }, [])
+
   const handleDownload = async (endpoint, filename) => {
     setLoading(true)
     try {
@@ -431,6 +466,52 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
     }
   }
 
+  const buildUuidLink = (uuid) => {
+    const url = new URL(window.location.href)
+    url.searchParams.set('uuid', uuid)
+    return url.toString()
+  }
+
+  const copyUuidLink = async (uuid, entityLabel) => {
+    if (!uuid) {
+      toast({
+        title: 'Request failed',
+        description: `No ${entityLabel} ID available to copy`,
+        status: 'error',
+        duration: 2000,
+        isClosable: true,
+      })
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(buildUuidLink(uuid))
+      toast({
+        title: 'Completed',
+        description: `${entityLabel} link copied`,
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
+      })
+    } catch {
+      toast({
+        title: 'Request failed',
+        description: `Failed to copy ${entityLabel} link`,
+        status: 'error',
+        duration: 2000,
+        isClosable: true,
+      })
+    }
+  }
+
+  const handleCopyStudyLink = async () => {
+    await copyUuidLink(studySessionId, 'Study')
+  }
+
+  const handleCopySessionLink = async (sessionId) => {
+    await copyUuidLink(sessionId, 'Session')
+  }
+
   // If no study session accessed, show access form
   if (!studySessionId) {
     return (
@@ -439,10 +520,10 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
           <Heading as="h1" size="lg">Case Study</Heading>
 
           <FormControl>
-            <FormLabel>Study session code</FormLabel>
+            <FormLabel>Study session UUID</FormLabel>
             <HStack>
               <Input
-                placeholder="Enter study code"
+                placeholder="Enter study UUID"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAccess()}
@@ -474,62 +555,43 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
           <VStack align="start" spacing={1}>
             <Heading as="h1" size="lg">Case Study</Heading>
             <HStack spacing={3}>
-              <Text fontSize="sm" color="gray.600">Study code: {studyCode || '—'}</Text>
+              <HStack spacing={1}>
+                <Text fontSize="sm" color="gray.600">Study ID: {studySessionId || '—'}</Text>
+                <Tooltip label={studySessionId ? 'Copy study ID' : 'No study ID'} hasArrow>
+                  <IconButton
+                    aria-label="Copy study link"
+                    icon={<CopyIcon />}
+                    size="xs"
+                    variant="ghost"
+                    onClick={handleCopyStudyLink}
+                    isDisabled={!studySessionId}
+                  />
+                </Tooltip>
+              </HStack>
               <Button size="xs" variant="outline" onClick={onClearStudy}>
                 Change Study
               </Button>
             </HStack>
           </VStack>
-          <Button leftIcon={<RepeatIcon />} variant="outline" size="sm" onClick={loadSessions} isLoading={loading}>
-            Refresh
-          </Button>
+          <HStack>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => handleDownload(`/study-session/${studySessionId}/backup/export`, `case_study_${studySessionId}.zip`)}
+              isLoading={loading}
+            >
+              Download case study ZIP
+            </Button>
+            <Button leftIcon={<RepeatIcon />} variant="outline" size="sm" onClick={loadSessions} isLoading={loading}>
+              Refresh
+            </Button>
+          </HStack>
         </HStack>
-
-        <Box borderWidth={1} borderRadius="md" p={4} bg="blue.50">
-          <VStack spacing={4} align="stretch">
-            <Text fontWeight="semibold">Features</Text>
-            <Text fontSize="sm" color="gray.600">
-              Select which analysis components are required for the elicitation sessions
-            </Text>
-            <HStack spacing={6}>
-              <Checkbox
-                isChecked={features.qi}
-                onChange={() => handleFeatureToggle('qi')}
-                isDisabled={savingFeatures}
-              >
-                <VStack align="start" spacing={0}>
-                  <Text fontWeight="medium">Qualitative Indicators</Text>
-                  <Text fontSize="xs" color="gray.600">Requires complete input with alternatives</Text>
-                </VStack>
-              </Checkbox>
-              <Checkbox
-                isChecked={features.vf}
-                onChange={() => handleFeatureToggle('vf')}
-                isDisabled={savingFeatures}
-              >
-                <VStack align="start" spacing={0}>
-                  <Text fontWeight="medium">Quantitative Indicators</Text>
-                  <Text fontSize="xs" color="gray.600">Criteria with optional min/max</Text>
-                </VStack>
-              </Checkbox>
-              <Checkbox
-                isChecked={features.bwt}
-                onChange={() => handleFeatureToggle('bwt')}
-                isDisabled={savingFeatures}
-              >
-                <VStack align="start" spacing={0}>
-                  <Text fontWeight="medium">Weight Elicitation</Text>
-                  <Text fontSize="xs" color="gray.600">Criteria with optional min/max</Text>
-                </VStack>
-              </Checkbox>
-            </HStack>
-          </VStack>
-        </Box>
 
         <Box borderWidth={1} borderRadius="md" p={4} bg="gray.50">
           <VStack spacing={3} align="stretch">
             <Text fontWeight="semibold">Create elicitation session</Text>
-            <Text fontSize="sm" color="gray.600">Session code is generated automatically.</Text>
+            <Text fontSize="sm" color="gray.600">Session ID is generated automatically.</Text>
             <Button
               colorScheme="blue"
               onClick={handleCreateSession}
@@ -546,7 +608,8 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
           <Table variant="simple" size="sm">
             <Thead>
               <Tr>
-                <Th>Session Code</Th>
+                <Th>Session ID</Th>
+                <Th>Friendly Name</Th>
                 <Th>Progress</Th>
                 <Th>Status</Th>
                 <Th>Downloads</Th>
@@ -556,7 +619,32 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
             <Tbody>
               {sessionRows.map((session) => (
                 <Tr key={session._id}>
-                  <Td>{session.name}</Td>
+                  <Td>
+                    <HStack spacing={1}>
+                      <Text>{session._id || 'N/A'}</Text>
+                      <Tooltip label={session._id ? 'Copy session link' : 'No session ID'} hasArrow>
+                        <IconButton
+                          aria-label="Copy session link"
+                          icon={<CopyIcon />}
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => handleCopySessionLink(session._id)}
+                          isDisabled={!session._id}
+                        />
+                      </Tooltip>
+                    </HStack>
+                  </Td>
+                  <Td>
+                    <HStack spacing={2}>
+                      <Input
+                        size="sm"
+                        value={friendlyNames[session._id] || ''}
+                        onChange={(e) => handleFriendlyNameChange(session._id, e.target.value)}
+                        onBlur={(e) => flushFriendlyNameAutoSave(session._id, e.target.value)}
+                        placeholder="Add friendly name"
+                      />
+                    </HStack>
+                  </Td>
                   <Td minW="200px">
                     <VStack align="stretch" spacing={2}>
                       <Progress value={session.progress.percent} size="sm" borderRadius="full" />
@@ -579,37 +667,37 @@ function CaseStudyPage({ studySessionId, studyCode, onStudyAccessed, onClearStud
                       <MenuButton as={IconButton} icon={<HamburgerIcon />} variant="ghost" size="sm" aria-label="Download options" />
                       <MenuList>
                         <MenuItem
-                          onClick={() => handleDownload(`/session/${session._id}/qualitative/export`, `qualitative_${session.name}.csv`)}
+                          onClick={() => handleDownload(`/session/${session._id}/qualitative/export`, `qualitative_${session._id}.csv`)}
                           isDisabled={!session.progress.hasQualitativeIndicators}
                         >
                           Qualitative Indicators
                         </MenuItem>
                         <MenuItem
-                          onClick={() => handleDownload(`/session/${session._id}/value-functions/export`, `value_functions_${session.name}.csv`)}
+                          onClick={() => handleDownload(`/session/${session._id}/value-functions/export`, `value_functions_${session._id}.csv`)}
                           isDisabled={!session.progress.hasValueFunctions}
                         >
                           Quantitative Indicators
                         </MenuItem>
                         <MenuItem
-                          onClick={() => handleDownload(`/session/${session._id}/export-input-data`, `input_data_${session.name}.csv`)}
+                          onClick={() => handleDownload(`/session/${session._id}/export-input-data`, `input_data_${session._id}.csv`)}
                           isDisabled={!session.progress.hasQualitativeIndicators}
                         >
                           Input Data
                         </MenuItem>
                         <MenuItem
-                          onClick={() => handleDownload(`/session/${session._id}/pile/export`, `pile_bwt_${session.name}.csv`)}
+                          onClick={() => handleDownload(`/session/${session._id}/pile/export`, `pile_bwt_${session._id}.csv`)}
                           isDisabled={!session.progress.hasBwt}
                         >
                           Weight Elicitation
                         </MenuItem>
                         <MenuItem
-                          onClick={() => handleDownload(`/session/${session._id}/pile/export-debug`, `pile_bwt_debug_a_values_${session.name}.csv`)}
+                          onClick={() => handleDownload(`/session/${session._id}/pile/export-debug`, `pile_bwt_debug_a_values_${session._id}.csv`)}
                           isDisabled={!session.progress.hasBwt || !session.progress.hasValueFunctions}
                         >
                           DEBUG - a values
                         </MenuItem>
                         <MenuItem
-                          onClick={() => handleDownload(`/study-session/${studySessionId}/weight-solutions/${session._id}/export`, `weight_solutions_${session.name}.csv`)}
+                          onClick={() => handleDownload(`/study-session/${studySessionId}/weight-solutions/${session._id}/export`, `weight_solutions_${session._id}.csv`)}
                           isDisabled={!session.progress.hasWeights}
                         >
                           Weight Solutions

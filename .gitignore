@@ -15,3 +15,4 @@ worker/scripts/weight_space_definition copy.py
 worker/scripts/weight_space_definition copy 3.py
 worker/scripts/weight_space_definition copy 2.py
 worker/scripts/weight_space_definition_old.py
+paper/
