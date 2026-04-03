@@ -26,6 +26,7 @@ Verifying a login attempt (with a database handle)::
         ...
 """
 
+import hmac
 import logging
 import os
 
@@ -103,7 +104,6 @@ class AuthenticationService:
             return check_password_hash(stored_password, plain_password)
 
         # Legacy plain-text path — kept for backward compatibility.
-        import hmac
         logger.warning(
             'ADMIN_PASSWORD appears to be stored as plain text. '
             'Please replace it with a hashed value produced by '
