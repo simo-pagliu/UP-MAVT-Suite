@@ -1,11 +1,10 @@
 from flask import Blueprint, request, jsonify, current_app, send_file
-import hmac
 import io
 import logging
-import os
 
 from app.exceptions import ServiceError
 from app.services import (
+    AuthenticationService,
     SessionService,
     StudySessionService,
     ExportService,
@@ -99,14 +98,11 @@ def confirm_email_verification_code():
 # --------------------------------------------------------------------------- #
 @bp.route('/admin/login', methods=['POST'])
 def admin_login():
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     password = data.get('password')
     if not password:
         return jsonify({'success': False, 'error': 'Password is required'}), 400
-    admin_password = os.getenv('ADMIN_PASSWORD')
-    if not admin_password:
-        return jsonify({'success': False, 'error': 'ADMIN_PASSWORD is not configured on the server'}), 500
-    if hmac.compare_digest(str(password), str(admin_password)):
+    if AuthenticationService().authenticate(password):
         return jsonify({'success': True}), 200
     return jsonify({'success': False, 'error': 'Invalid password'}), 401
 
@@ -123,14 +119,11 @@ def notify_inactive_study_sessions():
     warning email with a ZIP backup attachment is sent.  The response
     summarises how many sessions were notified and any failures.
     """
-    data = request.json or {}
+    data = request.get_json(silent=True) or {}
     password = data.get('password')
     if not password:
         return jsonify({'success': False, 'error': 'Password is required'}), 400
-    admin_password = os.getenv('ADMIN_PASSWORD')
-    if not admin_password:
-        return jsonify({'success': False, 'error': 'ADMIN_PASSWORD is not configured on the server'}), 500
-    if not hmac.compare_digest(str(password), str(admin_password)):
+    if not AuthenticationService().authenticate(password):
         return jsonify({'success': False, 'error': 'Invalid password'}), 401
 
     months = int(data.get('months', 12))
