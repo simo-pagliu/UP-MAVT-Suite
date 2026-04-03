@@ -1,6 +1,8 @@
 import { AddIcon, DeleteIcon, SettingsIcon } from '@chakra-ui/icons'
 import { useRef, forwardRef, useImperativeHandle } from 'react'
 import {
+  Alert,
+  AlertIcon,
   AlertDialog,
   AlertDialogBody,
   AlertDialogContent,
@@ -55,6 +57,9 @@ function InputPage({ studySessionId }, ref) {
   const [hasExistingSessions, setHasExistingSessions] = useState(false)
   const [hasModifiedInput, setHasModifiedInput] = useState(false)
   const [savingMetadata, setSavingMetadata] = useState(false)
+  const [features, setFeatures] = useState({ qi: false, vf: false, bwt: false })
+  const [savingFeatures, setSavingFeatures] = useState(false)
+  const [featureError, setFeatureError] = useState('')
   
   // Distribution modal state
   const { isOpen: isDistModalOpen, onOpen: onDistModalOpen, onClose: onDistModalClose } = useDisclosure()
@@ -137,6 +142,8 @@ function InputPage({ studySessionId }, ref) {
       setIsExistingStudySession(false)
       setIsLocked(true)
       setHasExistingSessions(false)
+      setFeatures({ qi: false, vf: false, bwt: false })
+      setFeatureError('')
       return
     }
 
@@ -144,13 +151,13 @@ function InputPage({ studySessionId }, ref) {
       try {
         const studyResponse = await axios.get(`${API_URL}/study-session/${studySessionId}`)
         const study = studyResponse.data
-        if (study.code) {
-          setName(study.code)
-        }
+        setName(studySessionId)
         setMetadataDefaults({
           title: study.title || '',
           description: study.description || '',
         })
+        setFeatures(study.features || { qi: false, vf: false, bwt: false })
+        setFeatureError('')
         setMetadataFormKey((prev) => prev + 1)
         if (study.criteria && Array.isArray(study.criteria)) {
           const normalized = normalizeCriteria(study.criteria)
@@ -173,6 +180,34 @@ function InputPage({ studySessionId }, ref) {
     }
     fetchStudy()
   }, [studySessionId])
+
+  const handleFeatureToggle = async (featureName, enabled) => {
+    if (!studySessionId) return
+
+    const previous = features
+    const updated = { ...features, [featureName]: enabled }
+    setFeatures(updated)
+    setFeatureError('')
+    setSavingFeatures(true)
+
+    try {
+      await axios.patch(`${API_URL}/study-session/${studySessionId}`, {
+        features: updated,
+      })
+    } catch (error) {
+      setFeatures(previous)
+      setFeatureError(error.response?.data?.error || 'Failed to update workflow features')
+    } finally {
+      setSavingFeatures(false)
+    }
+  }
+
+  const alternativesComplete = criteria.length > 0 && criteria.every((criterion) => {
+    const alternatives = Array.isArray(criterion.alternatives) ? criterion.alternatives : []
+    return alternatives.length > 0 && alternatives.every((alt) => alt?.name)
+  })
+
+  const alternativesRequiredByEnabledFeatures = Boolean(features.qi || features.bwt)
 
   const handleUnlock = () => {
     if (hasExistingSessions) {
@@ -791,6 +826,66 @@ function InputPage({ studySessionId }, ref) {
 
             <Divider />
 
+            <VStack align="stretch" spacing={3}>
+              <Heading as="h2" size="sm">Workflow Features</Heading>
+              <Text fontSize="sm" color="gray.600">
+                Choose which stakeholder workflow steps are required for this case study.
+              </Text>
+
+              <HStack spacing={6} wrap="wrap">
+                <Checkbox
+                  isChecked={features.qi}
+                  onChange={(e) => handleFeatureToggle('qi', e.target.checked)}
+                  isDisabled={savingFeatures || !studySessionId}
+                >
+                  <VStack align="start" spacing={0}>
+                    <Text fontWeight="medium">Qualitative Indicators</Text>
+                    <Text fontSize="xs" color="gray.600">Enable QI and use the Qualitative checkbox per criterion below</Text>
+                  </VStack>
+                </Checkbox>
+
+                <Checkbox
+                  isChecked={features.vf}
+                  onChange={(e) => handleFeatureToggle('vf', e.target.checked)}
+                  isDisabled={savingFeatures || !studySessionId}
+                >
+                  <VStack align="start" spacing={0}>
+                    <Text fontWeight="medium">Quantitative Indicators</Text>
+                    <Text fontSize="xs" color="gray.600">Enable Value Functions (VF)</Text>
+                  </VStack>
+                </Checkbox>
+
+                <Checkbox
+                  isChecked={features.bwt}
+                  onChange={(e) => handleFeatureToggle('bwt', e.target.checked)}
+                  isDisabled={savingFeatures || !studySessionId}
+                >
+                  <VStack align="start" spacing={0}>
+                    <Text fontWeight="medium">Weight Elicitation</Text>
+                    <Text fontSize="xs" color="gray.600">Enable BWT weight elicitation</Text>
+                  </VStack>
+                </Checkbox>
+              </HStack>
+
+              {featureError && (
+                <Alert status="error" borderRadius="md">
+                  <AlertIcon />
+                  <Text fontSize="sm">{featureError}</Text>
+                </Alert>
+              )}
+
+              {alternativesRequiredByEnabledFeatures && !alternativesComplete && (
+                <Alert status="warning" borderRadius="md">
+                  <AlertIcon />
+                  <Text fontSize="sm">
+                    Enabled features require alternatives for all criteria. Complete the alternatives table before creating elicitation sessions.
+                  </Text>
+                </Alert>
+              )}
+            </VStack>
+
+            <Divider />
+
             <VStack align="stretch" spacing={4}>
               <Text fontSize="sm" color="gray.600">
                 You can either define the input in a CSV and upload it, or use the editor below.
@@ -929,10 +1024,10 @@ function InputPage({ studySessionId }, ref) {
                           <Checkbox
                             isChecked={criterion.is_qualitative}
                             onChange={(e) => handleCellChange(idx, 'is_qualitative', e.target.checked)}
-                            isDisabled={isLocked}
+                            isDisabled={isLocked || !features.qi}
                             size="sm"
                           >
-                            <Text fontSize="xs">Qualitative</Text>
+                            <Text fontSize="xs">Qualitative (QI)</Text>
                           </Checkbox>
                           <Checkbox
                             isChecked={criterion.use_custom_min_max}

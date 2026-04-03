@@ -185,21 +185,28 @@ class StudySessionService:
         study['criteria'] = criteria
         study['title'] = study.get('title', '')
         study['description'] = study.get('description', '')
+        study['creator_email'] = study.get('creator_email', '')
         if include_sessions:
             sessions = self._sessions.find_by_study_session_id(study_id)
             for s in sessions:
                 s['_id'] = str(s['_id'])
                 s['study_session_id'] = self._studies._str_id(s.get('study_session_id'))
                 s['input_id'] = self._studies._str_id(s.get('input_id'))
+                s['friendly_name'] = str(s.get('friendly_name') or '').strip()
                 s['computed_weights'] = self._serialize_computed_weights(study)
             study['sessions'] = sessions
         return study
 
-    def create(self, code, title='', description=''):
+    def create(self, code, title='', description='', creator_email=''):
         """Create a new study session with the given practitioner code.
 
         Args:
             code (str): A unique identifier chosen by the practitioner.
+            title (str): Optional display title.
+            description (str): Optional description.
+            creator_email (str): Optional practitioner email address stored
+                for future notifications (e.g. inactivity warnings and
+                elicitation-completion alerts).
 
         Returns:
             str: The ``_id`` of the newly created study session as a hex string.
@@ -213,6 +220,7 @@ class StudySessionService:
             raise ValidationError('Study code is required')
         if self._studies.find_by_code(code):
             raise ConflictError('Study code already exists')
+        now = datetime.now(timezone.utc)
         doc = {
             'code': code,
             'input_id': None,
@@ -220,7 +228,9 @@ class StudySessionService:
             'vf_method': 'mid-splitting',
             'title': str(title or '').strip(),
             'description': str(description or '').strip(),
-            'created_at': datetime.now(timezone.utc),
+            'creator_email': str(creator_email or '').strip(),
+            'created_at': now,
+            'last_modified_at': now,
         }
         inserted_id = self._studies.insert(doc)
         return str(inserted_id)
@@ -242,6 +252,7 @@ class StudySessionService:
             update_doc['description'] = description.strip()
 
         if update_doc:
+            update_doc['last_modified_at'] = datetime.now(timezone.utc)
             self._studies.update(study_session_id, update_doc)
 
         updated = self._studies.find_by_id(study_session_id)
@@ -328,6 +339,7 @@ class StudySessionService:
         if normalized_method:
             update_doc['vf_method'] = normalized_method
         if update_doc:
+            update_doc['last_modified_at'] = datetime.now(timezone.utc)
             self._studies.update(study_session_id, update_doc)
         updated = self._studies.find_by_id(study_session_id)
         if not updated:
@@ -386,6 +398,7 @@ class StudySessionService:
         else:
             new_id = self._inputs.insert({'criteria': criteria, 'created_at': now, 'updated_at': now})
             self._studies.update(study_session_id, {'input_id': new_id})
+        self._studies.update(study_session_id, {'last_modified_at': now})
 
     def get_input(self, study_session_id):
         """Return the criteria list for a study session's shared input document.
@@ -492,6 +505,7 @@ class StudySessionService:
         self._session_svc.validate_input_for_features(criteria, features)
         doc = {
             'name': name,
+            'friendly_name': '',
             'input_id': input_id,
             'study_session_id': ObjectId(study_session_id),
             'qualitative_indicators': None,
@@ -534,6 +548,7 @@ class StudySessionService:
             s['_id'] = str(s['_id'])
             s['study_session_id'] = self._studies._str_id(s.get('study_session_id'))
             s['input_id'] = self._studies._str_id(s.get('input_id'))
+            s['friendly_name'] = str(s.get('friendly_name') or '').strip()
             s['computed_weights'] = self._serialize_computed_weights(study)
         return {
             'study_session_id': str(study['_id']) if isinstance(study.get('_id'), ObjectId) else study.get('_id'),
@@ -569,6 +584,7 @@ class StudySessionService:
                 'code': study.get('code'),
                 'title': study.get('title', ''),
                 'description': study.get('description', ''),
+                'creator_email': study.get('creator_email', ''),
                 'features': study.get('features', {'qi': False, 'vf': False, 'bwt': False}),
                 'vf_method': study.get('vf_method', 'mid-splitting'),
                 'created_at': study.get('created_at').isoformat() if study.get('created_at') else None,
@@ -576,6 +592,7 @@ class StudySessionService:
             'sessions': [
                 {
                     'name': s.get('name'),
+                    'friendly_name': s.get('friendly_name', ''),
                     'created_at': s.get('created_at').isoformat() if s.get('created_at') else None,
                 }
                 for s in sessions
@@ -608,6 +625,7 @@ class StudySessionService:
 
                 session_payload = {
                     'name': session_name,
+                    'friendly_name': session.get('friendly_name', ''),
                     'qualitative_indicators': session.get('qualitative_indicators'),
                     'value_functions': session.get('value_functions'),
                     'bwt': session.get('bwt'),
@@ -639,7 +657,7 @@ class StudySessionService:
         buf.seek(0)
         return buf, f'backup_{study.get("code", study_session_id)}.zip', 'application/zip'
 
-    def import_backup_zip(self, zip_bytes, on_conflict='abort'):
+    def import_study_case(self, zip_bytes, on_conflict='abort', contact_email='', preserve_backup_email=False):
         if on_conflict not in ('abort', 'regenerate'):
             raise ValidationError('Invalid on_conflict value')
 
@@ -665,10 +683,14 @@ class StudySessionService:
             requested_study_code = self.generate_unique_study_code()
 
         study_meta = metadata.get('study') or {}
+        provided_contact_email = str(contact_email or '').strip()
+        backup_creator_email = str(study_meta.get('creator_email') or '').strip()
+        creator_email = backup_creator_email if preserve_backup_email else provided_contact_email
         study_session_id = self.create(
             requested_study_code,
             title=study_meta.get('title', ''),
             description=study_meta.get('description', ''),
+            creator_email=creator_email,
         )
 
         self.update_features(
@@ -676,7 +698,9 @@ class StudySessionService:
             study_meta.get('features') or {'qi': False, 'vf': False, 'bwt': False},
             study_meta.get('vf_method'),
         )
-        self.update_input(study_session_id, input_payload.get('criteria') or [])
+        imported_criteria = input_payload.get('criteria')
+        if isinstance(imported_criteria, list) and imported_criteria:
+            self.update_input(study_session_id, imported_criteria)
 
         imported_sessions = []
         backup_name_to_new_session_id = {}
@@ -693,6 +717,7 @@ class StudySessionService:
 
             created_session_id = self.create_elicitation_session(study_session_id, requested_name)
             self._sessions.update(created_session_id, {
+                'friendly_name': str(payload.get('friendly_name') or '').strip(),
                 'qualitative_indicators': payload.get('qualitative_indicators'),
                 'value_functions': payload.get('value_functions'),
                 'bwt': payload.get('bwt'),
@@ -730,3 +755,155 @@ class StudySessionService:
             'code': requested_study_code,
             'imported_sessions': imported_sessions,
         }
+
+    # ------------------------------------------------------------------
+    # Example case study helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def build_example_case_study_zip(name, title, description):
+        """Build a minimal placeholder backup ZIP for an example case study.
+
+        Args:
+            name (str): Study code for the example.
+            title (str): Human-readable title.
+            description (str): Short description.
+
+        Returns:
+            io.BytesIO: In-memory ZIP buffer positioned at the start.
+        """
+        metadata = {
+            'version': 2,
+            'exported_at': '2024-01-01T00:00:00+00:00',
+            'study': {
+                'code': name,
+                'title': title,
+                'description': description,
+                'features': {'qi': True, 'vf': True, 'bwt': True},
+                'vf_method': 'mid-splitting',
+                'created_at': '2024-01-01T00:00:00+00:00',
+            },
+            'sessions': [],
+            'workflow': {
+                'workflow_preferences': {},
+                'computed_weights': {},
+                'step_2_results': None,
+                'step_3_results': None,
+                'step_4_results': None,
+                'step_5_results': None,
+                'step_6_results': None,
+            },
+        }
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr('metadata.json', json.dumps(metadata, indent=2))
+            zf.writestr('input/input.json', json.dumps({'criteria': []}, indent=2))
+        buf.seek(0)
+        return buf
+
+    # ------------------------------------------------------------------
+    # Email-notification helpers
+    # ------------------------------------------------------------------
+
+    def complete_elicitation_session(self, session_id):
+        """Mark an elicitation session as complete and return relevant context.
+
+        Sets ``session_locked = True`` on the session document so the
+        stakeholder can no longer submit changes.  Returns the session and its
+        parent study session so the caller can send an email notification.
+
+        Args:
+            session_id: The elicitation session's ``_id`` (string or ObjectId).
+
+        Returns:
+            dict: A dict with keys ``'session'`` (the updated elicitation
+            session) and ``'study'`` (the parent study session, or ``None``
+            when the session is not linked to a study).
+
+        Raises:
+            NotFoundError: When the elicitation session does not exist.
+        """
+        session = self._sessions.find_by_id(session_id)
+        if not session:
+            raise NotFoundError('Session not found')
+        self._sessions.update(session_id, {'session_locked': True})
+        session['session_locked'] = True
+        session['_id'] = str(session['_id'])
+
+        study = None
+        study_session_id = session.get('study_session_id')
+        if study_session_id:
+            study = self._studies.find_by_id(str(study_session_id))
+            if study:
+                study['_id'] = str(study['_id'])
+
+        return {'session': session, 'study': study}
+
+    def get_inactive_study_sessions(self, months=12):
+        """Return study sessions that have been inactive for *months* or more.
+
+        A session is considered inactive when its ``last_modified_at``
+        timestamp is more than *months* months in the past.  Sessions created
+        before ``last_modified_at`` was tracked fall back to ``created_at``.
+
+        Args:
+            months (int): Inactivity threshold in months (default: ``12``).
+
+        Returns:
+            list[dict]: Serialised study session documents with an extra
+            ``'months_inactive'`` key.
+        """
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(days=months * 30)
+        studies = self._studies.find_inactive_since(cutoff)
+        inactive = []
+        for study in studies:
+            last_activity = study.get('last_modified_at') or study.get('created_at')
+            if last_activity is None:
+                continue
+            if last_activity.tzinfo is None:
+                last_activity = last_activity.replace(tzinfo=timezone.utc)
+            delta_days = (now - last_activity).days
+            months_inactive = delta_days / 30.0
+            serialised = self._serialize_study(study)
+            serialised['months_inactive'] = months_inactive
+            inactive.append(serialised)
+        return inactive
+
+    def delete_inactive_study_sessions(self, months=12):
+        """Delete study sessions that have been inactive for *months* or more.
+
+        All associated elicitation sessions and input documents are removed
+        along with each study session.  The caller is responsible for sending
+        notification emails (with a backup ZIP) *before* calling this method
+        so that practitioners can retain a copy of their data.
+
+        Args:
+            months (int): Inactivity threshold in months (default: ``12``).
+
+        Returns:
+            list[dict]: A list of dicts describing every deleted session,
+            each with ``'_id'``, ``'code'``, ``'creator_email'``, and
+            ``'months_inactive'`` keys.
+        """
+        inactive = self.get_inactive_study_sessions(months=months)
+        deleted = []
+        for study in inactive:
+            study_id = study['_id']
+            # Remove all child elicitation sessions first.
+            self._sessions.delete_many_by_study_session_id(study_id)
+            # Remove the shared input document if present.
+            raw = self._studies.find_by_id(study_id)
+            if raw:
+                input_id = self._studies._to_oid(raw.get('input_id'))
+                if input_id:
+                    self._inputs.delete(input_id)
+                self._studies.delete(study_id)
+            deleted.append({
+                '_id': study_id,
+                'code': study.get('code', ''),
+                'creator_email': study.get('creator_email', ''),
+                'months_inactive': study.get('months_inactive', 0),
+            })
+        return deleted

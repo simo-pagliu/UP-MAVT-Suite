@@ -452,6 +452,13 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     })
   }
 
+  const getSessionLabel = (session, fallbackLabel = '') => {
+    if (!session) return fallbackLabel
+    const friendly = String(session.friendly_name || '').trim()
+    if (friendly) return friendly
+    return session._id || fallbackLabel || 'Unknown session'
+  }
+
   // ============================================================================
   // STEP 1: COMPUTE WEIGHTS
   // ============================================================================
@@ -656,7 +663,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       .sort((a, b) => Number(a[0]) - Number(b[0]))
 
     sortedElicitations.forEach(([expertIdx, iterations]) => {
-      const expertName = sessions[parseInt(expertIdx)]?.name || `Expert ${parseInt(expertIdx) + 1}`
+      const expertName = getSessionLabel(sessions[parseInt(expertIdx)], `Expert ${parseInt(expertIdx) + 1}`)
       const values = iterations.map((row) => Number(row[altIndex])).filter((v) => Number.isFinite(v))
       expertValues[expertName] = values
       allValues.push(...values)
@@ -718,7 +725,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       altName: stepResults.alternative_names[altIndex],
       densityData,
       expertNames: sortedElicitations.map(([expertIdx]) => (
-        sessions[parseInt(expertIdx)]?.name || `Expert ${parseInt(expertIdx) + 1}`
+        getSessionLabel(sessions[parseInt(expertIdx)], `Expert ${parseInt(expertIdx) + 1}`)
       )),
     }
   }
@@ -729,7 +736,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       .sort((a, b) => Number(a[0]) - Number(b[0]))
       .map(([expertIdx], idx) => ({
         label: `E${idx + 1}`,
-        expertName: sessions[parseInt(expertIdx)]?.name || `Expert ${parseInt(expertIdx) + 1}`,
+        expertName: getSessionLabel(sessions[parseInt(expertIdx)], `Expert ${parseInt(expertIdx) + 1}`),
       }))
   }
 
@@ -1054,7 +1061,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                         onChange={() => handleSessionToggle(session._id)}
                         isDisabled={!canSelect}
                       >
-                        {session.name || session.code || `Session ${session._id}`}{' '}
+                        {getSessionLabel(session, `Session ${session._id}`)}{' '}
                         <Text as="span" color="gray.500" ml={2}>{statusText}</Text>
                       </Checkbox>
                     </HStack>
@@ -1492,7 +1499,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                             const s = sessions.find((ss) => ss._id === sid)
                             return (
                               <option key={sid} value={sid}>
-                                {s?.name || sid}
+                                {getSessionLabel(s, sid)}
                               </option>
                             )
                           })}
