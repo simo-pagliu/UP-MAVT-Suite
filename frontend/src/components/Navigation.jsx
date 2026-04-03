@@ -88,7 +88,7 @@ function Navigation({
         
         <Spacer />
         
-        {isLoggedIn && currentRole !== 'admin' && (
+        {currentRole !== 'admin' && (
           <IconButton
             aria-label="Documentation"
             icon={<InfoIcon />}

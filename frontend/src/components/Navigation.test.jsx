@@ -174,6 +174,11 @@ describe('Navigation – documentation button', () => {
     expect(screen.getByRole('button', { name: /documentation/i })).toBeInTheDocument()
   })
 
+  it('shows the info icon button when not logged in', () => {
+    renderNavigation({ isLoggedIn: false, currentRole: null })
+    expect(screen.getByRole('button', { name: /documentation/i })).toBeInTheDocument()
+  })
+
   it('does not show the documentation button for admin', () => {
     renderNavigation({ isLoggedIn: true, currentRole: 'admin' })
     expect(screen.queryByRole('button', { name: /documentation/i })).not.toBeInTheDocument()
