@@ -171,6 +171,85 @@ def notify_inactive_study_sessions():
     }), 200
 
 
+@bp.route('/admin/delete-inactive', methods=['POST'])
+def delete_inactive_study_sessions():
+    """Delete study sessions inactive for 12+ months (GDPR / data-retention).
+
+    Accepts a JSON body:
+    * ``password`` (str, required) – admin password for authorisation.
+    * ``months`` (int, default 12) – inactivity threshold in months.
+    * ``send_backup_email`` (bool, default true) – when ``true`` a ZIP backup
+      is emailed to the practitioner *before* the session is deleted.
+
+    For each inactive session that has a ``creator_email`` stored, a final
+    backup email is sent (if ``send_backup_email`` is true and SMTP is
+    configured).  All associated elicitation sessions and input documents are
+    then permanently removed.
+    """
+    data = request.json or {}
+    password = data.get('password')
+    if not password:
+        return jsonify({'success': False, 'error': 'Password is required'}), 400
+    admin_password = os.getenv('ADMIN_PASSWORD')
+    if not admin_password:
+        return jsonify({'success': False, 'error': 'ADMIN_PASSWORD is not configured on the server'}), 500
+    if not hmac.compare_digest(str(password), str(admin_password)):
+        return jsonify({'success': False, 'error': 'Invalid password'}), 401
+
+    months = int(data.get('months', 12))
+    raw_send = data.get('send_backup_email')
+    send_backup_email = raw_send is not False and str(raw_send).lower() not in ('false', '0', 'no')
+
+    svc = StudySessionService(current_app.db)
+    email_svc = EmailService()
+
+    # Collect inactive sessions before deletion so we can send backup emails.
+    inactive_sessions = svc.get_inactive_study_sessions(months=months)
+
+    email_results = []
+    if send_backup_email:
+        for study in inactive_sessions:
+            creator_email = study.get('creator_email', '').strip()
+            if not creator_email:
+                continue
+            try:
+                zip_buf, zip_filename, _ = svc.export_backup_zip(study['_id'])
+                zip_bytes = zip_buf.read() if hasattr(zip_buf, 'read') else zip_buf
+            except Exception as exc:  # noqa: BLE001
+                logger.error('Failed to generate backup for %s: %s', study.get('code'), exc)
+                # Skip the email rather than sending an empty ZIP; record the failure.
+                email_results.append({
+                    'code': study.get('code'),
+                    'email': creator_email,
+                    'email_status': 'backup_failed',
+                })
+                continue
+
+            result = email_svc.send_inactivity_warning(
+                creator_email,
+                code=study.get('code', ''),
+                study_session_id=study['_id'],
+                months_inactive=study.get('months_inactive', months),
+                zip_bytes=zip_bytes,
+                zip_filename=zip_filename,
+            )
+            email_results.append({
+                'code': study.get('code'),
+                'email': creator_email,
+                'email_status': result.get('status'),
+            })
+
+    deleted = svc.delete_inactive_study_sessions(months=months)
+
+    return jsonify({
+        'success': True,
+        'inactive_count': len(inactive_sessions),
+        'deleted_count': len(deleted),
+        'deleted': deleted,
+        'email_results': email_results,
+    }), 200
+
+
 # --------------------------------------------------------------------------- #
 # Session detection
 # --------------------------------------------------------------------------- #

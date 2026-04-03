@@ -376,9 +376,15 @@ function LoginPage({ onLogin, onDocumentation }) {
             <VStack spacing={3} align="stretch">
               <Heading size="sm">Create New Case Study</Heading>
               <Text color="gray.600" fontSize="sm">
-                No account is created in this process. Your email is only used for essential case-study
-                notifications such as session confirmation, elicitation progress updates, completion alerts,
-                and inactivity warnings to help reduce the risk of accidental data loss.
+                No account is created in this process. Your email is used only for essential case-study
+                notifications (session confirmation, elicitation progress, completion alerts, and inactivity
+                warnings) and to send you a backup copy of your data before it is deleted. Your email address
+                is stored on servers operated by the Paul Scherrer Institute (PSI) in Switzerland and is
+                automatically and permanently deleted together with all case-study data after{' '}
+                <strong>12 months of inactivity</strong>. Processing is performed in accordance with the EU
+                General Data Protection Regulation (GDPR) and the Swiss Federal Act on Data Protection
+                (nFADP). You may request erasure at any time by contacting the PSI data protection officer
+                via the privacy notice linked in the footer.
               </Text>
 
               <Text color="gray.600" fontSize="sm">
@@ -469,12 +475,17 @@ function LoginPage({ onLogin, onDocumentation }) {
             <Text fontWeight="semibold">Disclaimers</Text>
             <Text fontSize="sm" color="gray.600">For research and decision-support use only.</Text>
             <Text fontSize="sm" color="gray.600">No warranty or guarantee of fitness for purpose.</Text>
+            <Text fontSize="sm" color="gray.600">
+              Practitioner email addresses are stored solely for operational notifications and are
+              automatically deleted after 12 months of inactivity in accordance with EU GDPR and the
+              Swiss nFADP.
+            </Text>
           </VStack>
 
           <VStack align="start" spacing={1}>
             <Text fontWeight="semibold">Legal and policy links</Text>
-            <Link href="https://example.org/terms" isExternal color="blue.700">Terms of use (placeholder)</Link>
-            <Link href="https://example.org/privacy" isExternal color="blue.700">Privacy notice (placeholder)</Link>
+            <Link href="https://www.psi.ch/en/disclaimer-and-privacy-policy" isExternal color="blue.700">Privacy notice (PSI)</Link>
+            <Link href="https://www.psi.ch/en/disclaimer-and-privacy-policy" isExternal color="blue.700">Terms of use (PSI)</Link>
           </VStack>
         </SimpleGrid>
       </Box>

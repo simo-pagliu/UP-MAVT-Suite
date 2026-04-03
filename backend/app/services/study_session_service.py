@@ -825,3 +825,40 @@ class StudySessionService:
                 serialised['months_inactive'] = months_inactive
                 inactive.append(serialised)
         return inactive
+
+    def delete_inactive_study_sessions(self, months=12):
+        """Delete study sessions that have been inactive for *months* or more.
+
+        All associated elicitation sessions and input documents are removed
+        along with each study session.  The caller is responsible for sending
+        notification emails (with a backup ZIP) *before* calling this method
+        so that practitioners can retain a copy of their data.
+
+        Args:
+            months (int): Inactivity threshold in months (default: ``12``).
+
+        Returns:
+            list[dict]: A list of dicts describing every deleted session,
+            each with ``'_id'``, ``'code'``, ``'creator_email'``, and
+            ``'months_inactive'`` keys.
+        """
+        inactive = self.get_inactive_study_sessions(months=months)
+        deleted = []
+        for study in inactive:
+            study_id = study['_id']
+            # Remove all child elicitation sessions first.
+            self._sessions.delete_many_by_study_session_id(study_id)
+            # Remove the shared input document if present.
+            raw = self._studies.find_by_id(study_id)
+            if raw:
+                input_id = self._studies._to_oid(raw.get('input_id'))
+                if input_id:
+                    self._inputs.delete(input_id)
+                self._studies.delete(study_id)
+            deleted.append({
+                '_id': study_id,
+                'code': study.get('code', ''),
+                'creator_email': study.get('creator_email', ''),
+                'months_inactive': study.get('months_inactive', 0),
+            })
+        return deleted
