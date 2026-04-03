@@ -1,8 +1,15 @@
 """Unit tests for AuthenticationService."""
 import pytest
+import mongomock
 from werkzeug.security import generate_password_hash
 
 from app.services.authentication_service import AuthenticationService
+
+
+@pytest.fixture()
+def mock_db():
+    client = mongomock.MongoClient()
+    return client['elicitation']
 
 
 class TestHashPassword:
@@ -71,6 +78,8 @@ class TestVerifyPassword:
 
 
 class TestAuthenticate:
+    """Tests for authenticate() without a database (env-only fallback)."""
+
     def test_correct_password_returns_true(self, monkeypatch):
         monkeypatch.setenv('ADMIN_PASSWORD', 'testpass')
         assert AuthenticationService().authenticate('testpass')
@@ -97,3 +106,51 @@ class TestAuthenticate:
     def test_default_rejects_wrong_password_when_env_not_set(self, monkeypatch):
         monkeypatch.delenv('ADMIN_PASSWORD', raising=False)
         assert not AuthenticationService().authenticate('wrongpass')
+
+
+class TestAuthenticateWithDb:
+    """Tests for authenticate() with a MongoDB database handle."""
+
+    def test_bootstraps_from_plain_env_password(self, mock_db, monkeypatch):
+        monkeypatch.setenv('ADMIN_PASSWORD', 'mypassword')
+        svc = AuthenticationService(mock_db)
+        assert svc.authenticate('mypassword')
+
+    def test_bootstrap_stores_hash_in_db(self, mock_db, monkeypatch):
+        monkeypatch.setenv('ADMIN_PASSWORD', 'mypassword')
+        AuthenticationService(mock_db).authenticate('mypassword')
+        stored = mock_db.admin.find_one({'role': 'admin'})
+        assert stored is not None
+        assert AuthenticationService._is_hashed(stored['password_hash'])
+
+    def test_bootstraps_from_hashed_env_password(self, mock_db, monkeypatch):
+        hashed = generate_password_hash('securepass')
+        monkeypatch.setenv('ADMIN_PASSWORD', hashed)
+        assert AuthenticationService(mock_db).authenticate('securepass')
+
+    def test_uses_db_hash_over_env_when_db_has_hash(self, mock_db, monkeypatch):
+        # Pre-seed a hash in the DB for 'dbpassword'.
+        db_hash = generate_password_hash('dbpassword')
+        mock_db.admin.insert_one({'role': 'admin', 'password_hash': db_hash})
+        # Even if env has a different password, the DB value wins.
+        monkeypatch.setenv('ADMIN_PASSWORD', 'envpassword')
+        svc = AuthenticationService(mock_db)
+        assert svc.authenticate('dbpassword')
+        assert not svc.authenticate('envpassword')
+
+    def test_wrong_password_returns_false(self, mock_db, monkeypatch):
+        monkeypatch.setenv('ADMIN_PASSWORD', 'mypassword')
+        assert not AuthenticationService(mock_db).authenticate('wrongpass')
+
+    def test_default_password_when_env_not_set(self, mock_db, monkeypatch):
+        monkeypatch.delenv('ADMIN_PASSWORD', raising=False)
+        assert AuthenticationService(mock_db).authenticate('admin123')
+
+    def test_second_call_uses_db_not_env(self, mock_db, monkeypatch):
+        monkeypatch.setenv('ADMIN_PASSWORD', 'firstpass')
+        AuthenticationService(mock_db).authenticate('firstpass')
+        # Change env — DB value should now be used, env is ignored.
+        monkeypatch.setenv('ADMIN_PASSWORD', 'changedpass')
+        assert AuthenticationService(mock_db).authenticate('firstpass')
+        assert not AuthenticationService(mock_db).authenticate('changedpass')
+

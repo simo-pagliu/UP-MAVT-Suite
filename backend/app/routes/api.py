@@ -102,7 +102,7 @@ def admin_login():
     password = data.get('password')
     if not password:
         return jsonify({'success': False, 'error': 'Password is required'}), 400
-    if AuthenticationService().authenticate(password):
+    if AuthenticationService(current_app.db).authenticate(password):
         return jsonify({'success': True}), 200
     return jsonify({'success': False, 'error': 'Invalid password'}), 401
 
@@ -123,7 +123,7 @@ def notify_inactive_study_sessions():
     password = data.get('password')
     if not password:
         return jsonify({'success': False, 'error': 'Password is required'}), 400
-    if not AuthenticationService().authenticate(password):
+    if not AuthenticationService(current_app.db).authenticate(password):
         return jsonify({'success': False, 'error': 'Invalid password'}), 401
 
     months = int(data.get('months', 12))
@@ -190,10 +190,7 @@ def delete_inactive_study_sessions():
     password = data.get('password')
     if not password:
         return jsonify({'success': False, 'error': 'Password is required'}), 400
-    admin_password = os.getenv('ADMIN_PASSWORD')
-    if not admin_password:
-        return jsonify({'success': False, 'error': 'ADMIN_PASSWORD is not configured on the server'}), 500
-    if not hmac.compare_digest(str(password), str(admin_password)):
+    if not AuthenticationService(current_app.db).authenticate(password):
         return jsonify({'success': False, 'error': 'Invalid password'}), 401
 
     months = int(data.get('months', 12))
