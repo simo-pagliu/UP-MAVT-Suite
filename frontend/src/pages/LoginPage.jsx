@@ -329,17 +329,39 @@ function LoginPage({ onLogin, onDocumentation }) {
                 Read the publication (placeholder)
               </Link>
             </HStack>
-            <VStack align="start" spacing={1}>
+            <VStack align="start" spacing={2}>
               <Text fontWeight="semibold">Example case studies</Text>
-              <Link href={`${API_URL}/example-case-study/1`} color="blue.700">
-                Download example case study 1
-              </Link>
-              <Link href={`${API_URL}/example-case-study/2`} color="blue.700">
-                Download example case study 2
-              </Link>
-              <Link href={`${API_URL}/example-case-study/3`} color="blue.700">
-                Download example case study 3
-              </Link>
+              <Text fontSize="sm" color="gray.600">
+                These examples are ordered from the simplest reference case to a larger, more realistic
+                scenario. Start with the baseline study, then move to the uncertain two-decision-maker
+                version, and finally the larger hierarchical example.
+              </Text>
+              <VStack align="start" spacing={2} pt={1}>
+                <Box>
+                  <Link href={`${API_URL}/example-case-study/1`} color="blue.700" fontWeight="semibold">
+                    Reference case study
+                  </Link>
+                  <Text fontSize="sm" color="gray.600">
+                    No uncertainty, one decision maker.
+                  </Text>
+                </Box>
+                <Box>
+                  <Link href={`${API_URL}/example-case-study/2`} color="blue.700" fontWeight="semibold">
+                    Uncertain case study with two decision makers
+                  </Link>
+                  <Text fontSize="sm" color="gray.600">
+                    A variation of the reference case with uncertainty and two decision makers.
+                  </Text>
+                </Box>
+                <Box>
+                  <Link href={`${API_URL}/example-case-study/3`} color="blue.700" fontWeight="semibold">
+                    Large hierarchical uncertain case study
+                  </Link>
+                  <Text fontSize="sm" color="gray.600">
+                    A bigger hierarchical example with uncertainty and a richer structure.
+                  </Text>
+                </Box>
+              </VStack>
             </VStack>
           </VStack>
         </GridItem>

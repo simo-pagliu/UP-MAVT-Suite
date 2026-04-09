@@ -25,11 +25,12 @@ describe('LoginPage – rendering', () => {
     expect(screen.getByPlaceholderText(/enter session uuid/i)).toBeInTheDocument()
   })
 
-  it('shows example case-study download links', () => {
+  it('shows descriptive example case-study download links', () => {
     renderLoginPage()
-    expect(screen.getByRole('link', { name: /download example case study 1/i })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /download example case study 2/i })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /download example case study 3/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /reference case study/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /uncertain case study with two decision makers/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /large hierarchical uncertain case study/i })).toBeInTheDocument()
+    expect(screen.getByText(/ordered from the simplest reference case/i)).toBeInTheDocument()
   })
 })
 

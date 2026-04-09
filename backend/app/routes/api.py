@@ -585,19 +585,19 @@ def upload_case_study():
 @bp.route('/example-case-study/1', methods=['GET'])
 def download_example_case_study_1():
     """Download example case study ZIP 1."""
-    return _send_example_case_study(1, 'example_case_study_1.zip')
+    return _send_example_case_study(1, 'reference_case_study.zip')
 
 
 @bp.route('/example-case-study/2', methods=['GET'])
 def download_example_case_study_2():
     """Download example case study ZIP 2."""
-    return _send_example_case_study(2, 'example_case_study_2.zip')
+    return _send_example_case_study(2, 'uncertain_two_decision_makers_case_study.zip')
 
 
 @bp.route('/example-case-study/3', methods=['GET'])
 def download_example_case_study_3():
     """Download example case study ZIP 3."""
-    return _send_example_case_study(3, 'example_case_study_3.zip')
+    return _send_example_case_study(3, 'large_hierarchical_uncertain_case_study.zip')
 
 
 
