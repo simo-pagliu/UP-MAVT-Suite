@@ -44,6 +44,26 @@ import {
 import { generateInputCSV, downloadCSVFile } from '../utils/csvExport'
 import { API_URL } from '../config'
 
+const SINGLE_GROUP_NAME = 'single-group'
+
+const applyHierarchyModeToCriteria = (items, isHierarchicalInput) => {
+  if (!Array.isArray(items)) return []
+  return items.map((criterion) => ({
+    ...criterion,
+    group: isHierarchicalInput
+      ? ((criterion.group || '') === SINGLE_GROUP_NAME ? '' : (criterion.group || ''))
+      : SINGLE_GROUP_NAME,
+  }))
+}
+
+const detectHierarchicalInputFromCriteria = (items) => {
+  if (!Array.isArray(items) || items.length === 0) return false
+  const groups = items.map((criterion) => (criterion?.group || '').trim().toLowerCase())
+  const allSingleGroup = groups.every((group) => group === SINGLE_GROUP_NAME)
+  const allBlank = groups.every((group) => group === '')
+  return !(allSingleGroup || allBlank)
+}
+
 function InputPage({ studySessionId }, ref) {
   const [name, setName] = useState('')
   const [metadataDefaults, setMetadataDefaults] = useState({ title: '', description: '' })
@@ -60,6 +80,7 @@ function InputPage({ studySessionId }, ref) {
   const [features, setFeatures] = useState({ qi: false, vf: false, bwt: false })
   const [savingFeatures, setSavingFeatures] = useState(false)
   const [featureError, setFeatureError] = useState('')
+  const [isHierarchicalInput, setIsHierarchicalInput] = useState(false)
   
   // Distribution modal state
   const { isOpen: isDistModalOpen, onOpen: onDistModalOpen, onClose: onDistModalClose } = useDisclosure()
@@ -144,6 +165,7 @@ function InputPage({ studySessionId }, ref) {
       setHasExistingSessions(false)
       setFeatures({ qi: false, vf: false, bwt: false })
       setFeatureError('')
+      setIsHierarchicalInput(false)
       return
     }
 
@@ -163,6 +185,9 @@ function InputPage({ studySessionId }, ref) {
           const normalized = normalizeCriteria(study.criteria)
           setCriteria(normalized)
           setOriginalCriteria(JSON.parse(JSON.stringify(normalized)))
+          setIsHierarchicalInput(detectHierarchicalInputFromCriteria(normalized))
+        } else {
+          setIsHierarchicalInput(false)
         }
         
         // Check if there are existing elicitation sessions
@@ -224,9 +249,17 @@ function InputPage({ studySessionId }, ref) {
     setIsLocked(false)
   }
 
+  const handleHierarchyToggle = (checked) => {
+    setIsHierarchicalInput(checked)
+    setCriteria((prev) => applyHierarchyModeToCriteria(prev, checked))
+    setHasModifiedInput(true)
+  }
+
   const handleCancel = () => {
     // Restore original criteria
-    setCriteria(JSON.parse(JSON.stringify(originalCriteria)))
+    const restored = JSON.parse(JSON.stringify(originalCriteria))
+    setCriteria(restored)
+    setIsHierarchicalInput(detectHierarchicalInputFromCriteria(restored))
     setIsEditing(false)
     setIsLocked(true)
     setHasModifiedInput(false)
@@ -444,7 +477,8 @@ function InputPage({ studySessionId }, ref) {
         }
       })
 
-      setCriteria(parsedCriteria)
+      const adjustedCriteria = applyHierarchyModeToCriteria(parsedCriteria, isHierarchicalInput)
+      setCriteria(adjustedCriteria)
       setHasModifiedInput(true)
       toast({
         title: 'File loaded',
@@ -589,7 +623,7 @@ function InputPage({ studySessionId }, ref) {
     const alternativeCount = criteria[0]?.alternatives.length || 0
     const newCriterion = {
       criterion_name: '',
-      group: '',
+      group: isHierarchicalInput ? '' : SINGLE_GROUP_NAME,
       description: '',
       is_qualitative: false,
       use_mid_splitting: true,
@@ -623,7 +657,8 @@ function InputPage({ studySessionId }, ref) {
       return
     }
 
-    const csvContent = generateInputCSV(criteria)
+    const criteriaForExport = applyHierarchyModeToCriteria(criteria, isHierarchicalInput)
+    const csvContent = generateInputCSV(criteriaForExport)
     downloadCSVFile(csvContent, `input_${name || 'criteria'}.csv`)
     
     toast({
@@ -647,8 +682,10 @@ function InputPage({ studySessionId }, ref) {
       return
     }
 
+    const criteriaToSave = applyHierarchyModeToCriteria(criteria, isHierarchicalInput)
+
     // Validate all criteria have names and units
-    const hasEmptyCriteria = criteria.some(
+    const hasEmptyCriteria = criteriaToSave.some(
       (criterion) => !criterion.criterion_name || !criterion.unit
     )
     if (hasEmptyCriteria) {
@@ -662,8 +699,22 @@ function InputPage({ studySessionId }, ref) {
       return
     }
 
+    if (isHierarchicalInput) {
+      const hasMissingGroups = criteriaToSave.some((criterion) => !criterion.group)
+      if (hasMissingGroups) {
+        toast({
+          title: 'Request failed',
+          description: 'All criteria must have a group when hierarchical input is enabled',
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        })
+        return
+      }
+    }
+
     // Validate all alternatives have names and values
-    const hasEmptyAlternatives = criteria.some(criterion => {
+    const hasEmptyAlternatives = criteriaToSave.some(criterion => {
       if (criterion.is_qualitative) {
         // Qualitative criteria should have empty values
         return criterion.alternatives.some(alt => !alt.name)
@@ -688,7 +739,7 @@ function InputPage({ studySessionId }, ref) {
       if (isExistingStudySession && studySessionId) {
         // If there are existing sessions and input was modified, selectively reset affected data
         if (hasExistingSessions && hasModifiedInput) {
-          const changes = detectCriteriaChanges(originalCriteria, criteria)
+          const changes = detectCriteriaChanges(originalCriteria, criteriaToSave)
           
           if (changes.affectedCriteria.length > 0 || changes.affectedGroups.length > 0) {
             // Selective reset: only reset affected criteria and groups
@@ -700,10 +751,11 @@ function InputPage({ studySessionId }, ref) {
           // If no affected criteria/groups, don't reset anything
         }
         
-        await axios.put(`${API_URL}/study-session/${studySessionId}/input`, { criteria })
+        await axios.put(`${API_URL}/study-session/${studySessionId}/input`, { criteria: criteriaToSave })
         
         // Update original criteria and state
-        setOriginalCriteria(JSON.parse(JSON.stringify(criteria)))
+        setCriteria(criteriaToSave)
+        setOriginalCriteria(JSON.parse(JSON.stringify(criteriaToSave)))
         setIsLocked(true)
         setIsEditing(false)
         setHasModifiedInput(false)
@@ -887,6 +939,19 @@ function InputPage({ studySessionId }, ref) {
             <Divider />
 
             <VStack align="stretch" spacing={4}>
+              <Checkbox
+                isChecked={isHierarchicalInput}
+                onChange={(e) => handleHierarchyToggle(e.target.checked)}
+                isDisabled={isLocked}
+              >
+                <VStack align="start" spacing={0}>
+                  <Text fontWeight="medium">Hierarchical input</Text>
+                  <Text fontSize="xs" color="gray.600">
+                    Disable this to use a single hidden group ({SINGLE_GROUP_NAME}) for all criteria.
+                  </Text>
+                </VStack>
+              </Checkbox>
+
               <Text fontSize="sm" color="gray.600">
                 You can either define the input in a CSV and upload it, or use the editor below.
               </Text>
@@ -994,15 +1059,17 @@ function InputPage({ studySessionId }, ref) {
                             bg="white"
                             isDisabled={isLocked}
                           />
-                          <Input
-                            value={criterion.group || ''}
-                            onChange={(e) => handleCellChange(idx, 'group', e.target.value)}
-                            placeholder="Group"
-                            size="sm"
-                            fontSize="xs"
-                            bg="white"
-                            isDisabled={isLocked}
-                          />
+                          {isHierarchicalInput && (
+                            <Input
+                              value={criterion.group || ''}
+                              onChange={(e) => handleCellChange(idx, 'group', e.target.value)}
+                              placeholder="Group"
+                              size="sm"
+                              fontSize="xs"
+                              bg="white"
+                              isDisabled={isLocked}
+                            />
+                          )}
                           <Input
                             value={criterion.description || ''}
                             onChange={(e) => handleCellChange(idx, 'description', e.target.value)}
