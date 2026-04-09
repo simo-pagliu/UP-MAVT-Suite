@@ -22,7 +22,7 @@ describe('LoginPage – rendering', () => {
 
   it('shows access session input by default', () => {
     renderLoginPage()
-    expect(screen.getByPlaceholderText(/enter session uuid/i)).toBeInTheDocument()
+    expect(screen.getByPlaceholderText(/enter session code/i)).toBeInTheDocument()
   })
 
   it('shows descriptive example case-study download links', () => {
@@ -38,7 +38,7 @@ describe('LoginPage – access session validation', () => {
   it('shows an error toast when trying to access with an empty code', async () => {
     renderLoginPage()
     await userEvent.click(screen.getByRole('button', { name: /access session/i }))
-    expect(await screen.findByText(/please enter a session uuid/i)).toBeInTheDocument()
+    expect(await screen.findByText(/please enter a session code/i)).toBeInTheDocument()
   })
 })
 
@@ -47,7 +47,7 @@ describe('LoginPage – admin access', () => {
     const onLogin = vi.fn()
     renderLoginPage(onLogin)
 
-    await userEvent.type(screen.getByPlaceholderText(/enter session uuid/i), 'admin')
+    await userEvent.type(screen.getByPlaceholderText(/enter session code/i), 'admin')
     await userEvent.click(screen.getByRole('button', { name: /access session/i }))
 
     expect(onLogin).toHaveBeenCalledWith(null, 'admin', 'admin')
@@ -57,7 +57,7 @@ describe('LoginPage – admin access', () => {
     const onLogin = vi.fn()
     renderLoginPage(onLogin)
 
-    await userEvent.type(screen.getByPlaceholderText(/enter session uuid/i), 'ADMIN')
+    await userEvent.type(screen.getByPlaceholderText(/enter session code/i), 'ADMIN')
     await userEvent.click(screen.getByRole('button', { name: /access session/i }))
 
     expect(onLogin).toHaveBeenCalledWith(null, 'admin', 'admin')
@@ -79,7 +79,7 @@ describe('LoginPage – access session (API success)', () => {
     const onLogin = vi.fn()
     renderLoginPage(onLogin)
 
-    await userEvent.type(screen.getByPlaceholderText(/enter session uuid/i), 'CODE1')
+    await userEvent.type(screen.getByPlaceholderText(/enter session code/i), 'CODE1')
     await userEvent.click(screen.getByRole('button', { name: /access session/i }))
 
     await waitFor(() => expect(onLogin).toHaveBeenCalledWith('sess-1', 'sess-1', 'stakeholder'))
@@ -94,15 +94,15 @@ describe('LoginPage – access session errors', () => {
   it('shows not found toast when session does not exist', async () => {
     axios.get.mockResolvedValue({ data: { exists: false } })
     renderLoginPage()
-    await userEvent.type(screen.getByPlaceholderText(/enter session uuid/i), 'UNKNOWN')
+    await userEvent.type(screen.getByPlaceholderText(/enter session code/i), 'UNKNOWN')
     await userEvent.click(screen.getByRole('button', { name: /access session/i }))
-    expect(await screen.findByText(/no session found/i)).toBeInTheDocument()
+    expect(await screen.findByText(/no active session is linked to this code/i)).toBeInTheDocument()
   })
 
   it('shows server error message in a toast', async () => {
     axios.get.mockRejectedValue({ response: { data: { error: 'Server down' } } })
     renderLoginPage()
-    await userEvent.type(screen.getByPlaceholderText(/enter session uuid/i), 'CODE1')
+    await userEvent.type(screen.getByPlaceholderText(/enter session code/i), 'CODE1')
     await userEvent.click(screen.getByRole('button', { name: /access session/i }))
     expect(await screen.findByText(/server down/i)).toBeInTheDocument()
   })
@@ -152,7 +152,7 @@ describe('LoginPage – keyboard', () => {
     const onLogin = vi.fn()
     renderLoginPage(onLogin)
 
-    const input = screen.getByPlaceholderText(/enter session uuid/i)
+    const input = screen.getByPlaceholderText(/enter session code/i)
     await userEvent.type(input, 'ENTER1{Enter}')
 
     await waitFor(() => expect(onLogin).toHaveBeenCalledWith('sess-2', 'sess-2', 'stakeholder'))

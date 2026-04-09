@@ -49,7 +49,7 @@ function LoginPage({ onLogin, onDocumentation }) {
     if (!code.trim()) {
       toast({
         title: 'Request failed',
-        description: 'Please enter a session UUID',
+        description: 'Please enter a session code',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -78,7 +78,7 @@ function LoginPage({ onLogin, onDocumentation }) {
       if (!data.exists) {
         toast({
           title: 'Not found',
-          description: 'No session found for this UUID',
+          description: 'No active session is linked to this code. If you are a participant, please ask your practitioner for access. If you are the practitioner, check your email for the confirmation sent when you created the case study (search for "mcda-up.psi.ch").',
           status: 'error',
           duration: 3000,
           isClosable: true,
@@ -128,7 +128,7 @@ function LoginPage({ onLogin, onDocumentation }) {
       onLogin(createdStudyId, createdStudyId, 'practitioner')
       toast({
         title: 'Study session created',
-        description: `Study ID: ${createdStudyId}`,
+        description: `Study code: ${createdStudyId}`,
         status: 'success',
         duration: 3000,
         isClosable: true,
@@ -170,7 +170,7 @@ function LoginPage({ onLogin, onDocumentation }) {
       onLogin(importedStudyId, importedStudyId, 'practitioner')
       toast({
         title: 'Case study uploaded',
-        description: `Study ID: ${importedStudyId}`,
+        description: `Study code: ${importedStudyId}`,
         status: 'success',
         duration: 3000,
         isClosable: true,
@@ -300,21 +300,21 @@ function LoginPage({ onLogin, onDocumentation }) {
 
             <SimpleGrid columns={1} spacing={4}>
               <Box bg="blue.50" borderRadius="md" p={4} borderWidth={1} borderColor="blue.100">
-                <Text fontWeight="semibold" mb={1}>1. Define context</Text>
+                <Text fontWeight="semibold" mb={1}>1. Define the Input</Text>
                 <Text fontSize="sm" color="gray.600">
-                  Practitioners create a case study and define the indicator structure.
+                  Practitioners create case studies, define indicators and input data, and set up elicitation sessions for decision-makers.
                 </Text>
               </Box>
               <Box bg="blue.50" borderRadius="md" p={4} borderWidth={1} borderColor="blue.100">
-                <Text fontWeight="semibold" mb={1}>2. Elicit preferences</Text>
+                <Text fontWeight="semibold" mb={1}>2. Elicitation</Text>
                 <Text fontSize="sm" color="gray.600">
-                  Stakeholders complete Qualitative Indicators, Quantitative Indicators, and Weight Elicitation steps.
+                  Decision makers complete the elicitation sessions.
                 </Text>
               </Box>
               <Box bg="blue.50" borderRadius="md" p={4} borderWidth={1} borderColor="blue.100">
                 <Text fontWeight="semibold" mb={1}>3. Review outcomes</Text>
                 <Text fontSize="sm" color="gray.600">
-                  The team compares results and consolidates evidence for final decisions.
+                  The practitioner uses the UP-MAVT workflow to compute results and consolidate evidence, supporting informed final decisions.
                 </Text>
               </Box>
             </SimpleGrid>
@@ -326,7 +326,9 @@ function LoginPage({ onLogin, onDocumentation }) {
                 color="blue.700"
                 fontWeight="semibold"
               >
-                Read the publication (placeholder)
+                Read the publication about this software.
+                <br />
+                Read the publication about the UP-MAVT method (work in progress)
               </Link>
             </HStack>
             <VStack align="start" spacing={2}>
@@ -371,18 +373,20 @@ function LoginPage({ onLogin, onDocumentation }) {
             <Box>
               <Heading size="md" mb={2}>Access Existing Session</Heading>
               <Text color="gray.600" fontSize="sm">
-                Enter your session UUID to continue elicitation, or create a new case study if you are
-                initiating a practitioner workflow.
+                Enter the session code provided by your practitioner to continue.
+                <br />
+                If you are a practitioner, enter the session code you received by email when you
+                created the case study, or create a new one.
               </Text>
             </Box>
 
             <Box>
               <FormLabel fontWeight="medium" mb={2}>
-                Session UUID
+                Session code
               </FormLabel>
               <HStack spacing={3}>
                 <Input
-                  placeholder="Enter session UUID"
+                  placeholder="Enter session code"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleDetectAndLogin()}
@@ -493,12 +497,12 @@ function LoginPage({ onLogin, onDocumentation }) {
         <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
           <VStack align="start" spacing={1}>
             <Text fontWeight="semibold">Software documentation</Text>
-            <Link color="blue.700" onClick={onDocumentation}>Open software documentation</Link>
+            <Link color="blue.700" onClick={onDocumentation}>Software documentation</Link>
           </VStack>
 
           <VStack align="start" spacing={1}>
             <Text fontWeight="semibold">Disclaimers</Text>
-            <Text fontSize="sm" color="gray.600">For research and decision-support use only.</Text>
+            <Text fontSize="sm" color="gray.600">This software open-source, licensed under MIT license</Text>
             <Text fontSize="sm" color="gray.600">No warranty or guarantee of fitness for purpose.</Text>
             <Text fontSize="sm" color="gray.600">
               Practitioner email addresses are stored solely for operational notifications and are
@@ -509,8 +513,8 @@ function LoginPage({ onLogin, onDocumentation }) {
 
           <VStack align="start" spacing={1}>
             <Text fontWeight="semibold">Legal and policy links</Text>
-            <Link href="https://www.psi.ch/en/disclaimer-and-privacy-policy" isExternal color="blue.700">Privacy notice (PSI)</Link>
-            <Link href="https://www.psi.ch/en/disclaimer-and-privacy-policy" isExternal color="blue.700">Terms of use (PSI)</Link>
+            <Link href="https://www.psi.ch/en/disclaimer-and-privacy-policy" isExternal color="blue.700">Privacy notice</Link>
+            <Link href="https://www.psi.ch/en/disclaimer-and-privacy-policy" isExternal color="blue.700">Terms of use</Link>
           </VStack>
         </SimpleGrid>
       </Box>

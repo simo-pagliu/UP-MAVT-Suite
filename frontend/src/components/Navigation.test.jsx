@@ -144,7 +144,7 @@ describe('Navigation – practitioner role', () => {
     const buttons = screen.getAllByRole('button')
     const labels = buttons.map((btn) => btn.textContent)
     const inputIdx = labels.indexOf('Input Definition')
-    const manageIdx = labels.indexOf('Manage Case Studies')
+    const manageIdx = labels.indexOf('Manage Elicitation Session')
     const runIdx = labels.indexOf('Run UP-MAVT')
     expect(inputIdx).toBeGreaterThan(-1)
     expect(manageIdx).toBeGreaterThan(-1)
@@ -161,7 +161,7 @@ describe('Navigation – practitioner role', () => {
     })
     expect(screen.getByRole('button', { name: /input definition/i })).toBeDisabled()
     expect(screen.getByRole('button', { name: /run up-mavt/i })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /manage case studies/i })).not.toBeDisabled()
+    expect(screen.getByRole('button', { name: /manage elicitation session/i })).not.toBeDisabled()
   })
 })
 
