@@ -319,32 +319,27 @@ function LoginPage({ onLogin, onDocumentation }) {
               </Box>
             </SimpleGrid>
 
-            <HStack spacing={5} wrap="wrap">
-              <Link
-                href="https://example.org/publication-upmavt"
-                isExternal
-                color="blue.700"
-                fontWeight="semibold"
-              >
+            <VStack align="start" spacing={1}>
+              <Link href="" color="blue.700" fontWeight="semibold">
                 Read the publication about this software.
-                <br />
+              </Link>
+              <Link href="" color="blue.700" fontWeight="semibold">
                 Read the publication about the UP-MAVT method (work in progress)
               </Link>
-            </HStack>
+            </VStack>
             <VStack align="start" spacing={2}>
               <Text fontWeight="semibold">Example case studies</Text>
-              <Text fontSize="sm" color="gray.600">
-                These examples are ordered from the simplest reference case to a larger, more realistic
-                scenario. Start with the baseline study, then move to the uncertain two-decision-maker
-                version, and finally the larger hierarchical example.
-              </Text>
               <VStack align="start" spacing={2} pt={1}>
                 <Box>
                   <Link href={`${API_URL}/example-case-study/1`} color="blue.700" fontWeight="semibold">
                     Reference case study
                   </Link>
                   <Text fontSize="sm" color="gray.600">
-                    No uncertainty, one decision maker.
+                    Case study from Liang et al. used for validation (
+                    <Link href="https://doi.org/10.1016/j.ins.2022.07.097" isExternal color="blue.700">
+                      DOI
+                    </Link>
+                    ).
                   </Text>
                 </Box>
                 <Box>
@@ -352,7 +347,7 @@ function LoginPage({ onLogin, onDocumentation }) {
                     Uncertain case study with two decision makers
                   </Link>
                   <Text fontSize="sm" color="gray.600">
-                    A variation of the reference case with uncertainty and two decision makers.
+                    A variation of the reference case with artificial uncertainty and an additional decision maker, used to showcase UP-MAVT features.
                   </Text>
                 </Box>
                 <Box>
@@ -360,7 +355,10 @@ function LoginPage({ onLogin, onDocumentation }) {
                     Large hierarchical uncertain case study
                   </Link>
                   <Text fontSize="sm" color="gray.600">
-                    A bigger hierarchical example with uncertainty and a richer structure.
+                    A complete example, with hierarchical structure and real uncertainty, from the original UP-MAVT study (
+                    <Link href=""  isExternal color="blue.700">
+                DOI
+              </Link>).
                   </Text>
                 </Box>
               </VStack>
@@ -404,18 +402,6 @@ function LoginPage({ onLogin, onDocumentation }) {
 
             <VStack spacing={3} align="stretch">
               <Heading size="sm">Create New Case Study</Heading>
-              <Text color="gray.600" fontSize="sm">
-                No account is created in this process. Your email is used only for essential case-study
-                notifications (session confirmation, elicitation progress, completion alerts, and inactivity
-                warnings) and to send you a backup copy of your data before it is deleted. Your email address
-                is stored on servers operated by the Paul Scherrer Institute (PSI) in Switzerland and is
-                automatically and permanently deleted together with all case-study data after{' '}
-                <strong>12 months of inactivity</strong>. Processing is performed in accordance with the EU
-                General Data Protection Regulation (GDPR) and the Swiss Federal Act on Data Protection
-                (nFADP). You may request erasure at any time by contacting the PSI data protection officer
-                via the privacy notice linked in the footer.
-              </Text>
-
               <Text color="gray.600" fontSize="sm">
                 {getPrimaryInstruction()}
               </Text>
@@ -481,6 +467,15 @@ function LoginPage({ onLogin, onDocumentation }) {
                   {getPrimaryActionLabel()}
                 </Button>
               </HStack>
+              <Text color="gray.600" fontSize="sm">
+                No account is created in this process. Your email is used only for essential case-study
+                notifications (session confirmation, elicitation progress, completion alerts, and inactivity
+                warnings) and to send you a backup copy of your data before it is deleted. Your email address
+                is stored on servers operated by the Paul Scherrer Institute (PSI) in Switzerland and is
+                automatically and permanently deleted together with all case-study data after{' '}
+                <strong>12 months of inactivity</strong>. You may request erasure at any time by contacting
+                mcda-up@psi.ch.
+              </Text>
               <Input
                 ref={uploadFileRef}
                 type="file"
