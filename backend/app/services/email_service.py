@@ -303,7 +303,7 @@ class EmailService:
 safe – you will need it to access your session.</p>
 <p><span class="code">{study_session_id}</span></p>
 <p>You can access your session directly using the link below:</p>
-<p><a class="button" href="{link}">Open Study Session</a></p>
+<p><a class="button" href="{link}" style="color: #fff !important;">Open Study Session</a></p>
 <p>If the button does not work, copy this link into your browser:<br>
 <a href="{link}">{link}</a></p>""",
         )
@@ -347,7 +347,7 @@ safe – you will need it to access your session.</p>
 (<code>{zip_filename}</code>). You can restore it at any time via the admin panel.</p>
 <p>To keep your study session active, please open it and make any change before
 the deletion deadline:</p>
-<p><a class="button" href="{restore_link}">Open Study Session</a></p>
+<p><a class="button" href="{restore_link}" style="color: #fff !important;">Open Study Session</a></p>
 <p>If the button does not work, copy this link into your browser:<br>
 <a href="{restore_link}">{restore_link}</a></p>""",
         )
@@ -388,7 +388,7 @@ the deletion deadline:</p>
 <p>The elicitation session <strong>{stakeholder_name}</strong> (study
 <strong>{code}</strong>) has been marked as complete by the stakeholder.</p>
 <p>You can now review the responses and begin your analysis:</p>
-<p><a class="button" href="{link}">Open Study Session</a></p>
+<p><a class="button" href="{link}" style="color: #fff !important;">Open Study Session</a></p>
 <p>If the button does not work, copy this link into your browser:<br>
 <a href="{link}">{link}</a></p>""",
         )
