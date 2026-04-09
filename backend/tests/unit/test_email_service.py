@@ -109,6 +109,63 @@ class TestEmailServiceSendSuccess:
         assert 'error' in result
 
 
+class TestEmailServiceOAuth2:
+    def _svc(self, monkeypatch):
+        monkeypatch.setenv('SMTP_HOST', 'smtp.office365.com')
+        monkeypatch.setenv('SMTP_PORT', '587')
+        monkeypatch.setenv('SMTP_USE_TLS', 'true')
+        monkeypatch.setenv('EMAIL_FROM', 'noreply@test.local')
+        monkeypatch.setenv('EMAIL_AUTH_MODE', 'oauth2')
+        monkeypatch.setenv('SMTP_USER', 'sender@example.com')
+        monkeypatch.setenv('OAUTH2_TENANT_ID', 'tenant-id')
+        monkeypatch.setenv('OAUTH2_CLIENT_ID', 'client-id')
+        monkeypatch.setenv('OAUTH2_CLIENT_SECRET', 'client-secret')
+        monkeypatch.setenv('OAUTH2_SCOPE', 'https://outlook.office365.com/.default')
+        from app.services.email_service import EmailService
+        return EmailService()
+
+    def _mock_smtp(self):
+        smtp_instance = MagicMock()
+        smtp_instance.__enter__ = MagicMock(return_value=smtp_instance)
+        smtp_instance.__exit__ = MagicMock(return_value=False)
+        smtp_instance.docmd.return_value = (235, b'2.7.0 Authentication successful')
+        return smtp_instance
+
+    def test_send_uses_xoauth2_auth(self, monkeypatch):
+        svc = self._svc(monkeypatch)
+        smtp_mock = self._mock_smtp()
+
+        with patch('smtplib.SMTP', return_value=smtp_mock), patch(
+            'app.services.email_service.requests.post'
+        ) as token_post:
+            token_post.return_value = MagicMock(
+                raise_for_status=MagicMock(),
+                json=MagicMock(return_value={'access_token': 'token-123'}),
+            )
+            result = svc.send_session_confirmation('user@example.com', 'sid-oauth')
+
+        assert result['status'] == 'sent'
+        smtp_mock.login.assert_not_called()
+        smtp_mock.docmd.assert_called_once()
+
+    def test_missing_oauth2_settings_returns_failed(self, monkeypatch):
+        monkeypatch.setenv('SMTP_HOST', 'smtp.office365.com')
+        monkeypatch.setenv('EMAIL_AUTH_MODE', 'oauth2')
+        monkeypatch.delenv('OAUTH2_TENANT_ID', raising=False)
+        monkeypatch.delenv('OAUTH2_CLIENT_ID', raising=False)
+        monkeypatch.delenv('OAUTH2_CLIENT_SECRET', raising=False)
+        monkeypatch.setenv('SMTP_USER', 'sender@example.com')
+
+        from app.services.email_service import EmailService
+        svc = EmailService()
+
+        with patch('smtplib.SMTP', return_value=self._mock_smtp()):
+            result = svc.send_session_confirmation('user@example.com', 'sid-missing-oauth')
+
+        assert result['status'] == 'failed'
+        assert 'missing required settings' in result['error']
+
+
 class TestEmailServiceMessageContent:
     """Validate that messages contain expected content."""
 

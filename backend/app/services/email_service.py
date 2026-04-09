@@ -9,6 +9,12 @@ Configuration is read from the following environment variables:
 * ``SMTP_PORT``      – SMTP server port (default: ``587``).
 * ``SMTP_USER``      – SMTP authentication username (optional).
 * ``SMTP_PASSWORD``  – SMTP authentication password (optional).
+* ``EMAIL_AUTH_MODE`` – ``"basic"`` (default) or ``"oauth2"``.
+* ``OAUTH2_TENANT_ID`` – Microsoft Entra tenant ID (for oauth2 mode).
+* ``OAUTH2_CLIENT_ID`` – App registration client ID (for oauth2 mode).
+* ``OAUTH2_CLIENT_SECRET`` – App registration secret (for oauth2 mode).
+* ``OAUTH2_SCOPE``    – OAuth scope (default:
+                        ``https://outlook.office365.com/.default``).
 * ``SMTP_USE_TLS``   – Use STARTTLS when ``"true"`` (default: ``"true"``).
 * ``EMAIL_FROM``     – Sender address (default: ``noreply@elicitation-tools.local``).
 * ``APP_BASE_URL``   – Public base URL used to build links in emails
@@ -21,11 +27,14 @@ warning, so the application can run without email support in development.
 import logging
 import os
 import smtplib
+import base64
 from urllib.parse import quote
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email import encoders
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +49,12 @@ _BASE_HTML = """\
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{subject}</title>
+        self._auth_mode = os.getenv('EMAIL_AUTH_MODE', 'basic').strip().lower()
+        self._oauth2_tenant_id = os.getenv('OAUTH2_TENANT_ID', '').strip()
+        self._oauth2_client_id = os.getenv('OAUTH2_CLIENT_ID', '').strip()
+        self._oauth2_client_secret = os.getenv('OAUTH2_CLIENT_SECRET', '').strip()
+        self._oauth2_scope = os.getenv('OAUTH2_SCOPE', 'https://outlook.office365.com/.default').strip()
+        self._oauth2_username = os.getenv('OAUTH2_USERNAME', '').strip() or self._user
   <style>
     body {{ font-family: Arial, sans-serif; background: #f4f4f4; margin: 0; padding: 0; }}
     .container {{ max-width: 600px; margin: 32px auto; background: #fff;
@@ -48,6 +63,56 @@ _BASE_HTML = """\
     .header {{ background: #2b6cb0; color: #fff; padding: 24px 32px; }}
     .header h1 {{ margin: 0; font-size: 22px; }}
     .body {{ padding: 24px 32px; color: #333; line-height: 1.6; }}
+
+    def _token_url(self):
+        custom = os.getenv('OAUTH2_TOKEN_URL', '').strip()
+        if custom:
+            return custom
+        return f'https://login.microsoftonline.com/{self._oauth2_tenant_id}/oauth2/v2.0/token'
+
+    def _get_oauth2_access_token(self):
+        missing = []
+        if not self._oauth2_tenant_id:
+            missing.append('OAUTH2_TENANT_ID')
+        if not self._oauth2_client_id:
+            missing.append('OAUTH2_CLIENT_ID')
+        if not self._oauth2_client_secret:
+            missing.append('OAUTH2_CLIENT_SECRET')
+        if not self._oauth2_username:
+            missing.append('OAUTH2_USERNAME or SMTP_USER')
+        if missing:
+            raise ValueError(
+                f'OAuth2 SMTP is enabled but missing required settings: {", ".join(missing)}'
+            )
+
+        response = requests.post(
+            self._token_url(),
+            data={
+                'client_id': self._oauth2_client_id,
+                'client_secret': self._oauth2_client_secret,
+                'scope': self._oauth2_scope,
+                'grant_type': 'client_credentials',
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+        token = response.json().get('access_token')
+        if not token:
+            raise ValueError('OAuth2 token response did not include access_token')
+        return token
+
+    def _authenticate(self, server):
+        if self._auth_mode == 'oauth2':
+            access_token = self._get_oauth2_access_token()
+            auth_string = f'user={self._oauth2_username}\x01auth=Bearer {access_token}\x01\x01'
+            encoded = base64.b64encode(auth_string.encode('utf-8')).decode('ascii')
+            code, response = server.docmd('AUTH', f'XOAUTH2 {encoded}')
+            if code != 235:
+                raise smtplib.SMTPAuthenticationError(code, response)
+            return
+
+        if self._user:
+            server.login(self._user, self._password)
     .code {{ display: inline-block; background: #ebf8ff; color: #2b6cb0;
              font-family: monospace; font-size: 20px; font-weight: bold;
              padding: 8px 20px; border-radius: 4px; letter-spacing: 2px;
@@ -71,13 +136,12 @@ _BASE_HTML = """\
 
 _PLAIN_FOOTER = "\n\n---\nThis is an automated message from mcda-up.psi.ch. Please do not reply."
 
-
-def _html(subject, heading, body):
+                    server.ehlo()
+                    self._authenticate(server)
     return _BASE_HTML.format(subject=subject, heading=heading, body=body)
 
 
-def _uuid_link(base_url, uuid):
-    safe_uuid = quote(str(uuid or '').strip(), safe='')
+                    self._authenticate(server)
     return f'{base_url}/?uuid={safe_uuid}'
 
 
