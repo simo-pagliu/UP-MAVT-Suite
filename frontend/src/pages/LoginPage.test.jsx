@@ -29,6 +29,7 @@ describe('LoginPage – rendering', () => {
     renderLoginPage()
     expect(screen.getByRole('link', { name: /download example case study 1/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /download example case study 2/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /download example case study 3/i })).toBeInTheDocument()
   })
 })
 

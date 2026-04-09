@@ -337,6 +337,9 @@ function LoginPage({ onLogin, onDocumentation }) {
               <Link href={`${API_URL}/example-case-study/2`} color="blue.700">
                 Download example case study 2
               </Link>
+              <Link href={`${API_URL}/example-case-study/3`} color="blue.700">
+                Download example case study 3
+              </Link>
             </VStack>
           </VStack>
         </GridItem>

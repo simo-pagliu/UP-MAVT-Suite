@@ -26,6 +26,7 @@ services:
       - mongo
     volumes:
       - ./backend:/app
+      - ./examples:/app/examples:ro
       - ./frontend/public:/frontend/public:ro
       - ./worker/scripts:/worker/scripts:ro
     networks:

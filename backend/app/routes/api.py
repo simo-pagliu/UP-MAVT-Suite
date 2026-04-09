@@ -3,7 +3,7 @@ import hmac
 import io
 import json
 import logging
-import os
+from pathlib import Path
 import zipfile
 
 from app.exceptions import ServiceError
@@ -19,6 +19,7 @@ from app.services import (
 
 bp = Blueprint('api', __name__, url_prefix='/api')
 logger = logging.getLogger(__name__)
+EXAMPLES_DIR = Path(__file__).resolve().parents[2] / 'examples'
 
 
 @bp.errorhandler(ServiceError)
@@ -30,6 +31,13 @@ def _send(content, filename, mimetype):
     """Helper to send bytes or BytesIO as a file attachment."""
     buf = content if isinstance(content, io.BytesIO) else io.BytesIO(content)
     return send_file(buf, mimetype=mimetype, as_attachment=True, download_name=filename)
+
+
+def _send_example_case_study(example_id, filename):
+    zip_path = EXAMPLES_DIR / f'{example_id}.zip'
+    if not zip_path.is_file():
+        return jsonify({'error': f'Example case study {example_id} is unavailable'}), 404
+    return send_file(zip_path, mimetype='application/zip', as_attachment=True, download_name=filename)
 
 
 # --------------------------------------------------------------------------- #
@@ -576,24 +584,20 @@ def upload_case_study():
 
 @bp.route('/example-case-study/1', methods=['GET'])
 def download_example_case_study_1():
-    """Download a placeholder example case study ZIP."""
-    buf = StudySessionService.build_example_case_study_zip(
-        'EXAMPLE1',
-        'Example Case Study 1',
-        'Placeholder example case study. Replace with a real case study ZIP.',
-    )
-    return _send(buf, 'example_case_study_1.zip', 'application/zip')
+    """Download example case study ZIP 1."""
+    return _send_example_case_study(1, 'example_case_study_1.zip')
 
 
 @bp.route('/example-case-study/2', methods=['GET'])
 def download_example_case_study_2():
-    """Download a placeholder example case study ZIP."""
-    buf = StudySessionService.build_example_case_study_zip(
-        'EXAMPLE2',
-        'Example Case Study 2',
-        'Placeholder example case study. Replace with a real case study ZIP.',
-    )
-    return _send(buf, 'example_case_study_2.zip', 'application/zip')
+    """Download example case study ZIP 2."""
+    return _send_example_case_study(2, 'example_case_study_2.zip')
+
+
+@bp.route('/example-case-study/3', methods=['GET'])
+def download_example_case_study_3():
+    """Download example case study ZIP 3."""
+    return _send_example_case_study(3, 'example_case_study_3.zip')
 
 
 
