@@ -119,6 +119,26 @@ def admin_login():
     return jsonify({'success': False, 'error': 'Invalid password'}), 401
 
 
+@bp.route('/admin/email-diagnostics', methods=['POST'])
+def admin_email_diagnostics():
+    """Run SMTP diagnostics (token + auth) without sending an email."""
+    data = request.get_json(silent=True) or {}
+    password = data.get('password')
+    if not password:
+        return jsonify({'success': False, 'error': 'Password is required'}), 400
+    if not AuthenticationService(current_app.db).authenticate(password):
+        return jsonify({'success': False, 'error': 'Invalid password'}), 401
+
+    diagnostics = EmailService().diagnose_auth()
+    response = {'success': diagnostics.get('status') == 'ok', **diagnostics}
+
+    if diagnostics.get('status') == 'ok':
+        return jsonify(response), 200
+    if diagnostics.get('status') == 'skipped':
+        return jsonify(response), 503
+    return jsonify(response), 502
+
+
 @bp.route('/admin/notify-inactive', methods=['POST'])
 def notify_inactive_study_sessions():
     """Send inactivity warning emails for study sessions inactive for 12+ months.

@@ -1,6 +1,7 @@
 """Integration tests for the admin API endpoints."""
 import os
 import pytest
+from unittest.mock import patch
 from werkzeug.security import generate_password_hash
 
 
@@ -122,4 +123,48 @@ class TestDeleteInactiveStudySessions:
         resp = client.post('/api/admin/login', json={'password': 'wrongpass'})
         assert resp.status_code == 401
         assert resp.json['success'] is False
+
+
+class TestAdminEmailDiagnostics:
+    def test_requires_password(self, client):
+        resp = client.post('/api/admin/email-diagnostics', json={})
+        assert resp.status_code == 400
+        assert resp.json['success'] is False
+
+    def test_wrong_password_returns_401(self, client, monkeypatch):
+        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
+        resp = client.post('/api/admin/email-diagnostics', json={'password': 'wrong'})
+        assert resp.status_code == 401
+        assert resp.json['success'] is False
+
+    def test_ok_diagnostics_returns_200(self, client, monkeypatch):
+        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
+        with patch('app.routes.api.EmailService') as email_cls:
+            email_cls.return_value.diagnose_auth.return_value = {
+                'status': 'ok',
+                'auth_mode': 'oauth2',
+                'smtp': {'configured': True, 'host': 'smtp.office365.com', 'port': 587, 'use_tls': True},
+                'oauth2': {'enabled': True, 'username': 'mcda@psi.ch', 'token_ok': True, 'smtp_auth_ok': True},
+            }
+            resp = client.post('/api/admin/email-diagnostics', json={'password': 'secret'})
+
+        assert resp.status_code == 200
+        assert resp.json['success'] is True
+        assert resp.json['status'] == 'ok'
+
+    def test_failed_diagnostics_returns_502(self, client, monkeypatch):
+        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
+        with patch('app.routes.api.EmailService') as email_cls:
+            email_cls.return_value.diagnose_auth.return_value = {
+                'status': 'failed',
+                'error_stage': 'smtp_auth',
+                'error': '(535, Authentication unsuccessful)',
+                'smtp': {'configured': True, 'host': 'smtp.office365.com', 'port': 587, 'use_tls': True},
+                'oauth2': {'enabled': True, 'username': 'mcda@psi.ch', 'token_ok': True, 'smtp_auth_ok': False},
+            }
+            resp = client.post('/api/admin/email-diagnostics', json={'password': 'secret'})
+
+        assert resp.status_code == 502
+        assert resp.json['success'] is False
+        assert resp.json['error_stage'] == 'smtp_auth'
 
