@@ -117,6 +117,28 @@ function App() {
   }
 
   /**
+   * When the admin is logged in, register a beforeunload handler so that
+   * closing the tab or doing a hard refresh (Ctrl+F5) clears the HTTPOnly
+   * admin JWT cookies.  fetch() with keepalive:true is used because it
+   * supports credentials (unlike navigator.sendBeacon) and is guaranteed to
+   * complete even after the page begins unloading.
+   */
+  useEffect(() => {
+    if (currentRole !== 'admin') return
+
+    const handleBeforeUnload = () => {
+      fetch(`${API_URL}/admin/logout`, {
+        method: 'POST',
+        credentials: 'include',
+        keepalive: true,
+      })
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [currentRole])
+
+  /**
    * On mount, check whether a valid admin session cookie is present.
    * If the access token has expired, attempt a silent refresh.
    * On success the admin dashboard is restored; on failure the login page
