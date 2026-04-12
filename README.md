@@ -43,8 +43,15 @@ cp .env.example .env
 | `ADMIN_PASSWORD` | Password for the admin panel |
 | `SMTP_HOST` | SMTP server hostname (leave blank to disable email) |
 | `SMTP_PORT` | SMTP port (e.g. `587` for STARTTLS) |
-| `SMTP_USER` | SMTP username |
-| `SMTP_PASSWORD` | SMTP password |
+| `SMTP_USER` | SMTP username (or mailbox identity for OAuth2) |
+| `SMTP_PASSWORD` | SMTP password (only for `EMAIL_AUTH_MODE=basic`) |
+| `EMAIL_AUTH_MODE` | `basic` (default) or `oauth2` (required for Microsoft 365 tenants with basic auth disabled) |
+| `OAUTH2_TENANT_ID` | Microsoft Entra tenant ID (for `oauth2`) |
+| `OAUTH2_CLIENT_ID` | Microsoft Entra app client ID (for `oauth2`) |
+| `OAUTH2_CLIENT_SECRET` | Microsoft Entra app client secret (for `oauth2`) |
+| `OAUTH2_SCOPE` | OAuth scope (default `https://outlook.office365.com/.default`) |
+| `OAUTH2_TOKEN_URL` | Optional OAuth token endpoint override |
+| `OAUTH2_USERNAME` | Optional SMTP identity override for XOAUTH2 (defaults to `SMTP_USER`) |
 | `SMTP_USE_TLS` | `true` to use STARTTLS |
 | `EMAIL_FROM` | Sender address shown in outgoing emails |
 | `APP_BASE_URL` | Public URL of the frontend (e.g. `https://yourdomain.com`) |

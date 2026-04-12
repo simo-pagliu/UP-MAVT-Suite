@@ -154,3 +154,87 @@ class TestAuthenticateWithDb:
         assert AuthenticationService(mock_db).authenticate('firstpass')
         assert not AuthenticationService(mock_db).authenticate('changedpass')
 
+
+class TestGenerateAccessToken:
+    def test_returns_non_empty_string(self):
+        token = AuthenticationService.generate_access_token('admin')
+        assert isinstance(token, str)
+        assert len(token) > 0
+
+    def test_payload_contains_role_and_type(self):
+        import jwt as pyjwt
+        from app.services.authentication_service import _jwt_secret
+        token = AuthenticationService.generate_access_token('admin')
+        payload = pyjwt.decode(token, _jwt_secret(), algorithms=['HS256'])
+        assert payload['role'] == 'admin'
+        assert payload['type'] == 'access'
+
+    def test_payload_has_expiry(self):
+        import jwt as pyjwt
+        from app.services.authentication_service import _jwt_secret
+        token = AuthenticationService.generate_access_token('admin')
+        payload = pyjwt.decode(token, _jwt_secret(), algorithms=['HS256'])
+        assert 'exp' in payload
+
+
+class TestGenerateRefreshToken:
+    def test_returns_non_empty_string(self):
+        token = AuthenticationService.generate_refresh_token('admin')
+        assert isinstance(token, str)
+        assert len(token) > 0
+
+    def test_payload_contains_role_and_refresh_type(self):
+        import jwt as pyjwt
+        from app.services.authentication_service import _jwt_secret
+        token = AuthenticationService.generate_refresh_token('admin')
+        payload = pyjwt.decode(token, _jwt_secret(), algorithms=['HS256'])
+        assert payload['role'] == 'admin'
+        assert payload['type'] == 'refresh'
+
+
+class TestVerifyToken:
+    def test_valid_access_token_returns_payload(self):
+        token = AuthenticationService.generate_access_token('admin')
+        payload = AuthenticationService.verify_token(token)
+        assert payload is not None
+        assert payload['role'] == 'admin'
+
+    def test_invalid_token_returns_none(self):
+        assert AuthenticationService.verify_token('notavalidtoken') is None
+
+    def test_none_token_returns_none(self):
+        assert AuthenticationService.verify_token(None) is None
+
+    def test_empty_string_returns_none(self):
+        assert AuthenticationService.verify_token('') is None
+
+
+class TestExtractBearerToken:
+    def test_extracts_token_from_valid_header(self):
+        class FakeHeaders:
+            def get(self, key, default=''):
+                if key == 'Authorization':
+                    return 'Bearer mytoken'
+                return default
+
+        result = AuthenticationService.extract_bearer_token(FakeHeaders())
+        assert result == 'mytoken'
+
+    def test_returns_none_for_missing_header(self):
+        class FakeHeaders:
+            def get(self, key, default=''):
+                return default
+
+        result = AuthenticationService.extract_bearer_token(FakeHeaders())
+        assert result is None
+
+    def test_returns_none_for_non_bearer_scheme(self):
+        class FakeHeaders:
+            def get(self, key, default=''):
+                if key == 'Authorization':
+                    return 'Basic dXNlcjpwYXNz'
+                return default
+
+        result = AuthenticationService.extract_bearer_token(FakeHeaders())
+        assert result is None
+

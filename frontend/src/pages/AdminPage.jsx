@@ -35,6 +35,13 @@ import { useRef, Fragment } from 'react'
 import axios from 'axios'
 import { API_URL } from '../config'
 
+/**
+ * Axios instance that always sends credentials (cookies) so the admin
+ * HTTPOnly JWT cookies are included in every request automatically.
+ * JavaScript never reads or writes the token values directly.
+ */
+const adminApi = axios.create({ withCredentials: true })
+
 function AdminPage(props, ref) {
   const [studySessions, setStudySessions] = useState([])
   const [loading, setLoading] = useState(true)
@@ -55,19 +62,74 @@ function AdminPage(props, ref) {
     },
   }))
 
-  // Check if already authenticated on mount
+  // On mount, ask the backend whether the stored HTTPOnly cookies are still
+  // valid.  If the access token has expired but the refresh token is still
+  // valid, a silent refresh is attempted before deciding.
   useEffect(() => {
-    setIsAuthenticated(false)
-    setLoading(false)
+    const checkAuth = async () => {
+      try {
+        await adminApi.get(`${API_URL}/admin/verify`)
+        setIsAuthenticated(true)
+      } catch (verifyError) {
+        if (verifyError.response?.status === 401) {
+          // Access token may have expired; try a silent refresh.
+          try {
+            await adminApi.post(`${API_URL}/admin/refresh`)
+            setIsAuthenticated(true)
+          } catch {
+            // Refresh also failed — show the login form.
+          }
+        }
+      } finally {
+        setLoading(false)
+      }
+    }
+    checkAuth()
   }, [])
+
+  /**
+   * Silently refresh the access token via the refresh cookie.
+   * Returns true on success; on failure the user is logged out.
+   */
+  const refreshAccessToken = async () => {
+    try {
+      await adminApi.post(`${API_URL}/admin/refresh`)
+      return true
+    } catch {
+      // Refresh token expired or invalid – force re-login.
+      setIsAuthenticated(false)
+      return false
+    }
+  }
+
+  /**
+   * Execute an Axios request function.  If the request fails with 401,
+   * attempt to refresh the access token once and retry.  This keeps the
+   * user logged in across access-token expirations without any manual
+   * token handling on the frontend.
+   */
+  const withAuth = async (requestFn) => {
+    try {
+      return await requestFn()
+    } catch (error) {
+      if (error.response?.status === 401) {
+        const refreshed = await refreshAccessToken()
+        if (refreshed) {
+          return await requestFn()
+        }
+        throw error
+      }
+      throw error
+    }
+  }
 
   const handleLogin = async (e) => {
     e.preventDefault()
     setIsAuthenticating(true)
-    
+
     try {
-      const response = await axios.post(`${API_URL}/admin/login`, { password })
-      
+      const response = await adminApi.post(`${API_URL}/admin/login`, { password })
+
       if (response.data.success) {
         setIsAuthenticated(true)
         setPassword('')
@@ -93,7 +155,12 @@ function AdminPage(props, ref) {
     }
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await adminApi.post(`${API_URL}/admin/logout`)
+    } catch {
+      // Proceed with local logout even if the request fails.
+    }
     setIsAuthenticated(false)
     setPassword('')
   }
@@ -396,6 +463,16 @@ function AdminPage(props, ref) {
     await uploadCaseStudy('abort')
   }
 
+  // Show a spinner while the initial auth / session fetch is in progress
+  // (keeps the login form hidden until we know the cookie check has failed)
+  if (loading) {
+    return (
+      <Center h="400px">
+        <Spinner size="xl" />
+      </Center>
+    )
+  }
+
   // Show login form if not authenticated
   if (!isAuthenticated) {
     return (
@@ -422,14 +499,6 @@ function AdminPage(props, ref) {
             </Button>
           </VStack>
         </Box>
-      </Center>
-    )
-  }
-
-  if (loading) {
-    return (
-      <Center h="400px">
-        <Spinner size="xl" />
       </Center>
     )
   }

@@ -258,7 +258,7 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
     if (!code.trim()) {
       toast({
         title: 'Request failed',
-        description: 'Please enter a study UUID',
+        description: 'Please enter a study code',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -274,7 +274,7 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
       if (!data.exists || data.type !== 'practitioner') {
         toast({
           title: 'Not found',
-          description: 'No study session found for this UUID',
+          description: 'No study session found for this code',
           status: 'error',
           duration: 3000,
           isClosable: true,
@@ -310,7 +310,7 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
       onStudyAccessed(createdStudyId, null)
       toast({
         title: 'Study session created',
-        description: `Study ID: ${createdStudyId}`,
+        description: `Study code: ${createdStudyId}`,
         status: 'success',
         duration: 3000,
         isClosable: true,
@@ -552,10 +552,10 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
           <Heading as="h1" size="lg">Case Study</Heading>
 
           <FormControl>
-            <FormLabel>Study session UUID</FormLabel>
+            <FormLabel>Study session code</FormLabel>
             <HStack>
               <Input
-                placeholder="Enter study UUID"
+                placeholder="Enter study code"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleAccess()}
@@ -588,8 +588,8 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
             <Heading as="h1" size="lg">Case Study</Heading>
             <HStack spacing={3}>
               <HStack spacing={1}>
-                <Text fontSize="sm" color="gray.600">Study ID: {studySessionId || '—'}</Text>
-                <Tooltip label={studySessionId ? 'Copy study ID' : 'No study ID'} hasArrow>
+                <Text fontSize="sm" color="gray.600">Study code: {studySessionId || '—'}</Text>
+                <Tooltip label={studySessionId ? 'Copy study code' : 'No study code'} hasArrow>
                   <IconButton
                     aria-label="Copy study link"
                     icon={<CopyIcon />}

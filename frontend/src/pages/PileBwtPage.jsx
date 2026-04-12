@@ -742,7 +742,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     if (isSessionLocked && !bwtLockActive) {
       toast({
         title: 'Session locked by practitioner',
-        description: 'Weight elicitation editing is disabled. Ask the practitioner/admin to unlock.',
+        description: 'Weight elicitation editing is disabled. Ask your practitioner to unlock.',
         status: 'warning',
         isClosable: true,
       })
@@ -775,7 +775,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       setStep('select-criteria')
       toast({
         title: 'Unlocked',
-        description: 'Qualitative Indicators and Quantitative Indicators can now be edited. Existing Weight Elicitation comparisons were kept.',
+        description: 'QI/VF can now be edited. Existing pairwise comparisons might be reset!',
         status: 'warning',
         isClosable: true,
       })
@@ -1182,7 +1182,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     if (isSessionLocked && !bwtLockActive) {
       toast({
         title: 'Session locked by practitioner',
-        description: 'Weight elicitation editing is disabled. Ask the practitioner/admin to unlock.',
+        description: 'Weight elicitation editing is disabled. Ask your practitioner to unlock.',
         status: 'warning',
         isClosable: true,
       })

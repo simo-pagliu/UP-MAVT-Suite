@@ -49,7 +49,7 @@ function LoginPage({ onLogin, onDocumentation }) {
     if (!code.trim()) {
       toast({
         title: 'Request failed',
-        description: 'Please enter a session UUID',
+        description: 'Please enter a session code',
         status: 'error',
         duration: 3000,
         isClosable: true,
@@ -78,7 +78,7 @@ function LoginPage({ onLogin, onDocumentation }) {
       if (!data.exists) {
         toast({
           title: 'Not found',
-          description: 'No session found for this UUID',
+          description: 'No active session is linked to this code. If you are a participant, please ask your practitioner for access. If you are the practitioner, check your email for the confirmation sent when you created the case study (search for "mcda-up.psi.ch").',
           status: 'error',
           duration: 3000,
           isClosable: true,
@@ -128,7 +128,7 @@ function LoginPage({ onLogin, onDocumentation }) {
       onLogin(createdStudyId, createdStudyId, 'practitioner')
       toast({
         title: 'Study session created',
-        description: `Study ID: ${createdStudyId}`,
+        description: `Study code: ${createdStudyId}`,
         status: 'success',
         duration: 3000,
         isClosable: true,
@@ -170,7 +170,7 @@ function LoginPage({ onLogin, onDocumentation }) {
       onLogin(importedStudyId, importedStudyId, 'practitioner')
       toast({
         title: 'Case study uploaded',
-        description: `Study ID: ${importedStudyId}`,
+        description: `Study code: ${importedStudyId}`,
         status: 'success',
         duration: 3000,
         isClosable: true,
@@ -300,43 +300,65 @@ function LoginPage({ onLogin, onDocumentation }) {
 
             <SimpleGrid columns={1} spacing={4}>
               <Box bg="blue.50" borderRadius="md" p={4} borderWidth={1} borderColor="blue.100">
-                <Text fontWeight="semibold" mb={1}>1. Define context</Text>
+                <Text fontWeight="semibold" mb={1}>1. Define the Input</Text>
                 <Text fontSize="sm" color="gray.600">
-                  Practitioners create a case study and define the indicator structure.
+                  Practitioners create case studies, define indicators and input data, and set up elicitation sessions for decision-makers.
                 </Text>
               </Box>
               <Box bg="blue.50" borderRadius="md" p={4} borderWidth={1} borderColor="blue.100">
-                <Text fontWeight="semibold" mb={1}>2. Elicit preferences</Text>
+                <Text fontWeight="semibold" mb={1}>2. Elicitation</Text>
                 <Text fontSize="sm" color="gray.600">
-                  Stakeholders complete Qualitative Indicators, Quantitative Indicators, and Weight Elicitation steps.
+                  Decision makers complete the elicitation sessions.
                 </Text>
               </Box>
               <Box bg="blue.50" borderRadius="md" p={4} borderWidth={1} borderColor="blue.100">
                 <Text fontWeight="semibold" mb={1}>3. Review outcomes</Text>
                 <Text fontSize="sm" color="gray.600">
-                  The team compares results and consolidates evidence for final decisions.
+                  The practitioner uses the UP-MAVT workflow to compute results and consolidate evidence, supporting informed final decisions.
                 </Text>
               </Box>
             </SimpleGrid>
 
-            <HStack spacing={5} wrap="wrap">
-              <Link
-                href="https://example.org/publication-upmavt"
-                isExternal
-                color="blue.700"
-                fontWeight="semibold"
-              >
-                Read the publication (placeholder)
-              </Link>
-            </HStack>
             <VStack align="start" spacing={1}>
+              <Text color="gray.400" fontWeight="semibold">
+                Read the publication about this software. (coming soon)
+              </Text>
+              <Text color="gray.400" fontWeight="semibold">
+                Read the publication about the UP-MAVT method (work in progress)
+              </Text>
+            </VStack>
+            <VStack align="start" spacing={2}>
               <Text fontWeight="semibold">Example case studies</Text>
-              <Link href={`${API_URL}/example-case-study/1`} color="blue.700">
-                Download example case study 1
-              </Link>
-              <Link href={`${API_URL}/example-case-study/2`} color="blue.700">
-                Download example case study 2
-              </Link>
+              <VStack align="start" spacing={2} pt={1}>
+                <Box>
+                  <Link href={`${API_URL}/example-case-study/1`} color="blue.700" fontWeight="semibold">
+                    Reference case study
+                  </Link>
+                  <Text fontSize="sm" color="gray.600">
+                    Case study from Liang et al. used for validation (
+                    <Link href="https://doi.org/10.1016/j.ins.2022.07.097" isExternal color="blue.700">
+                      DOI
+                    </Link>
+                    ).
+                  </Text>
+                </Box>
+                <Box>
+                  <Link href={`${API_URL}/example-case-study/2`} color="blue.700" fontWeight="semibold">
+                    Uncertain case study with two decision makers
+                  </Link>
+                  <Text fontSize="sm" color="gray.600">
+                    A variation of the reference case with artificial uncertainty and an additional decision maker, used to showcase UP-MAVT features.
+                  </Text>
+                </Box>
+                <Box>
+                  <Link href={`${API_URL}/example-case-study/3`} color="blue.700" fontWeight="semibold">
+                    Large hierarchical uncertain case study
+                  </Link>
+                  <Text fontSize="sm" color="gray.600">
+                    A complete example, with hierarchical structure and real uncertainty, from the original UP-MAVT study (DOI coming soon).
+                  </Text>
+                </Box>
+              </VStack>
             </VStack>
           </VStack>
         </GridItem>
@@ -346,18 +368,20 @@ function LoginPage({ onLogin, onDocumentation }) {
             <Box>
               <Heading size="md" mb={2}>Access Existing Session</Heading>
               <Text color="gray.600" fontSize="sm">
-                Enter your session UUID to continue elicitation, or create a new case study if you are
-                initiating a practitioner workflow.
+                Enter the session code provided by your practitioner to continue.
+                <br />
+                If you are a practitioner, enter the session code you received by email when you
+                created the case study, or create a new one.
               </Text>
             </Box>
 
             <Box>
               <FormLabel fontWeight="medium" mb={2}>
-                Session UUID
+                Session code
               </FormLabel>
               <HStack spacing={3}>
                 <Input
-                  placeholder="Enter session UUID"
+                  placeholder="Enter session code"
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && handleDetectAndLogin()}
@@ -375,18 +399,6 @@ function LoginPage({ onLogin, onDocumentation }) {
 
             <VStack spacing={3} align="stretch">
               <Heading size="sm">Create New Case Study</Heading>
-              <Text color="gray.600" fontSize="sm">
-                No account is created in this process. Your email is used only for essential case-study
-                notifications (session confirmation, elicitation progress, completion alerts, and inactivity
-                warnings) and to send you a backup copy of your data before it is deleted. Your email address
-                is stored on servers operated by the Paul Scherrer Institute (PSI) in Switzerland and is
-                automatically and permanently deleted together with all case-study data after{' '}
-                <strong>12 months of inactivity</strong>. Processing is performed in accordance with the EU
-                General Data Protection Regulation (GDPR) and the Swiss Federal Act on Data Protection
-                (nFADP). You may request erasure at any time by contacting the PSI data protection officer
-                via the privacy notice linked in the footer.
-              </Text>
-
               <Text color="gray.600" fontSize="sm">
                 {getPrimaryInstruction()}
               </Text>
@@ -452,6 +464,15 @@ function LoginPage({ onLogin, onDocumentation }) {
                   {getPrimaryActionLabel()}
                 </Button>
               </HStack>
+              <Text color="gray.600" fontSize="sm">
+                No account is created in this process. Your email is used only for essential case-study
+                notifications (session confirmation, elicitation progress, completion alerts, and inactivity
+                warnings) and to send you a backup copy of your data before it is deleted. Your email address
+                is stored on servers operated by the Paul Scherrer Institute (PSI) in Switzerland and is
+                automatically and permanently deleted together with all case-study data after{' '}
+                <strong>12 months of inactivity</strong>. You may request erasure at any time by contacting
+                mcda-up@psi.ch.
+              </Text>
               <Input
                 ref={uploadFileRef}
                 type="file"
@@ -468,12 +489,12 @@ function LoginPage({ onLogin, onDocumentation }) {
         <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
           <VStack align="start" spacing={1}>
             <Text fontWeight="semibold">Software documentation</Text>
-            <Link color="blue.700" onClick={onDocumentation}>Open software documentation</Link>
+            <Link color="blue.700" onClick={onDocumentation}>Software documentation</Link>
           </VStack>
 
           <VStack align="start" spacing={1}>
             <Text fontWeight="semibold">Disclaimers</Text>
-            <Text fontSize="sm" color="gray.600">For research and decision-support use only.</Text>
+            <Text fontSize="sm" color="gray.600">This software open-source, licensed under MIT license</Text>
             <Text fontSize="sm" color="gray.600">No warranty or guarantee of fitness for purpose.</Text>
             <Text fontSize="sm" color="gray.600">
               Practitioner email addresses are stored solely for operational notifications and are
@@ -484,8 +505,8 @@ function LoginPage({ onLogin, onDocumentation }) {
 
           <VStack align="start" spacing={1}>
             <Text fontWeight="semibold">Legal and policy links</Text>
-            <Link href="https://www.psi.ch/en/disclaimer-and-privacy-policy" isExternal color="blue.700">Privacy notice (PSI)</Link>
-            <Link href="https://www.psi.ch/en/disclaimer-and-privacy-policy" isExternal color="blue.700">Terms of use (PSI)</Link>
+            <Link href="https://www.psi.ch/en/disclaimer-and-privacy-policy" isExternal color="blue.700">Privacy notice</Link>
+            <Link href="https://www.psi.ch/en/disclaimer-and-privacy-policy" isExternal color="blue.700">Terms of use</Link>
           </VStack>
         </SimpleGrid>
       </Box>

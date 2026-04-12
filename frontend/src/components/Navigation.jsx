@@ -29,7 +29,7 @@ function Navigation({
 
   const practitionerPages = [
     { id: 'input-definition', label: 'Input Definition', requiresStudy: true },
-    { id: 'case-study', label: 'Manage Case Studies' },
+    { id: 'case-study', label: 'Manage Elicitation Session' },
     { id: 'run-up-mavt', label: 'Run UP-MAVT', requiresStudy: true },
   ]
 
