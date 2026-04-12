@@ -6,8 +6,16 @@ accounts or more complex authentication flows are introduced in the future.
 
 The admin password is persisted in MongoDB (the ``admin`` collection) once the
 system is first accessed.  On the initial request the password is read from the
-``ADMIN_PASSWORD`` environment variable, hashed, and written to the database.
-All subsequent authentications use the database value.
+``ADMIN_PASSWORD`` environment variable (or ``ADMIN_PASSWORD_FILE`` for Docker
+secrets), hashed, and written to the database.  All subsequent authentications
+use the database value.
+
+Docker secrets
+--------------
+When running with Docker Swarm or Compose secrets, set the
+``ADMIN_PASSWORD_FILE`` environment variable to the path of the secret file
+(e.g. ``/run/secrets/admin_password``).  The ``ADMIN_PASSWORD`` environment
+variable takes precedence if both are set.
 
 Usage
 -----
@@ -16,7 +24,7 @@ Hashing a new password (e.g. for initial setup)::
     from app.services import AuthenticationService
 
     hashed = AuthenticationService.hash_password('my-secure-password')
-    # Store the returned string in the ADMIN_PASSWORD environment variable.
+    # Store the returned string in ADMIN_PASSWORD or in the secret file.
 
 Verifying a login attempt (with a database handle)::
 
@@ -40,6 +48,37 @@ logger = logging.getLogger(__name__)
 # This exists purely to avoid a hard crash during development; it must *not*
 # be used in any production environment.
 _DEFAULT_PLAIN_PASSWORD = 'admin123'
+
+
+def _read_admin_password() -> str:
+    """Read the admin password from the environment or a Docker secret file.
+
+    Resolution order:
+
+    1. ``ADMIN_PASSWORD`` environment variable (direct value).
+    2. The file pointed to by ``ADMIN_PASSWORD_FILE`` (Docker secrets pattern).
+    3. Empty string if neither is configured.
+
+    Returns:
+        The raw password/hash string, or ``''`` when nothing is configured.
+    """
+    value = os.getenv('ADMIN_PASSWORD', '').strip()
+    if value:
+        return value
+
+    file_path = os.getenv('ADMIN_PASSWORD_FILE', '').strip()
+    if not file_path:
+        return ''
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as secret_file:
+            return secret_file.read().strip()
+    except OSError as exc:
+        logger.error(
+            'AuthenticationService: failed to read ADMIN_PASSWORD_FILE from %s: %s',
+            file_path, exc,
+        )
+        return ''
 
 
 class AuthenticationService:
@@ -135,13 +174,13 @@ class AuthenticationService:
             repo = UsersRepository(self._db)
             stored = repo.find_password_hash()
             if stored is None:
-                # Bootstrap: read from env, hash, and persist to DB.
-                env_password = os.getenv('ADMIN_PASSWORD')
+                # Bootstrap: read from env or secret file, hash, and persist to DB.
+                env_password = _read_admin_password()
                 if not env_password:
                     logger.warning(
-                        'ADMIN_PASSWORD is not configured. '
+                        'Neither ADMIN_PASSWORD nor ADMIN_PASSWORD_FILE is configured. '
                         'Falling back to the default insecure password. '
-                        'Set ADMIN_PASSWORD to a hashed value in production.'
+                        'Set ADMIN_PASSWORD or ADMIN_PASSWORD_FILE in production.'
                     )
                     env_password = _DEFAULT_PLAIN_PASSWORD
                 if self._is_hashed(env_password):
@@ -152,12 +191,12 @@ class AuthenticationService:
             return self.verify_password(plain_password, stored)
 
         # No database — fall back to environment-variable-only behaviour.
-        stored = os.getenv('ADMIN_PASSWORD')
+        stored = _read_admin_password()
         if not stored:
             logger.warning(
-                'ADMIN_PASSWORD is not configured. '
+                'Neither ADMIN_PASSWORD nor ADMIN_PASSWORD_FILE is configured. '
                 'Falling back to the default insecure password. '
-                'Set ADMIN_PASSWORD to a hashed value in production.'
+                'Set ADMIN_PASSWORD or ADMIN_PASSWORD_FILE in production.'
             )
             stored = _DEFAULT_PLAIN_PASSWORD
         return self.verify_password(plain_password, stored)

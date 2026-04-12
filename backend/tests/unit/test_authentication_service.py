@@ -1,9 +1,10 @@
 """Unit tests for AuthenticationService."""
+import os
 import pytest
 import mongomock
 from werkzeug.security import generate_password_hash
 
-from app.services.authentication_service import AuthenticationService
+from app.services.authentication_service import AuthenticationService, _read_admin_password
 
 
 @pytest.fixture()
@@ -77,6 +78,45 @@ class TestVerifyPassword:
         assert not AuthenticationService.verify_password(None, hashed)
 
 
+class TestReadAdminPassword:
+    """Tests for the _read_admin_password() helper."""
+
+    def test_returns_env_var_when_set(self, monkeypatch):
+        monkeypatch.setenv('ADMIN_PASSWORD', 'mypassword')
+        assert _read_admin_password() == 'mypassword'
+
+    def test_returns_empty_when_nothing_configured(self, monkeypatch):
+        monkeypatch.delenv('ADMIN_PASSWORD', raising=False)
+        monkeypatch.delenv('ADMIN_PASSWORD_FILE', raising=False)
+        assert _read_admin_password() == ''
+
+    def test_reads_from_file_when_env_absent(self, monkeypatch, tmp_path):
+        secret_file = tmp_path / 'admin_password.txt'
+        secret_file.write_text('secretfromfile\n')
+        monkeypatch.delenv('ADMIN_PASSWORD', raising=False)
+        monkeypatch.setenv('ADMIN_PASSWORD_FILE', str(secret_file))
+        assert _read_admin_password() == 'secretfromfile'
+
+    def test_env_takes_precedence_over_file(self, monkeypatch, tmp_path):
+        secret_file = tmp_path / 'admin_password.txt'
+        secret_file.write_text('filevalue\n')
+        monkeypatch.setenv('ADMIN_PASSWORD', 'envvalue')
+        monkeypatch.setenv('ADMIN_PASSWORD_FILE', str(secret_file))
+        assert _read_admin_password() == 'envvalue'
+
+    def test_returns_empty_when_file_missing(self, monkeypatch, tmp_path):
+        monkeypatch.delenv('ADMIN_PASSWORD', raising=False)
+        monkeypatch.setenv('ADMIN_PASSWORD_FILE', str(tmp_path / 'nonexistent.txt'))
+        assert _read_admin_password() == ''
+
+    def test_strips_trailing_newline_from_file(self, monkeypatch, tmp_path):
+        secret_file = tmp_path / 'admin_password.txt'
+        secret_file.write_text('  mypassword  \n')
+        monkeypatch.delenv('ADMIN_PASSWORD', raising=False)
+        monkeypatch.setenv('ADMIN_PASSWORD_FILE', str(secret_file))
+        assert _read_admin_password() == 'mypassword'
+
+
 class TestAuthenticate:
     """Tests for authenticate() without a database (env-only fallback)."""
 
@@ -106,6 +146,27 @@ class TestAuthenticate:
     def test_default_rejects_wrong_password_when_env_not_set(self, monkeypatch):
         monkeypatch.delenv('ADMIN_PASSWORD', raising=False)
         assert not AuthenticationService().authenticate('wrongpass')
+
+    def test_reads_password_from_file(self, monkeypatch, tmp_path):
+        secret_file = tmp_path / 'admin_password.txt'
+        secret_file.write_text('filepassword\n')
+        monkeypatch.delenv('ADMIN_PASSWORD', raising=False)
+        monkeypatch.setenv('ADMIN_PASSWORD_FILE', str(secret_file))
+        assert AuthenticationService().authenticate('filepassword')
+
+    def test_env_takes_precedence_over_file(self, monkeypatch, tmp_path):
+        secret_file = tmp_path / 'admin_password.txt'
+        secret_file.write_text('filepassword\n')
+        monkeypatch.setenv('ADMIN_PASSWORD', 'envpassword')
+        monkeypatch.setenv('ADMIN_PASSWORD_FILE', str(secret_file))
+        assert AuthenticationService().authenticate('envpassword')
+        assert not AuthenticationService().authenticate('filepassword')
+
+    def test_missing_file_falls_back_to_default(self, monkeypatch, tmp_path):
+        monkeypatch.delenv('ADMIN_PASSWORD', raising=False)
+        monkeypatch.setenv('ADMIN_PASSWORD_FILE', str(tmp_path / 'nonexistent.txt'))
+        # Falls back to default 'admin123' when file cannot be read.
+        assert AuthenticationService().authenticate('admin123')
 
 
 class TestAuthenticateWithDb:
@@ -153,4 +214,12 @@ class TestAuthenticateWithDb:
         monkeypatch.setenv('ADMIN_PASSWORD', 'changedpass')
         assert AuthenticationService(mock_db).authenticate('firstpass')
         assert not AuthenticationService(mock_db).authenticate('changedpass')
+
+    def test_bootstraps_from_file_when_env_absent(self, mock_db, monkeypatch, tmp_path):
+        secret_file = tmp_path / 'admin_password.txt'
+        secret_file.write_text('filepassword\n')
+        monkeypatch.delenv('ADMIN_PASSWORD', raising=False)
+        monkeypatch.setenv('ADMIN_PASSWORD_FILE', str(secret_file))
+        svc = AuthenticationService(mock_db)
+        assert svc.authenticate('filepassword')
 

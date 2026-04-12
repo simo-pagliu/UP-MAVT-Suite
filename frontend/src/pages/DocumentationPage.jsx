@@ -185,7 +185,8 @@ function ArchitecturePanel() {
       <SectionHeading>Key configuration</SectionHeading>
       <BulletList
         items={[
-          '.env / .env.example — ADMIN_PASSWORD and other secrets; never commit .env to version control.',
+          '.env / .env.example — non-sensitive settings (SMTP host, port, etc.); never commit .env to version control.',
+          'secrets/ — Docker secret files for sensitive values (admin password, SMTP password, OAuth2 secret); excluded from version control.',
           'frontend/src/config.js — exports API_URL (read from VITE_API_URL env var).',
           'docker-compose.yml — service definitions, port mappings, volume mounts, environment injection.',
           'deployment_notes.md — step-by-step instructions for building, tagging, and pushing images to the PSI Gitea registry.',
@@ -469,7 +470,8 @@ function FileStructurePanel() {
       <Code fontSize="xs" whiteSpace="pre" p={4} borderRadius="md" bg="gray.50" w="full" overflowX="auto">
 {`elicitation-tools/
 ├── docker-compose.yml          # Service orchestration
-├── .env / .env.example         # Secrets (never commit .env)
+├── .env / .env.example         # Non-sensitive settings (never commit .env)
+├── secrets/                    # Docker secret files – excluded from version control
 ├── deployment_notes.md         # Image build & push instructions
 │
 ├── frontend/                   # React + Vite SPA

@@ -21,9 +21,12 @@ services:
     environment:
       MONGO_URI: mongodb://mongo:27017/elicitation
       FLASK_ENV: development
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+      SMTP_PASSWORD_FILE: /run/secrets/smtp_password
       OAUTH2_CLIENT_SECRET_FILE: /run/secrets/oauth2_client_secret
     secrets:
+      - admin_password
+      - smtp_password
       - oauth2_client_secret
     depends_on:
       - mongo
@@ -73,5 +76,9 @@ networks:
     driver: bridge
 
 secrets:
+  admin_password:
+    file: ./secrets/admin_password.txt
+  smtp_password:
+    file: ./secrets/smtp_password.txt
   oauth2_client_secret:
     file: ./secrets/oauth2_client_secret.txt
