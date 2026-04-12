@@ -89,6 +89,28 @@ def _jwt_secret() -> str:
     return secret
 
 
+def _get_secret_env(var_name):
+    """Read a secret from VAR or VAR_FILE (Docker secret pattern).
+    
+    Supports both direct env vars (VAR) and Docker secrets (VAR_FILE).
+    Returns the first available value, or empty string if neither is set.
+    """
+    value = os.getenv(var_name, '').strip()
+    if value:
+        return value
+
+    file_path = os.getenv(f'{var_name}_FILE', '').strip()
+    if not file_path:
+        return ''
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as secret_file:
+            return secret_file.read().strip()
+    except OSError as exc:
+        logger.error('AuthenticationService: failed to read %s_FILE from %s: %s', var_name, file_path, exc)
+        return ''
+
+
 class AuthenticationService:
     """Service for admin password hashing, verification, and JWT management.
 
@@ -183,7 +205,7 @@ class AuthenticationService:
             stored = repo.find_password_hash()
             if stored is None:
                 # Bootstrap: read from env, hash, and persist to DB.
-                env_password = os.getenv('ADMIN_PASSWORD')
+                env_password = _get_secret_env('ADMIN_PASSWORD')
                 if not env_password:
                     logger.warning(
                         'ADMIN_PASSWORD is not configured. '
@@ -199,7 +221,7 @@ class AuthenticationService:
             return self.verify_password(plain_password, stored)
 
         # No database — fall back to environment-variable-only behaviour.
-        stored = os.getenv('ADMIN_PASSWORD')
+        stored = _get_secret_env('ADMIN_PASSWORD')
         if not stored:
             logger.warning(
                 'ADMIN_PASSWORD is not configured. '
