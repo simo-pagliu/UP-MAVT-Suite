@@ -93,7 +93,16 @@ function App() {
   }, [])
 
   /** Resets all session state and returns to the login screen. */
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (currentRole === 'admin') {
+      // Clear the HTTPOnly admin JWT cookies on the server side so the
+      // auto-restore effect on next page load does not re-authenticate.
+      try {
+        await axios.post(`${API_URL}/admin/logout`, {}, { withCredentials: true })
+      } catch {
+        // Proceed with local logout even if the request fails.
+      }
+    }
     setIsLoggedIn(false)
     setCurrentRole(null)
     setCurrentSessionId(null)
