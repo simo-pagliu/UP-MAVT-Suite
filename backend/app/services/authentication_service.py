@@ -46,7 +46,6 @@ Protecting a route (Flask example)::
 """
 
 import datetime
-import functools
 import hmac
 import logging
 import os
