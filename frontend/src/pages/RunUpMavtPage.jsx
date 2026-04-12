@@ -85,7 +85,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
   // Step parameters - MC iterations per step
   const [mcIterations, setMcIterations] = useState({
-    1: 1000, 2: 1000, 3: 1000, 4: 200, 5: 1000, 6: 1000,
+    1: 1000, 2: 1000, 3: 1000, 4: 200, 5: 1000, 6: 10000,
   })
 
   // Aggregation method per step
@@ -565,7 +565,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         {
           step_number: stepNumber,
           selected_session_ids: selectedSessions,
-          mc_iterations: mcIterations[stepNumber] || 1000,
+          mc_iterations: mcIterations[stepNumber] || (stepNumber === 6 ? 10000 : 1000),
           aggregation_method: config.aggregation_method,
           mc_mode: config.mc_mode,
           use_random_weights: config.use_random_weights,
@@ -647,7 +647,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
   const updateMcIterations = (step, value) => {
     const maxAllowed = step === 6 ? 10000 : 5000
-    const v = Math.max(100, Math.min(maxAllowed, parseInt(value) || 1000))
+    const fallback = step === 6 ? 10000 : 1000
+    const v = Math.max(100, Math.min(maxAllowed, parseInt(value) || fallback))
     setMcIterations((prev) => ({ ...prev, [step]: v }))
   }
 

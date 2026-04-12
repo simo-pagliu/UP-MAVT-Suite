@@ -125,7 +125,7 @@ class WorkflowService:
             upper = 10000 if step_number == 6 else 5000
             mc_iterations = max(100, min(upper, int(mc_iterations)))
         except (TypeError, ValueError):
-            mc_iterations = 1000
+            mc_iterations = 10000 if step_number == 6 else 1000
 
         agg_map = {
             'SUM': 'weighted_sum', 'GEO': 'geometric_mean', 'HAR': 'harmonic_mean',
