@@ -186,7 +186,7 @@ function ArchitecturePanel() {
       <BulletList
         items={[
           '.env / .env.example — non-sensitive settings (SMTP host, port, etc.); never commit .env to version control.',
-          'secrets/ — Docker secret files for sensitive values (admin password, SMTP password, OAuth2 secret); excluded from version control.',
+          'secrets/ — Docker secret files for sensitive values (admin password, OAuth2 secret); excluded from version control.',
           'frontend/src/config.js — exports API_URL (read from VITE_API_URL env var).',
           'docker-compose.yml — service definitions, port mappings, volume mounts, environment injection.',
           'deployment_notes.md — step-by-step instructions for building, tagging, and pushing images to the PSI Gitea registry.',

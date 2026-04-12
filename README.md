@@ -40,9 +40,6 @@ mkdir -p secrets
 # Admin panel password (required)
 echo "your_secure_admin_password" > secrets/admin_password.txt
 
-# SMTP password for email notifications (required only when email is enabled)
-echo "your_smtp_password" > secrets/smtp_password.txt
-
 # OAuth2 client secret (required only when EMAIL_AUTH_MODE=oauth2)
 echo "your_oauth2_client_secret" > secrets/oauth2_client_secret.txt
 
@@ -51,7 +48,7 @@ chmod 600 secrets/*.txt
 ```
 
 > **Note:** If a secrets file is absent Docker will refuse to start the container
-> that references it.  Create an empty placeholder (`echo "" > secrets/smtp_password.txt`)
+> that references it.  Create an empty placeholder (`echo "" > secrets/oauth2_client_secret.txt`)
 > for secrets that are not needed in your deployment.
 
 **3. Create the environment file**
@@ -67,6 +64,7 @@ cp .env.example .env
 | `SMTP_HOST` | SMTP server hostname (leave blank to disable email) |
 | `SMTP_PORT` | SMTP port (e.g. `587` for STARTTLS) |
 | `SMTP_USER` | SMTP username (or mailbox identity for OAuth2) |
+| `SMTP_PASSWORD` | SMTP password (only for `EMAIL_AUTH_MODE=basic`) |
 | `EMAIL_AUTH_MODE` | `basic` (default) or `oauth2` (required for Microsoft 365 tenants with basic auth disabled) |
 | `OAUTH2_TENANT_ID` | Microsoft Entra tenant ID (for `oauth2`) |
 | `OAUTH2_CLIENT_ID` | Microsoft Entra app client ID (for `oauth2`) |
@@ -83,7 +81,6 @@ the secrets files created above:
 | Secret file | Description |
 |---|---|
 | `secrets/admin_password.txt` | Password for the admin panel |
-| `secrets/smtp_password.txt` | SMTP password (only for `EMAIL_AUTH_MODE=basic`) |
 | `secrets/oauth2_client_secret.txt` | Microsoft Entra client secret (only for `oauth2`) |
 
 **5. Build and start all services**
