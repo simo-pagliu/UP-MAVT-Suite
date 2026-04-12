@@ -320,12 +320,12 @@ function LoginPage({ onLogin, onDocumentation }) {
             </SimpleGrid>
 
             <VStack align="start" spacing={1}>
-              <Link href="" color="blue.700" fontWeight="semibold">
-                Read the publication about this software.
-              </Link>
-              <Link href="" color="blue.700" fontWeight="semibold">
+              <Text color="gray.400" fontWeight="semibold">
+                Read the publication about this software. (coming soon)
+              </Text>
+              <Text color="gray.400" fontWeight="semibold">
                 Read the publication about the UP-MAVT method (work in progress)
-              </Link>
+              </Text>
             </VStack>
             <VStack align="start" spacing={2}>
               <Text fontWeight="semibold">Example case studies</Text>
@@ -355,10 +355,7 @@ function LoginPage({ onLogin, onDocumentation }) {
                     Large hierarchical uncertain case study
                   </Link>
                   <Text fontSize="sm" color="gray.600">
-                    A complete example, with hierarchical structure and real uncertainty, from the original UP-MAVT study (
-                    <Link href=""  isExternal color="blue.700">
-                DOI
-              </Link>).
+                    A complete example, with hierarchical structure and real uncertainty, from the original UP-MAVT study (DOI coming soon).
                   </Text>
                 </Box>
               </VStack>
