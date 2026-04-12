@@ -34,7 +34,13 @@ import { LockIcon, UnlockIcon, DeleteIcon, DownloadIcon, ArrowUpIcon, ChevronDow
 import { useRef, Fragment } from 'react'
 import axios from 'axios'
 import { API_URL } from '../config'
-import { storeTokens, loadTokens, updateAccessToken, clearTokens, isTokenValid } from '../utils/tokenStorage'
+
+/**
+ * Axios instance that always sends credentials (cookies) so the admin
+ * HTTPOnly JWT cookies are included in every request automatically.
+ * JavaScript never reads or writes the token values directly.
+ */
+const adminApi = axios.create({ withCredentials: true })
 
 function AdminPage(props, ref) {
   const [studySessions, setStudySessions] = useState([])
@@ -45,8 +51,6 @@ function AdminPage(props, ref) {
   const [password, setPassword] = useState('')
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [expandedStudies, setExpandedStudies] = useState(new Set())
-  const [accessToken, setAccessToken] = useState(null)
-  const [refreshToken, setRefreshToken] = useState(null)
   const { isOpen, onOpen, onClose } = useDisclosure()
   const cancelRef = useRef()
   const toast = useToast()
@@ -58,70 +62,60 @@ function AdminPage(props, ref) {
     },
   }))
 
-  // Restore tokens from secure storage on mount.  Only mark the user as
-  // authenticated if at least the refresh token is still valid; an expired
-  // access token is fine because it will be silently refreshed on the first
-  // protected request.
+  // On mount, ask the backend whether the stored HTTPOnly cookies are still
+  // valid.  If the access token has expired but the refresh token is still
+  // valid, a silent refresh is attempted before deciding.
   useEffect(() => {
-    const { accessToken: storedAccess, refreshToken: storedRefresh } = loadTokens()
-    if (storedRefresh && isTokenValid(storedRefresh)) {
-      setAccessToken(storedAccess)
-      setRefreshToken(storedRefresh)
-      setIsAuthenticated(true)
-    } else if (storedAccess || storedRefresh) {
-      // Stored tokens are present but expired – clean up stale storage.
-      clearTokens()
+    const checkAuth = async () => {
+      try {
+        await adminApi.get(`${API_URL}/admin/verify`)
+        setIsAuthenticated(true)
+      } catch (verifyError) {
+        if (verifyError.response?.status === 401) {
+          // Access token may have expired; try a silent refresh.
+          try {
+            await adminApi.post(`${API_URL}/admin/refresh`)
+            setIsAuthenticated(true)
+          } catch {
+            // Refresh also failed — show the login form.
+          }
+        }
+      } finally {
+        setLoading(false)
+      }
     }
-    setLoading(false)
+    checkAuth()
   }, [])
 
   /**
-   * Return Axios request config that includes the admin Bearer token header.
-   * Callers can spread this into their Axios options.
-   */
-  const authHeaders = () => ({
-    headers: { Authorization: `Bearer ${accessToken}` },
-  })
-
-  /**
-   * Silently refresh the access token using the stored refresh token.
-   * Returns the new access token string on success, or null on failure.
+   * Silently refresh the access token via the refresh cookie.
+   * Returns true on success; on failure the user is logged out.
    */
   const refreshAccessToken = async () => {
-    if (!refreshToken) return null
     try {
-      const response = await axios.post(
-        `${API_URL}/admin/refresh`,
-        {},
-        { headers: { Authorization: `Bearer ${refreshToken}` } },
-      )
-      const newToken = response.data.access_token
-      setAccessToken(newToken)
-      updateAccessToken(newToken)
-      return newToken
+      await adminApi.post(`${API_URL}/admin/refresh`)
+      return true
     } catch {
       // Refresh token expired or invalid – force re-login.
       setIsAuthenticated(false)
-      setAccessToken(null)
-      setRefreshToken(null)
-      clearTokens()
-      return null
+      return false
     }
   }
 
   /**
-   * Execute an Axios request function.  If the request fails with 401 and a
-   * refresh token is available, attempt to refresh the access token once and
-   * retry.  This keeps the user logged in across access-token expirations.
+   * Execute an Axios request function.  If the request fails with 401,
+   * attempt to refresh the access token once and retry.  This keeps the
+   * user logged in across access-token expirations without any manual
+   * token handling on the frontend.
    */
   const withAuth = async (requestFn) => {
     try {
-      return await requestFn(accessToken)
+      return await requestFn()
     } catch (error) {
       if (error.response?.status === 401) {
-        const newToken = await refreshAccessToken()
-        if (newToken) {
-          return await requestFn(newToken)
+        const refreshed = await refreshAccessToken()
+        if (refreshed) {
+          return await requestFn()
         }
         throw error
       }
@@ -132,15 +126,11 @@ function AdminPage(props, ref) {
   const handleLogin = async (e) => {
     e.preventDefault()
     setIsAuthenticating(true)
-    
+
     try {
-      const response = await axios.post(`${API_URL}/admin/login`, { password })
-      
+      const response = await adminApi.post(`${API_URL}/admin/login`, { password })
+
       if (response.data.success) {
-        const { access_token, refresh_token } = response.data
-        setAccessToken(access_token)
-        setRefreshToken(refresh_token)
-        storeTokens(access_token, refresh_token)
         setIsAuthenticated(true)
         setPassword('')
       } else {
@@ -165,11 +155,13 @@ function AdminPage(props, ref) {
     }
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await adminApi.post(`${API_URL}/admin/logout`)
+    } catch {
+      // Proceed with local logout even if the request fails.
+    }
     setIsAuthenticated(false)
-    setAccessToken(null)
-    setRefreshToken(null)
-    clearTokens()
     setPassword('')
   }
 

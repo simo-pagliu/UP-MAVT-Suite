@@ -1,9 +1,10 @@
-from flask import Blueprint, request, jsonify, current_app, send_file
+from flask import Blueprint, request, jsonify, current_app, send_file, make_response
 import functools
 import hmac
 import io
 import json
 import logging
+import os
 from pathlib import Path
 import zipfile
 
@@ -22,6 +23,34 @@ bp = Blueprint('api', __name__, url_prefix='/api')
 logger = logging.getLogger(__name__)
 EXAMPLES_DIR = Path(__file__).resolve().parents[2] / 'examples'
 
+# --------------------------------------------------------------------------- #
+# Cookie helpers
+# --------------------------------------------------------------------------- #
+_COOKIE_ACCESS_TOKEN = 'adm_access_token'
+_COOKIE_REFRESH_TOKEN = 'adm_refresh_token'
+_COOKIE_PATH = '/api'
+
+# Access-token lifetime matches the JWT (15 min); refresh-token lifetime matches
+# the JWT (7 days).  These control max_age on the Set-Cookie header so the
+# browser discards the cookie when it can no longer be used.
+_ACCESS_COOKIE_MAX_AGE = 15 * 60        # 900 seconds
+_REFRESH_COOKIE_MAX_AGE = 7 * 24 * 3600  # 604 800 seconds
+
+
+def _cookie_kwargs() -> dict:
+    """Return common HTTPOnly cookie security kwargs.
+
+    ``Secure`` is enabled only when ``FLASK_ENV=production`` is set so that
+    local HTTP development still works.  ``SameSite=Strict`` prevents the
+    cookies from being sent with cross-site requests (CSRF protection).
+    """
+    return {
+        'httponly': True,
+        'samesite': 'Strict',
+        'secure': os.getenv('FLASK_ENV', '') == 'production',
+        'path': _COOKIE_PATH,
+    }
+
 
 @bp.errorhandler(ServiceError)
 def handle_service_error(e):
@@ -29,16 +58,16 @@ def handle_service_error(e):
 
 
 def require_admin_token(f):
-    """Decorator that enforces admin JWT Bearer token authentication.
+    """Decorator that enforces admin JWT cookie authentication.
 
-    Reads the ``Authorization: Bearer <token>`` header, verifies the token
-    with :meth:`AuthenticationService.verify_token`, and rejects requests that
-    carry no token, an invalid token, or a token whose ``role`` is not
+    Reads the ``adm_access_token`` HTTPOnly cookie, verifies the token with
+    :meth:`AuthenticationService.verify_token`, and rejects requests that
+    carry no cookie, an invalid token, or a token whose ``role`` is not
     ``'admin'``.
     """
     @functools.wraps(f)
     def decorated(*args, **kwargs):
-        token = AuthenticationService.extract_bearer_token(request.headers)
+        token = request.cookies.get(_COOKIE_ACCESS_TOKEN)
         payload = AuthenticationService.verify_token(token)
         if payload is None or payload.get('role') != 'admin':
             return jsonify({'success': False, 'error': 'Unauthorized'}), 401
@@ -136,18 +165,32 @@ def admin_login():
     if AuthenticationService(current_app.db).authenticate(password):
         access_token = AuthenticationService.generate_access_token('admin')
         refresh_token = AuthenticationService.generate_refresh_token('admin')
-        return jsonify({
-            'success': True,
-            'access_token': access_token,
-            'refresh_token': refresh_token,
-        }), 200
+        resp = make_response(jsonify({'success': True}), 200)
+        resp.set_cookie(
+            _COOKIE_ACCESS_TOKEN, access_token,
+            max_age=_ACCESS_COOKIE_MAX_AGE, **_cookie_kwargs(),
+        )
+        resp.set_cookie(
+            _COOKIE_REFRESH_TOKEN, refresh_token,
+            max_age=_REFRESH_COOKIE_MAX_AGE, **_cookie_kwargs(),
+        )
+        return resp
     return jsonify({'success': False, 'error': 'Invalid password'}), 401
+
+
+@bp.route('/admin/logout', methods=['POST'])
+def admin_logout():
+    """Clear admin auth cookies (invalidates the browser session)."""
+    resp = make_response(jsonify({'success': True}), 200)
+    resp.delete_cookie(_COOKIE_ACCESS_TOKEN, path=_COOKIE_PATH)
+    resp.delete_cookie(_COOKIE_REFRESH_TOKEN, path=_COOKIE_PATH)
+    return resp
 
 
 @bp.route('/admin/refresh', methods=['POST'])
 def admin_refresh_token():
-    """Issue a new access token using a valid refresh token."""
-    token = AuthenticationService.extract_bearer_token(request.headers)
+    """Issue a new access token using a valid refresh token cookie."""
+    token = request.cookies.get(_COOKIE_REFRESH_TOKEN)
     payload = AuthenticationService.verify_token(token)
     if (
         payload is None
@@ -156,7 +199,19 @@ def admin_refresh_token():
     ):
         return jsonify({'success': False, 'error': 'Invalid or expired refresh token'}), 401
     access_token = AuthenticationService.generate_access_token('admin')
-    return jsonify({'success': True, 'access_token': access_token}), 200
+    resp = make_response(jsonify({'success': True}), 200)
+    resp.set_cookie(
+        _COOKIE_ACCESS_TOKEN, access_token,
+        max_age=_ACCESS_COOKIE_MAX_AGE, **_cookie_kwargs(),
+    )
+    return resp
+
+
+@bp.route('/admin/verify', methods=['GET'])
+@require_admin_token
+def admin_verify():
+    """Lightweight endpoint for the frontend to confirm a valid admin session."""
+    return jsonify({'success': True}), 200
 
 
 @bp.route('/admin/email-diagnostics', methods=['POST'])

@@ -402,27 +402,21 @@ class TestCompleteElicitationSession:
 # ---------------------------------------------------------------------------
 
 class TestNotifyInactiveStudySessions:
-    def test_requires_token(self, client):
+    def test_requires_cookie(self, client):
         resp = client.post('/api/admin/notify-inactive', json={})
         assert resp.status_code == 401
         assert resp.json['success'] is False
 
-    def test_wrong_token_returns_401(self, client):
-        resp = client.post(
-            '/api/admin/notify-inactive',
-            json={},
-            headers={'Authorization': 'Bearer badtoken'},
-        )
+    def test_wrong_cookie_returns_401(self, client):
+        client.set_cookie('adm_access_token', 'badtoken', path='/api')
+        resp = client.post('/api/admin/notify-inactive', json={})
         assert resp.status_code == 401
 
-    def test_correct_token_returns_200(self, client):
+    def test_correct_cookie_returns_200(self, client):
         from app.services import AuthenticationService
         token = AuthenticationService.generate_access_token('admin')
-        resp = client.post(
-            '/api/admin/notify-inactive',
-            json={},
-            headers={'Authorization': f'Bearer {token}'},
-        )
+        client.set_cookie('adm_access_token', token, path='/api')
+        resp = client.post('/api/admin/notify-inactive', json={})
         assert resp.status_code == 200
         assert resp.json['success'] is True
 
@@ -441,11 +435,8 @@ class TestNotifyInactiveStudySessions:
             {'$set': {'last_modified_at': old_date}},
         )
         token = AuthenticationService.generate_access_token('admin')
-        resp = client.post(
-            '/api/admin/notify-inactive',
-            json={},
-            headers={'Authorization': f'Bearer {token}'},
-        )
+        client.set_cookie('adm_access_token', token, path='/api')
+        resp = client.post('/api/admin/notify-inactive', json={})
         assert resp.status_code == 200
         assert any(s['code'] == 'OLD-STUDY-NOEMAIL' for s in resp.json['skipped'])
 
@@ -466,11 +457,8 @@ class TestNotifyInactiveStudySessions:
             {'$set': {'last_modified_at': old_date}},
         )
         token = AuthenticationService.generate_access_token('admin')
-        resp = client.post(
-            '/api/admin/notify-inactive',
-            json={},
-            headers={'Authorization': f'Bearer {token}'},
-        )
+        client.set_cookie('adm_access_token', token, path='/api')
+        resp = client.post('/api/admin/notify-inactive', json={})
         assert resp.status_code == 200
         # SMTP not configured → email is skipped; entry goes into notified with status='skipped'
         notified_or_skipped = resp.json['notified'] + resp.json['skipped']
@@ -481,15 +469,13 @@ class TestNotifyInactiveStudySessions:
     def test_response_shape(self, client):
         from app.services import AuthenticationService
         token = AuthenticationService.generate_access_token('admin')
-        resp = client.post(
-            '/api/admin/notify-inactive',
-            json={},
-            headers={'Authorization': f'Bearer {token}'},
-        )
+        client.set_cookie('adm_access_token', token, path='/api')
+        resp = client.post('/api/admin/notify-inactive', json={})
         assert resp.status_code == 200
         data = resp.json
         assert 'inactive_count' in data
         assert 'notified' in data
         assert 'skipped' in data
         assert 'failed' in data
+
 
