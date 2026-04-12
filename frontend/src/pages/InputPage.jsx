@@ -81,6 +81,7 @@ function InputPage({ studySessionId }, ref) {
   const [savingFeatures, setSavingFeatures] = useState(false)
   const [featureError, setFeatureError] = useState('')
   const [isHierarchicalInput, setIsHierarchicalInput] = useState(false)
+  const [savedGroups, setSavedGroups] = useState(null) // stashed groups when hierarchy mode is turned off
   
   // Distribution modal state
   const { isOpen: isDistModalOpen, onOpen: onDistModalOpen, onClose: onDistModalClose } = useDisclosure()
@@ -166,6 +167,7 @@ function InputPage({ studySessionId }, ref) {
       setFeatures({ qi: false, vf: false, bwt: false })
       setFeatureError('')
       setIsHierarchicalInput(false)
+      setSavedGroups(null)
       return
     }
 
@@ -251,8 +253,30 @@ function InputPage({ studySessionId }, ref) {
 
   const handleHierarchyToggle = (checked) => {
     setIsHierarchicalInput(checked)
-    setCriteria((prev) => applyHierarchyModeToCriteria(prev, checked))
     setHasModifiedInput(true)
+    if (!checked) {
+      // Stash current group values before flattening so they can be restored
+      const groups = {}
+      criteria.forEach((c) => { groups[c.criterion_name] = c.group })
+      setSavedGroups(groups)
+      setCriteria((prev) => applyHierarchyModeToCriteria(prev, false))
+    } else {
+      // Restore stashed groups when re-enabling hierarchy mode
+      if (savedGroups) {
+        setCriteria((prev) =>
+          prev.map((c) => ({
+            ...c,
+            group:
+              savedGroups[c.criterion_name] !== undefined
+                ? savedGroups[c.criterion_name]
+                : '',
+          }))
+        )
+        setSavedGroups(null)
+      } else {
+        setCriteria((prev) => applyHierarchyModeToCriteria(prev, true))
+      }
+    }
   }
 
   const handleCancel = () => {
@@ -260,6 +284,7 @@ function InputPage({ studySessionId }, ref) {
     const restored = JSON.parse(JSON.stringify(originalCriteria))
     setCriteria(restored)
     setIsHierarchicalInput(detectHierarchicalInputFromCriteria(restored))
+    setSavedGroups(null)
     setIsEditing(false)
     setIsLocked(true)
     setHasModifiedInput(false)
