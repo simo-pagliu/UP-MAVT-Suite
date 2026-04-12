@@ -1,9 +1,11 @@
-from flask import Blueprint, request, jsonify, current_app, send_file
+from flask import Blueprint, request, jsonify, current_app, send_file, make_response
+import functools
 import hmac
 import io
 import json
 import logging
 import os
+from pathlib import Path
 import zipfile
 
 from app.exceptions import ServiceError
@@ -19,6 +21,35 @@ from app.services import (
 
 bp = Blueprint('api', __name__, url_prefix='/api')
 logger = logging.getLogger(__name__)
+EXAMPLES_DIR = Path(__file__).resolve().parents[2] / 'examples'
+
+# --------------------------------------------------------------------------- #
+# Cookie helpers
+# --------------------------------------------------------------------------- #
+_COOKIE_ACCESS_TOKEN = 'adm_access_token'
+_COOKIE_REFRESH_TOKEN = 'adm_refresh_token'
+_COOKIE_PATH = '/api'
+
+# Access-token lifetime matches the JWT (15 min); refresh-token lifetime matches
+# the JWT (7 days).  These control max_age on the Set-Cookie header so the
+# browser discards the cookie when it can no longer be used.
+_ACCESS_COOKIE_MAX_AGE = 15 * 60        # 900 seconds
+_REFRESH_COOKIE_MAX_AGE = 7 * 24 * 3600  # 604 800 seconds
+
+
+def _cookie_kwargs() -> dict:
+    """Return common HTTPOnly cookie security kwargs.
+
+    ``Secure`` is enabled only when ``FLASK_ENV=production`` is set so that
+    local HTTP development still works.  ``SameSite=Strict`` prevents the
+    cookies from being sent with cross-site requests (CSRF protection).
+    """
+    return {
+        'httponly': True,
+        'samesite': 'Strict',
+        'secure': os.getenv('FLASK_ENV', '') == 'production',
+        'path': _COOKIE_PATH,
+    }
 
 
 @bp.errorhandler(ServiceError)
@@ -26,10 +57,35 @@ def handle_service_error(e):
     return jsonify({'error': str(e)}), e.status_code
 
 
+def require_admin_token(f):
+    """Decorator that enforces admin JWT cookie authentication.
+
+    Reads the ``adm_access_token`` HTTPOnly cookie, verifies the token with
+    :meth:`AuthenticationService.verify_token`, and rejects requests that
+    carry no cookie, an invalid token, or a token whose ``role`` is not
+    ``'admin'``.
+    """
+    @functools.wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.cookies.get(_COOKIE_ACCESS_TOKEN)
+        payload = AuthenticationService.verify_token(token)
+        if payload is None or payload.get('role') != 'admin':
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+
 def _send(content, filename, mimetype):
     """Helper to send bytes or BytesIO as a file attachment."""
     buf = content if isinstance(content, io.BytesIO) else io.BytesIO(content)
     return send_file(buf, mimetype=mimetype, as_attachment=True, download_name=filename)
+
+
+def _send_example_case_study(example_id, filename):
+    zip_path = EXAMPLES_DIR / f'{example_id}.zip'
+    if not zip_path.is_file():
+        return jsonify({'error': f'Example case study {example_id} is unavailable'}), 404
+    return send_file(zip_path, mimetype='application/zip', as_attachment=True, download_name=filename)
 
 
 # --------------------------------------------------------------------------- #
@@ -107,29 +163,84 @@ def admin_login():
     if not password:
         return jsonify({'success': False, 'error': 'Password is required'}), 400
     if AuthenticationService(current_app.db).authenticate(password):
-        return jsonify({'success': True}), 200
+        access_token = AuthenticationService.generate_access_token('admin')
+        refresh_token = AuthenticationService.generate_refresh_token('admin')
+        resp = make_response(jsonify({'success': True}), 200)
+        resp.set_cookie(
+            _COOKIE_ACCESS_TOKEN, access_token,
+            max_age=_ACCESS_COOKIE_MAX_AGE, **_cookie_kwargs(),
+        )
+        resp.set_cookie(
+            _COOKIE_REFRESH_TOKEN, refresh_token,
+            max_age=_REFRESH_COOKIE_MAX_AGE, **_cookie_kwargs(),
+        )
+        return resp
     return jsonify({'success': False, 'error': 'Invalid password'}), 401
 
 
+@bp.route('/admin/logout', methods=['POST'])
+def admin_logout():
+    """Clear admin auth cookies (invalidates the browser session)."""
+    resp = make_response(jsonify({'success': True}), 200)
+    resp.delete_cookie(_COOKIE_ACCESS_TOKEN, path=_COOKIE_PATH)
+    resp.delete_cookie(_COOKIE_REFRESH_TOKEN, path=_COOKIE_PATH)
+    return resp
+
+
+@bp.route('/admin/refresh', methods=['POST'])
+def admin_refresh_token():
+    """Issue a new access token using a valid refresh token cookie."""
+    token = request.cookies.get(_COOKIE_REFRESH_TOKEN)
+    payload = AuthenticationService.verify_token(token)
+    if (
+        payload is None
+        or payload.get('type') != 'refresh'
+        or payload.get('role') != 'admin'
+    ):
+        return jsonify({'success': False, 'error': 'Invalid or expired refresh token'}), 401
+    access_token = AuthenticationService.generate_access_token('admin')
+    resp = make_response(jsonify({'success': True}), 200)
+    resp.set_cookie(
+        _COOKIE_ACCESS_TOKEN, access_token,
+        max_age=_ACCESS_COOKIE_MAX_AGE, **_cookie_kwargs(),
+    )
+    return resp
+
+
+@bp.route('/admin/verify', methods=['GET'])
+@require_admin_token
+def admin_verify():
+    """Lightweight endpoint for the frontend to confirm a valid admin session."""
+    return jsonify({'success': True}), 200
+
+
+@bp.route('/admin/email-diagnostics', methods=['POST'])
+@require_admin_token
+def admin_email_diagnostics():
+    """Run SMTP diagnostics (token + auth) without sending an email."""
+    diagnostics = EmailService().diagnose_auth()
+    response = {'success': diagnostics.get('status') == 'ok', **diagnostics}
+
+    if diagnostics.get('status') == 'ok':
+        return jsonify(response), 200
+    if diagnostics.get('status') == 'skipped':
+        return jsonify(response), 503
+    return jsonify(response), 502
+
+
 @bp.route('/admin/notify-inactive', methods=['POST'])
+@require_admin_token
 def notify_inactive_study_sessions():
     """Send inactivity warning emails for study sessions inactive for 12+ months.
 
     Accepts an optional JSON body:
     * ``months`` (int, default 12) – inactivity threshold in months.
-    * ``password`` (str, required) – admin password for authorisation.
 
     For each inactive study session that has a ``creator_email`` stored, a
     warning email with a ZIP backup attachment is sent.  The response
     summarises how many sessions were notified and any failures.
     """
     data = request.get_json(silent=True) or {}
-    password = data.get('password')
-    if not password:
-        return jsonify({'success': False, 'error': 'Password is required'}), 400
-    if not AuthenticationService(current_app.db).authenticate(password):
-        return jsonify({'success': False, 'error': 'Invalid password'}), 401
-
     months = int(data.get('months', 12))
     svc = StudySessionService(current_app.db)
     email_svc = EmailService()
@@ -176,11 +287,11 @@ def notify_inactive_study_sessions():
 
 
 @bp.route('/admin/delete-inactive', methods=['POST'])
+@require_admin_token
 def delete_inactive_study_sessions():
     """Delete study sessions inactive for 12+ months (GDPR / data-retention).
 
-    Accepts a JSON body:
-    * ``password`` (str, required) – admin password for authorisation.
+    Accepts an optional JSON body:
     * ``months`` (int, default 12) – inactivity threshold in months.
     * ``send_backup_email`` (bool, default true) – when ``true`` a ZIP backup
       is emailed to the practitioner *before* the session is deleted.
@@ -191,12 +302,6 @@ def delete_inactive_study_sessions():
     then permanently removed.
     """
     data = request.json or {}
-    password = data.get('password')
-    if not password:
-        return jsonify({'success': False, 'error': 'Password is required'}), 400
-    if not AuthenticationService(current_app.db).authenticate(password):
-        return jsonify({'success': False, 'error': 'Invalid password'}), 401
-
     months = int(data.get('months', 12))
     raw_send = data.get('send_backup_email')
     send_backup_email = raw_send is not False and str(raw_send).lower() not in ('false', '0', 'no')
@@ -576,24 +681,20 @@ def upload_case_study():
 
 @bp.route('/example-case-study/1', methods=['GET'])
 def download_example_case_study_1():
-    """Download a placeholder example case study ZIP."""
-    buf = StudySessionService.build_example_case_study_zip(
-        'EXAMPLE1',
-        'Example Case Study 1',
-        'Placeholder example case study. Replace with a real case study ZIP.',
-    )
-    return _send(buf, 'example_case_study_1.zip', 'application/zip')
+    """Download example case study ZIP 1."""
+    return _send_example_case_study(1, 'reference_case_study.zip')
 
 
 @bp.route('/example-case-study/2', methods=['GET'])
 def download_example_case_study_2():
-    """Download a placeholder example case study ZIP."""
-    buf = StudySessionService.build_example_case_study_zip(
-        'EXAMPLE2',
-        'Example Case Study 2',
-        'Placeholder example case study. Replace with a real case study ZIP.',
-    )
-    return _send(buf, 'example_case_study_2.zip', 'application/zip')
+    """Download example case study ZIP 2."""
+    return _send_example_case_study(2, 'uncertain_two_decision_makers_case_study.zip')
+
+
+@bp.route('/example-case-study/3', methods=['GET'])
+def download_example_case_study_3():
+    """Download example case study ZIP 3."""
+    return _send_example_case_study(3, 'large_hierarchical_uncertain_case_study.zip')
 
 
 

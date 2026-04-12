@@ -9,6 +9,12 @@ Configuration is read from the following environment variables:
 * ``SMTP_PORT``      – SMTP server port (default: ``587``).
 * ``SMTP_USER``      – SMTP authentication username (optional).
 * ``SMTP_PASSWORD``  – SMTP authentication password (optional).
+* ``EMAIL_AUTH_MODE`` – ``"basic"`` (default) or ``"oauth2"``.
+* ``OAUTH2_TENANT_ID`` – Microsoft Entra tenant ID (for oauth2 mode).
+* ``OAUTH2_CLIENT_ID`` – App registration client ID (for oauth2 mode).
+* ``OAUTH2_CLIENT_SECRET`` – App registration secret (for oauth2 mode).
+* ``OAUTH2_SCOPE``    – OAuth scope (default:
+                        ``https://outlook.office365.com/.default``).
 * ``SMTP_USE_TLS``   – Use STARTTLS when ``"true"`` (default: ``"true"``).
 * ``EMAIL_FROM``     – Sender address (default: ``noreply@elicitation-tools.local``).
 * ``APP_BASE_URL``   – Public base URL used to build links in emails
@@ -21,11 +27,14 @@ warning, so the application can run without email support in development.
 import logging
 import os
 import smtplib
+import base64
 from urllib.parse import quote
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email import encoders
+
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -76,9 +85,27 @@ def _html(subject, heading, body):
     return _BASE_HTML.format(subject=subject, heading=heading, body=body)
 
 
-def _uuid_link(base_url, uuid):
-    safe_uuid = quote(str(uuid or '').strip(), safe='')
-    return f'{base_url}/?uuid={safe_uuid}'
+def _uuid_link(base_url, study_session_id):
+    safe_uuid = quote(str(study_session_id), safe="")
+    return f"{base_url}/?uuid={safe_uuid}"
+
+
+def _get_secret_env(var_name):
+    """Read a secret from VAR or VAR_FILE (Docker secret pattern)."""
+    value = os.getenv(var_name, '').strip()
+    if value:
+        return value
+
+    file_path = os.getenv(f'{var_name}_FILE', '').strip()
+    if not file_path:
+        return ''
+
+    try:
+        with open(file_path, 'r', encoding='utf-8') as secret_file:
+            return secret_file.read().strip()
+    except OSError as exc:
+        logger.error('EmailService: failed to read %s_FILE from %s: %s', var_name, file_path, exc)
+        return ''
 
 
 # ---------------------------------------------------------------------------
@@ -97,7 +124,16 @@ class EmailService:
         self._host = os.getenv('SMTP_HOST', '').strip()
         self._port = int(os.getenv('SMTP_PORT', '587'))
         self._user = os.getenv('SMTP_USER', '').strip()
-        self._password = os.getenv('SMTP_PASSWORD', '').strip()
+        self._password = _get_secret_env('SMTP_PASSWORD')
+        self._auth_mode = os.getenv('EMAIL_AUTH_MODE', 'basic').strip().lower()
+        self._oauth2_tenant_id = os.getenv('OAUTH2_TENANT_ID', '').strip()
+        self._oauth2_client_id = os.getenv('OAUTH2_CLIENT_ID', '').strip()
+        self._oauth2_client_secret = _get_secret_env('OAUTH2_CLIENT_SECRET')
+        self._oauth2_scope = os.getenv(
+            'OAUTH2_SCOPE', 'https://outlook.office365.com/.default'
+        ).strip()
+        self._oauth2_token_url = os.getenv('OAUTH2_TOKEN_URL', '').strip()
+        self._oauth2_username = os.getenv('OAUTH2_USERNAME', '').strip() or self._user
         self._use_tls = os.getenv('SMTP_USE_TLS', 'true').lower() == 'true'
         self._from = os.getenv('EMAIL_FROM', 'noreply@elicitation-tools.local').strip()
         self._base_url = os.getenv('APP_BASE_URL', 'http://localhost:3000').rstrip('/')
@@ -106,6 +142,138 @@ class EmailService:
     def _configured(self):
         """Return ``True`` when an SMTP host is configured."""
         return bool(self._host)
+
+    @property
+    def _oauth2_enabled(self):
+        return self._auth_mode == 'oauth2'
+
+    def _oauth2_missing_settings(self):
+        missing = []
+        if not self._oauth2_tenant_id:
+            missing.append('OAUTH2_TENANT_ID')
+        if not self._oauth2_client_id:
+            missing.append('OAUTH2_CLIENT_ID')
+        if not self._oauth2_client_secret:
+            missing.append('OAUTH2_CLIENT_SECRET')
+        if not self._oauth2_username:
+            missing.append('OAUTH2_USERNAME/SMTP_USER')
+        return missing
+
+    def _resolve_oauth2_token_url(self):
+        if self._oauth2_token_url:
+            return self._oauth2_token_url
+        return (
+            f'https://login.microsoftonline.com/{self._oauth2_tenant_id}'
+            '/oauth2/v2.0/token'
+        )
+
+    def _fetch_oauth2_access_token(self):
+        missing = self._oauth2_missing_settings()
+        if missing:
+            raise ValueError(f'OAuth2 missing required settings: {", ".join(missing)}')
+
+        response = requests.post(
+            self._resolve_oauth2_token_url(),
+            data={
+                'client_id': self._oauth2_client_id,
+                'client_secret': self._oauth2_client_secret,
+                'scope': self._oauth2_scope,
+                'grant_type': 'client_credentials',
+            },
+            timeout=15,
+        )
+        response.raise_for_status()
+        token = response.json().get('access_token', '').strip()
+        if not token:
+            raise ValueError('OAuth2 token response missing access_token')
+        return token
+
+    def _build_xoauth2_blob(self, access_token):
+        auth_string = f'user={self._oauth2_username}\x01auth=Bearer {access_token}\x01\x01'
+        return base64.b64encode(auth_string.encode('utf-8')).decode('ascii')
+
+    def _authenticate(self, server):
+        if self._oauth2_enabled:
+            token = self._fetch_oauth2_access_token()
+            xoauth2_blob = self._build_xoauth2_blob(token)
+            code, message = server.docmd('AUTH', f'XOAUTH2 {xoauth2_blob}')
+            if code != 235:
+                raise smtplib.SMTPAuthenticationError(code, message)
+            return
+
+        if self._user:
+            server.login(self._user, self._password)
+
+    def diagnose_auth(self):
+        """Run SMTP auth diagnostics without sending an email.
+
+        Returns:
+            dict: Stage-by-stage status for token retrieval and SMTP auth.
+        """
+        result = {
+            'status': 'failed',
+            'auth_mode': self._auth_mode,
+            'smtp': {
+                'configured': self._configured,
+                'host': self._host,
+                'port': self._port,
+                'use_tls': self._use_tls,
+            },
+            'oauth2': {
+                'enabled': self._oauth2_enabled,
+                'username': self._oauth2_username,
+                'token_ok': None,
+                'smtp_auth_ok': None,
+            },
+        }
+
+        if not self._configured:
+            result['status'] = 'skipped'
+            result['error'] = 'SMTP_HOST is not configured'
+            return result
+
+        token = None
+        if self._oauth2_enabled:
+            try:
+                token = self._fetch_oauth2_access_token()
+                result['oauth2']['token_ok'] = True
+            except (requests.RequestException, ValueError) as exc:
+                result['oauth2']['token_ok'] = False
+                result['error_stage'] = 'oauth2_token'
+                result['error'] = str(exc)
+                return result
+
+        try:
+            with smtplib.SMTP(self._host, self._port, timeout=15) as server:
+                server.ehlo()
+                if self._use_tls:
+                    server.starttls()
+                    server.ehlo()
+
+                if self._oauth2_enabled:
+                    xoauth2_blob = self._build_xoauth2_blob(token)
+                    code, message = server.docmd('AUTH', f'XOAUTH2 {xoauth2_blob}')
+                    if code != 235:
+                        raise smtplib.SMTPAuthenticationError(code, message)
+                elif self._user:
+                    server.login(self._user, self._password)
+
+            result['status'] = 'ok'
+            if self._oauth2_enabled:
+                result['oauth2']['smtp_auth_ok'] = True
+            return result
+
+        except (
+            smtplib.SMTPException,
+            ConnectionError,
+            TimeoutError,
+            OSError,
+        ) as exc:
+            result['error_stage'] = 'smtp_auth'
+            result['error'] = str(exc)
+            if self._oauth2_enabled:
+                result['oauth2']['smtp_auth_ok'] = False
+            return result
 
     def _build_message(self, to, subject, html_body, plain_body, attachment=None, attachment_name=None):
         """Build a MIME email message.
@@ -162,13 +330,14 @@ class EmailService:
                 with smtplib.SMTP(self._host, self._port, timeout=15) as server:
                     server.ehlo()
                     server.starttls()
-                    if self._user:
-                        server.login(self._user, self._password)
+                    # RFC 3207: client must EHLO again after STARTTLS.
+                    server.ehlo()
+                    self._authenticate(server)
                     server.sendmail(self._from, [to], msg.as_string())
             else:
                 with smtplib.SMTP(self._host, self._port, timeout=15) as server:
-                    if self._user:
-                        server.login(self._user, self._password)
+                    server.ehlo()
+                    self._authenticate(server)
                     server.sendmail(self._from, [to], msg.as_string())
 
             logger.info('EmailService: sent "%s" to %s', msg['Subject'], to)
@@ -176,9 +345,11 @@ class EmailService:
 
         except (
             smtplib.SMTPException,
+            requests.RequestException,
             ConnectionError,
             TimeoutError,
             OSError,
+            ValueError,
         ) as exc:
             logger.error(
                 'EmailService: failed to send "%s" to %s: %s',
@@ -239,7 +410,7 @@ class EmailService:
 safe – you will need it to access your session.</p>
 <p><span class="code">{study_session_id}</span></p>
 <p>You can access your session directly using the link below:</p>
-<p><a class="button" href="{link}">Open Study Session</a></p>
+<p><a class="button" href="{link}" style="color: #fff !important;">Open Study Session</a></p>
 <p>If the button does not work, copy this link into your browser:<br>
 <a href="{link}">{link}</a></p>""",
         )
@@ -283,7 +454,7 @@ safe – you will need it to access your session.</p>
 (<code>{zip_filename}</code>). You can restore it at any time via the admin panel.</p>
 <p>To keep your study session active, please open it and make any change before
 the deletion deadline:</p>
-<p><a class="button" href="{restore_link}">Open Study Session</a></p>
+<p><a class="button" href="{restore_link}" style="color: #fff !important;">Open Study Session</a></p>
 <p>If the button does not work, copy this link into your browser:<br>
 <a href="{restore_link}">{restore_link}</a></p>""",
         )
@@ -324,7 +495,7 @@ the deletion deadline:</p>
 <p>The elicitation session <strong>{stakeholder_name}</strong> (study
 <strong>{code}</strong>) has been marked as complete by the stakeholder.</p>
 <p>You can now review the responses and begin your analysis:</p>
-<p><a class="button" href="{link}">Open Study Session</a></p>
+<p><a class="button" href="{link}" style="color: #fff !important;">Open Study Session</a></p>
 <p>If the button does not work, copy this link into your browser:<br>
 <a href="{link}">{link}</a></p>""",
         )
