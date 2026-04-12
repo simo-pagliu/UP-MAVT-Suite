@@ -34,7 +34,7 @@ import { LockIcon, UnlockIcon, DeleteIcon, DownloadIcon, ArrowUpIcon, ChevronDow
 import { useRef, Fragment } from 'react'
 import axios from 'axios'
 import { API_URL } from '../config'
-import { storeTokens, loadTokens, updateAccessToken, clearTokens } from '../utils/tokenStorage'
+import { storeTokens, loadTokens, updateAccessToken, clearTokens, isTokenValid } from '../utils/tokenStorage'
 
 function AdminPage(props, ref) {
   const [studySessions, setStudySessions] = useState([])
@@ -58,14 +58,19 @@ function AdminPage(props, ref) {
     },
   }))
 
-  // Restore tokens from secure storage on mount; if valid tokens exist the
-  // user is considered authenticated without needing to re-enter the password.
+  // Restore tokens from secure storage on mount.  Only mark the user as
+  // authenticated if at least the refresh token is still valid; an expired
+  // access token is fine because it will be silently refreshed on the first
+  // protected request.
   useEffect(() => {
     const { accessToken: storedAccess, refreshToken: storedRefresh } = loadTokens()
-    if (storedAccess && storedRefresh) {
+    if (storedRefresh && isTokenValid(storedRefresh)) {
       setAccessToken(storedAccess)
       setRefreshToken(storedRefresh)
       setIsAuthenticated(true)
+    } else if (storedAccess || storedRefresh) {
+      // Stored tokens are present but expired – clean up stale storage.
+      clearTokens()
     }
     setLoading(false)
   }, [])

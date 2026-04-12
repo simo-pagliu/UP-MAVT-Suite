@@ -7,41 +7,63 @@
  * - Never written to `localStorage`, which persists indefinitely.
  *
  * An additional layer of obfuscation is applied before writing to storage:
- * the token string is Base64-encoded with a simple XOR using a per-session
- * key derived from `crypto.getRandomValues`.  This does **not** replace
- * proper transport-level security (HTTPS) but it prevents tokens from
- * appearing as plain JWTs in a quick storage inspection.
+ * the token bytes are XOR-obfuscated then Base64-encoded using a tab-scoped
+ * key stored alongside the tokens in `sessionStorage`.  This does **not**
+ * replace proper transport-level security (HTTPS) but it prevents tokens
+ * from appearing as plain JWTs in a quick storage inspection.
  *
- * The session key itself is stored in memory only — it is never persisted —
- * so tokens written in one page load cannot be decoded in another.
+ * Because the obfuscation key is stored in `sessionStorage` alongside the
+ * tokens, it survives page reloads within the same tab and is discarded
+ * automatically when the tab is closed.
  */
 
 const ACCESS_TOKEN_KEY = '__adm_at'
 const REFRESH_TOKEN_KEY = '__adm_rt'
-
-/** Per-page-load encryption key (32 random bytes, memory-only). */
-const SESSION_KEY = (() => {
-  const buf = new Uint8Array(32)
-  crypto.getRandomValues(buf)
-  return buf
-})()
+const SESSION_KEY_KEY = '__adm_sk'
 
 /**
- * XOR-obfuscate a UTF-8 string with the per-session key and return a
- * Base64-encoded result, or return the original string if the Web Crypto
- * API is unavailable.
+ * Return the per-tab obfuscation key from sessionStorage, creating and
+ * persisting it if it does not yet exist.
+ *
+ * @returns {Uint8Array} 32-byte key.
+ */
+function getOrCreateSessionKey() {
+  try {
+    const stored = sessionStorage.getItem(SESSION_KEY_KEY)
+    if (stored) {
+      const raw = atob(stored)
+      return Uint8Array.from(raw, (c) => c.charCodeAt(0))
+    }
+  } catch {
+    // Fall through to generate a new key.
+  }
+
+  const buf = new Uint8Array(32)
+  crypto.getRandomValues(buf)
+  try {
+    sessionStorage.setItem(SESSION_KEY_KEY, btoa(Array.from(buf, (b) => String.fromCharCode(b)).join('')))
+  } catch {
+    // sessionStorage may be unavailable; carry on with an in-memory key.
+  }
+  return buf
+}
+
+/**
+ * XOR-obfuscate a UTF-8 string with the per-tab session key and return a
+ * Base64-encoded result, or return the original string if encoding fails.
  *
  * @param {string} value - Plain-text string to obfuscate.
  * @returns {string} Base64-encoded obfuscated string.
  */
 function obfuscate(value) {
   try {
+    const key = getOrCreateSessionKey()
     const bytes = new TextEncoder().encode(value)
     const out = new Uint8Array(bytes.length)
     for (let i = 0; i < bytes.length; i++) {
-      out[i] = bytes[i] ^ SESSION_KEY[i % SESSION_KEY.length]
+      out[i] = bytes[i] ^ key[i % key.length]
     }
-    return btoa(String.fromCharCode(...out))
+    return btoa(Array.from(out, (b) => String.fromCharCode(b)).join(''))
   } catch {
     return value
   }
@@ -55,11 +77,12 @@ function obfuscate(value) {
  */
 function deobfuscate(value) {
   try {
+    const key = getOrCreateSessionKey()
     const raw = atob(value)
     const bytes = Uint8Array.from(raw, (c) => c.charCodeAt(0))
     const out = new Uint8Array(bytes.length)
     for (let i = 0; i < bytes.length; i++) {
-      out[i] = bytes[i] ^ SESSION_KEY[i % SESSION_KEY.length]
+      out[i] = bytes[i] ^ key[i % key.length]
     }
     return new TextDecoder().decode(out)
   } catch {
@@ -86,8 +109,7 @@ export function storeTokens(accessToken, refreshToken) {
  * Retrieve the stored JWT tokens from sessionStorage.
  *
  * Returns `{ accessToken: null, refreshToken: null }` if tokens are absent
- * or cannot be decoded (e.g. because the page was reloaded and the in-memory
- * session key changed).
+ * or cannot be decoded.
  *
  * @returns {{ accessToken: string|null, refreshToken: string|null }}
  */
@@ -124,7 +146,44 @@ export function clearTokens() {
   try {
     sessionStorage.removeItem(ACCESS_TOKEN_KEY)
     sessionStorage.removeItem(REFRESH_TOKEN_KEY)
+    sessionStorage.removeItem(SESSION_KEY_KEY)
   } catch {
     // Fail silently.
   }
+}
+
+/**
+ * Decode the payload of a JWT without verifying its signature.
+ * Used purely to inspect the `exp` claim on the client side; the
+ * server always performs authoritative signature verification.
+ *
+ * @param {string} token - JWT string.
+ * @returns {{ exp?: number }|null} Decoded payload, or `null` on failure.
+ */
+export function decodeTokenPayload(token) {
+  try {
+    const parts = token.split('.')
+    if (parts.length !== 3) return null
+    const padded = parts[1].replace(/-/g, '+').replace(/_/g, '/').padEnd(
+      parts[1].length + (4 - (parts[1].length % 4)) % 4,
+      '=',
+    )
+    return JSON.parse(atob(padded))
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Return `true` if the JWT token's `exp` claim is in the future.
+ *
+ * @param {string|null} token - JWT string, or `null`.
+ * @returns {boolean}
+ */
+export function isTokenValid(token) {
+  if (!token) return false
+  const payload = decodeTokenPayload(token)
+  if (!payload || typeof payload.exp !== 'number') return false
+  // exp is in seconds; add a 5-second clock-skew buffer.
+  return payload.exp > Date.now() / 1000 + 5
 }
