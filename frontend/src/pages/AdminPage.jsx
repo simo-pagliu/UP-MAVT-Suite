@@ -463,6 +463,16 @@ function AdminPage(props, ref) {
     await uploadCaseStudy('abort')
   }
 
+  // Show a spinner while the initial auth / session fetch is in progress
+  // (keeps the login form hidden until we know the cookie check has failed)
+  if (loading) {
+    return (
+      <Center h="400px">
+        <Spinner size="xl" />
+      </Center>
+    )
+  }
+
   // Show login form if not authenticated
   if (!isAuthenticated) {
     return (
@@ -489,14 +499,6 @@ function AdminPage(props, ref) {
             </Button>
           </VStack>
         </Box>
-      </Center>
-    )
-  }
-
-  if (loading) {
-    return (
-      <Center h="400px">
-        <Spinner size="xl" />
       </Center>
     )
   }
