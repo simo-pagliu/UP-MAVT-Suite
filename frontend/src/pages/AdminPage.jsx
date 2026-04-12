@@ -34,6 +34,7 @@ import { LockIcon, UnlockIcon, DeleteIcon, DownloadIcon, ArrowUpIcon, ChevronDow
 import { useRef, Fragment } from 'react'
 import axios from 'axios'
 import { API_URL } from '../config'
+import { storeTokens, loadTokens, updateAccessToken, clearTokens } from '../utils/tokenStorage'
 
 function AdminPage(props, ref) {
   const [studySessions, setStudySessions] = useState([])
@@ -57,9 +58,15 @@ function AdminPage(props, ref) {
     },
   }))
 
-  // Check if already authenticated on mount
+  // Restore tokens from secure storage on mount; if valid tokens exist the
+  // user is considered authenticated without needing to re-enter the password.
   useEffect(() => {
-    setIsAuthenticated(false)
+    const { accessToken: storedAccess, refreshToken: storedRefresh } = loadTokens()
+    if (storedAccess && storedRefresh) {
+      setAccessToken(storedAccess)
+      setRefreshToken(storedRefresh)
+      setIsAuthenticated(true)
+    }
     setLoading(false)
   }, [])
 
@@ -85,12 +92,14 @@ function AdminPage(props, ref) {
       )
       const newToken = response.data.access_token
       setAccessToken(newToken)
+      updateAccessToken(newToken)
       return newToken
     } catch {
       // Refresh token expired or invalid – force re-login.
       setIsAuthenticated(false)
       setAccessToken(null)
       setRefreshToken(null)
+      clearTokens()
       return null
     }
   }
@@ -123,8 +132,10 @@ function AdminPage(props, ref) {
       const response = await axios.post(`${API_URL}/admin/login`, { password })
       
       if (response.data.success) {
-        setAccessToken(response.data.access_token)
-        setRefreshToken(response.data.refresh_token)
+        const { access_token, refresh_token } = response.data
+        setAccessToken(access_token)
+        setRefreshToken(refresh_token)
+        storeTokens(access_token, refresh_token)
         setIsAuthenticated(true)
         setPassword('')
       } else {
@@ -153,6 +164,7 @@ function AdminPage(props, ref) {
     setIsAuthenticated(false)
     setAccessToken(null)
     setRefreshToken(null)
+    clearTokens()
     setPassword('')
   }
 
