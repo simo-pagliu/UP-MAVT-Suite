@@ -24,7 +24,10 @@ def create_app():
     cors_origins_raw = os.getenv("CORS_ORIGIN", "*")
     # Support comma-separated origins for multi-origin deployments (e.g. "https://a.com,https://b.com").
     cors_origin = [o.strip() for o in cors_origins_raw.split(",")] if "," in cors_origins_raw else cors_origins_raw
-    CORS(app, origins=cors_origin)
+    # supports_credentials=True is required for HTTPOnly cookie auth.  When the
+    # origin is the wildcard "*" flask-cors automatically echoes the requesting
+    # Origin back so the browser accepts the credentials flag.
+    CORS(app, origins=cors_origin, supports_credentials=True)
 
     # Limit incoming request bodies to 10 MB to prevent denial-of-service via huge payloads.
     app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB

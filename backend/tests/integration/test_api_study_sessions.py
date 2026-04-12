@@ -402,27 +402,30 @@ class TestCompleteElicitationSession:
 # ---------------------------------------------------------------------------
 
 class TestNotifyInactiveStudySessions:
-    def test_requires_password(self, client):
+    def test_requires_cookie(self, client):
         resp = client.post('/api/admin/notify-inactive', json={})
-        assert resp.status_code == 400
+        assert resp.status_code == 401
         assert resp.json['success'] is False
 
-    def test_wrong_password_returns_401(self, client, monkeypatch):
-        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
-        resp = client.post('/api/admin/notify-inactive', json={'password': 'wrong'})
+    def test_wrong_cookie_returns_401(self, client):
+        client.set_cookie('adm_access_token', 'badtoken', path='/api')
+        resp = client.post('/api/admin/notify-inactive', json={})
         assert resp.status_code == 401
 
-    def test_correct_password_returns_200(self, client, monkeypatch):
-        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
-        resp = client.post('/api/admin/notify-inactive', json={'password': 'secret'})
+    def test_correct_cookie_returns_200(self, client):
+        from app.services import AuthenticationService
+        token = AuthenticationService.generate_access_token('admin')
+        client.set_cookie('adm_access_token', token, path='/api')
+        resp = client.post('/api/admin/notify-inactive', json={})
         assert resp.status_code == 200
         assert resp.json['success'] is True
 
-    def test_inactive_sessions_no_email_are_skipped(self, client, monkeypatch, mock_db):
+    def test_inactive_sessions_no_email_are_skipped(self, client, mock_db):
         from datetime import datetime, timezone, timedelta
         from bson.objectid import ObjectId
-        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
-        monkeypatch.delenv('SMTP_HOST', raising=False)
+        from app.services import AuthenticationService
+        import os
+        os.environ.pop('SMTP_HOST', None)
         # Create a study with no creator_email
         create_resp = client.post('/api/study-session', json={'code': 'OLD-STUDY-NOEMAIL'})
         sid = create_resp.json['study_session_id']
@@ -431,15 +434,18 @@ class TestNotifyInactiveStudySessions:
             {'_id': ObjectId(sid)},
             {'$set': {'last_modified_at': old_date}},
         )
-        resp = client.post('/api/admin/notify-inactive', json={'password': 'secret'})
+        token = AuthenticationService.generate_access_token('admin')
+        client.set_cookie('adm_access_token', token, path='/api')
+        resp = client.post('/api/admin/notify-inactive', json={})
         assert resp.status_code == 200
         assert any(s['code'] == 'OLD-STUDY-NOEMAIL' for s in resp.json['skipped'])
 
-    def test_inactive_sessions_with_email_are_notified(self, client, monkeypatch, mock_db):
+    def test_inactive_sessions_with_email_are_notified(self, client, mock_db):
         from datetime import datetime, timezone, timedelta
         from bson.objectid import ObjectId
-        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
-        monkeypatch.delenv('SMTP_HOST', raising=False)
+        from app.services import AuthenticationService
+        import os
+        os.environ.pop('SMTP_HOST', None)
         create_resp = client.post('/api/study-session', json={
             'code': 'OLD-STUDY-EMAIL',
             'creator_email': 'owner@example.com',
@@ -450,7 +456,9 @@ class TestNotifyInactiveStudySessions:
             {'_id': ObjectId(sid)},
             {'$set': {'last_modified_at': old_date}},
         )
-        resp = client.post('/api/admin/notify-inactive', json={'password': 'secret'})
+        token = AuthenticationService.generate_access_token('admin')
+        client.set_cookie('adm_access_token', token, path='/api')
+        resp = client.post('/api/admin/notify-inactive', json={})
         assert resp.status_code == 200
         # SMTP not configured → email is skipped; entry goes into notified with status='skipped'
         notified_or_skipped = resp.json['notified'] + resp.json['skipped']
@@ -458,12 +466,16 @@ class TestNotifyInactiveStudySessions:
         assert len(matching) == 1
         assert matching[0].get('status') == 'skipped'
 
-    def test_response_shape(self, client, monkeypatch):
-        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
-        resp = client.post('/api/admin/notify-inactive', json={'password': 'secret'})
+    def test_response_shape(self, client):
+        from app.services import AuthenticationService
+        token = AuthenticationService.generate_access_token('admin')
+        client.set_cookie('adm_access_token', token, path='/api')
+        resp = client.post('/api/admin/notify-inactive', json={})
         assert resp.status_code == 200
         data = resp.json
         assert 'inactive_count' in data
         assert 'notified' in data
         assert 'skipped' in data
         assert 'failed' in data
+
+

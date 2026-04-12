@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Box, useToast } from '@chakra-ui/react'
+import { Box, Center, Spinner, useToast } from '@chakra-ui/react'
 import axios from 'axios'
 import { API_URL } from './config'
 import Navigation from './components/Navigation'
@@ -20,6 +20,7 @@ function App() {
   const [currentRole, setCurrentRole] = useState(null) // 'stakeholder' or 'practitioner'
   const [currentSessionId, setCurrentSessionId] = useState(null)
   const [currentCode, setCurrentCode] = useState('')
+  const [isRestoringSession, setIsRestoringSession] = useState(true)
   
   // Page navigation
   const [stakeholderPage, setStakeholderPage] = useState('qualitative')
@@ -92,7 +93,16 @@ function App() {
   }, [])
 
   /** Resets all session state and returns to the login screen. */
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (currentRole === 'admin') {
+      // Clear the HTTPOnly admin JWT cookies on the server side so the
+      // auto-restore effect on next page load does not re-authenticate.
+      try {
+        await axios.post(`${API_URL}/admin/logout`, {}, { withCredentials: true })
+      } catch {
+        // Proceed with local logout even if the request fails.
+      }
+    }
     setIsLoggedIn(false)
     setCurrentRole(null)
     setCurrentSessionId(null)
@@ -105,6 +115,65 @@ function App() {
     setShowDocumentation(false)
     setFeatures({ qi: false, vf: false, bwt: false })
   }
+
+  /**
+   * When the admin is logged in, register a beforeunload handler so that
+   * closing the tab or doing a hard refresh (Ctrl+F5) clears the HTTPOnly
+   * admin JWT cookies.  fetch() with keepalive:true is used because it
+   * supports credentials (unlike navigator.sendBeacon) and is guaranteed to
+   * complete even after the page begins unloading.
+   */
+  useEffect(() => {
+    if (currentRole !== 'admin') return
+
+    const handleBeforeUnload = () => {
+      fetch(`${API_URL}/admin/logout`, {
+        method: 'POST',
+        credentials: 'include',
+        keepalive: true,
+      })
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [currentRole])
+
+  /**
+   * On mount, check whether a valid admin session cookie is present.
+   * If the access token has expired, attempt a silent refresh.
+   * On success the admin dashboard is restored; on failure the login page
+   * is shown as normal.  Skipped when a ?uuid= param is present because
+   * the UUID effect handles that login path.
+   */
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('uuid')) {
+      setIsRestoringSession(false)
+      return
+    }
+
+    const restoreAdminSession = async () => {
+      const adminAxios = axios.create({ withCredentials: true })
+      try {
+        await adminAxios.get(`${API_URL}/admin/verify`)
+        handleLogin(null, 'admin', 'admin')
+      } catch (verifyError) {
+        if (verifyError.response?.status === 401) {
+          try {
+            await adminAxios.post(`${API_URL}/admin/refresh`)
+            handleLogin(null, 'admin', 'admin')
+          } catch {
+            // Refresh also failed — show login page
+          }
+        }
+      } finally {
+        setIsRestoringSession(false)
+      }
+    }
+    restoreAdminSession()
+  // handleLogin is stable (useCallback with no deps that change)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   /**
    * Switches the active page for the current role and hides the documentation
@@ -229,18 +298,25 @@ function App() {
         onLogout={handleLogout}
         onDocumentation={handleDocumentation}
       />
+      {/* Checking for a persisted admin session on first load */}
+      {isRestoringSession && (
+        <Center h="calc(100vh - 72px)">
+          <Spinner size="xl" />
+        </Center>
+      )}
+
       {/* Login/Documentation for unauthenticated users */}
-      {!isLoggedIn && !showDocumentation && (
+      {!isRestoringSession && !isLoggedIn && !showDocumentation && (
         <LoginPage onLogin={handleLogin} onDocumentation={handleDocumentation} />
       )}
 
-      {!isLoggedIn && showDocumentation && (
+      {!isRestoringSession && !isLoggedIn && showDocumentation && (
         <Box py={8} px={{ base: 4, md: 8 }}>
           <DocumentationPage />
         </Box>
       )}
 
-      {isLoggedIn && (
+      {!isRestoringSession && isLoggedIn && (
         <Box py={8} px={{ base: 4, md: 8 }}>
           {/* Admin Page */}
           {currentRole === 'admin' && <AdminPage />}
