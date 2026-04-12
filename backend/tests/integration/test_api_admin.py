@@ -4,6 +4,18 @@ import pytest
 from unittest.mock import patch
 from werkzeug.security import generate_password_hash
 
+from app.services import AuthenticationService
+
+
+def _admin_token():
+    """Return a valid admin JWT access token for use in test requests."""
+    return AuthenticationService.generate_access_token('admin')
+
+
+def _auth_headers():
+    """Return Authorization headers carrying a valid admin Bearer token."""
+    return {'Authorization': f'Bearer {_admin_token()}'}
+
 
 class TestAdminLogin:
     def test_login_correct_password(self, client, monkeypatch):
@@ -11,6 +23,8 @@ class TestAdminLogin:
         resp = client.post('/api/admin/login', json={'password': 'testpass'})
         assert resp.status_code == 200
         assert resp.json['success'] is True
+        assert 'access_token' in resp.json
+        assert 'refresh_token' in resp.json
 
     def test_login_wrong_password(self, client, monkeypatch):
         monkeypatch.setenv('ADMIN_PASSWORD', 'testpass')
@@ -34,6 +48,37 @@ class TestAdminLogin:
         assert resp.status_code == 200
 
 
+class TestAdminRefreshToken:
+    def test_refresh_with_valid_refresh_token(self, client):
+        refresh_token = AuthenticationService.generate_refresh_token('admin')
+        resp = client.post(
+            '/api/admin/refresh',
+            headers={'Authorization': f'Bearer {refresh_token}'},
+        )
+        assert resp.status_code == 200
+        assert resp.json['success'] is True
+        assert 'access_token' in resp.json
+
+    def test_refresh_with_access_token_is_rejected(self, client):
+        access_token = AuthenticationService.generate_access_token('admin')
+        resp = client.post(
+            '/api/admin/refresh',
+            headers={'Authorization': f'Bearer {access_token}'},
+        )
+        assert resp.status_code == 401
+
+    def test_refresh_without_token_is_rejected(self, client):
+        resp = client.post('/api/admin/refresh')
+        assert resp.status_code == 401
+
+    def test_refresh_with_invalid_token_is_rejected(self, client):
+        resp = client.post(
+            '/api/admin/refresh',
+            headers={'Authorization': 'Bearer invalidtoken'},
+        )
+        assert resp.status_code == 401
+
+
 class TestDeleteInactiveStudySessions:
     """Integration tests for the /admin/delete-inactive endpoint."""
 
@@ -50,25 +95,34 @@ class TestDeleteInactiveStudySessions:
         )
         return sid
 
-    def test_requires_password(self, client):
+    def test_requires_token(self, client):
         resp = client.post('/api/admin/delete-inactive', json={})
-        assert resp.status_code == 400
+        assert resp.status_code == 401
         assert resp.json['success'] is False
 
-    def test_wrong_password_returns_401(self, client, monkeypatch):
-        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
-        resp = client.post('/api/admin/delete-inactive', json={'password': 'wrong'})
+    def test_wrong_token_returns_401(self, client):
+        resp = client.post(
+            '/api/admin/delete-inactive',
+            json={},
+            headers={'Authorization': 'Bearer invalidtoken'},
+        )
         assert resp.status_code == 401
 
-    def test_correct_password_returns_200(self, client, monkeypatch):
-        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
-        resp = client.post('/api/admin/delete-inactive', json={'password': 'secret'})
+    def test_correct_token_returns_200(self, client):
+        resp = client.post(
+            '/api/admin/delete-inactive',
+            json={},
+            headers=_auth_headers(),
+        )
         assert resp.status_code == 200
         assert resp.json['success'] is True
 
-    def test_response_shape(self, client, monkeypatch):
-        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
-        resp = client.post('/api/admin/delete-inactive', json={'password': 'secret'})
+    def test_response_shape(self, client):
+        resp = client.post(
+            '/api/admin/delete-inactive',
+            json={},
+            headers=_auth_headers(),
+        )
         assert resp.status_code == 200
         data = resp.json
         assert 'inactive_count' in data
@@ -76,40 +130,44 @@ class TestDeleteInactiveStudySessions:
         assert 'deleted' in data
         assert 'email_results' in data
 
-    def test_inactive_session_is_deleted(self, client, monkeypatch, mock_db):
+    def test_inactive_session_is_deleted(self, client, mock_db):
         from bson.objectid import ObjectId
-        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
         sid = self._create_old_study(client, mock_db, 'OLD-TO-DELETE')
-        resp = client.post('/api/admin/delete-inactive', json={
-            'password': 'secret',
-            'send_backup_email': False,
-        })
+        resp = client.post(
+            '/api/admin/delete-inactive',
+            json={'send_backup_email': False},
+            headers=_auth_headers(),
+        )
         assert resp.status_code == 200
         assert resp.json['deleted_count'] >= 1
         deleted_codes = [d['code'] for d in resp.json['deleted']]
         assert 'OLD-TO-DELETE' in deleted_codes
         assert mock_db.study_sessions.find_one({'_id': ObjectId(sid)}) is None
 
-    def test_recent_session_is_not_deleted(self, client, monkeypatch, mock_db):
+    def test_recent_session_is_not_deleted(self, client, mock_db):
         from bson.objectid import ObjectId
-        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
         resp_recent = client.post('/api/study-session', json={'code': 'KEEP-RECENT'})
         sid_recent = resp_recent.json['study_session_id']
         # Also create an old session so something gets deleted (shows the endpoint ran)
         self._create_old_study(client, mock_db, 'DELETE-OLD-BUT-NOT-RECENT')
-        resp = client.post('/api/admin/delete-inactive', json={
-            'password': 'secret',
-            'send_backup_email': False,
-        })
+        resp = client.post(
+            '/api/admin/delete-inactive',
+            json={'send_backup_email': False},
+            headers=_auth_headers(),
+        )
         assert resp.status_code == 200
         assert mock_db.study_sessions.find_one({'_id': ObjectId(sid_recent)}) is not None
 
-    def test_no_inactive_sessions_returns_zero_deleted(self, client, monkeypatch):
-        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
-        resp = client.post('/api/admin/delete-inactive', json={'password': 'secret'})
+    def test_no_inactive_sessions_returns_zero_deleted(self, client):
+        resp = client.post(
+            '/api/admin/delete-inactive',
+            json={},
+            headers=_auth_headers(),
+        )
         assert resp.status_code == 200
         assert resp.json['deleted_count'] == 0
         assert resp.json['deleted'] == []
+
     def test_login_with_hashed_password(self, client, monkeypatch):
         hashed = generate_password_hash('securepass')
         monkeypatch.setenv('ADMIN_PASSWORD', hashed)
@@ -126,19 +184,21 @@ class TestDeleteInactiveStudySessions:
 
 
 class TestAdminEmailDiagnostics:
-    def test_requires_password(self, client):
+    def test_requires_token(self, client):
         resp = client.post('/api/admin/email-diagnostics', json={})
-        assert resp.status_code == 400
-        assert resp.json['success'] is False
-
-    def test_wrong_password_returns_401(self, client, monkeypatch):
-        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
-        resp = client.post('/api/admin/email-diagnostics', json={'password': 'wrong'})
         assert resp.status_code == 401
         assert resp.json['success'] is False
 
-    def test_ok_diagnostics_returns_200(self, client, monkeypatch):
-        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
+    def test_wrong_token_returns_401(self, client):
+        resp = client.post(
+            '/api/admin/email-diagnostics',
+            json={},
+            headers={'Authorization': 'Bearer badtoken'},
+        )
+        assert resp.status_code == 401
+        assert resp.json['success'] is False
+
+    def test_ok_diagnostics_returns_200(self, client):
         with patch('app.routes.api.EmailService') as email_cls:
             email_cls.return_value.diagnose_auth.return_value = {
                 'status': 'ok',
@@ -146,14 +206,17 @@ class TestAdminEmailDiagnostics:
                 'smtp': {'configured': True, 'host': 'smtp.office365.com', 'port': 587, 'use_tls': True},
                 'oauth2': {'enabled': True, 'username': 'mcda@psi.ch', 'token_ok': True, 'smtp_auth_ok': True},
             }
-            resp = client.post('/api/admin/email-diagnostics', json={'password': 'secret'})
+            resp = client.post(
+                '/api/admin/email-diagnostics',
+                json={},
+                headers=_auth_headers(),
+            )
 
         assert resp.status_code == 200
         assert resp.json['success'] is True
         assert resp.json['status'] == 'ok'
 
-    def test_failed_diagnostics_returns_502(self, client, monkeypatch):
-        monkeypatch.setenv('ADMIN_PASSWORD', 'secret')
+    def test_failed_diagnostics_returns_502(self, client):
         with patch('app.routes.api.EmailService') as email_cls:
             email_cls.return_value.diagnose_auth.return_value = {
                 'status': 'failed',
@@ -162,7 +225,11 @@ class TestAdminEmailDiagnostics:
                 'smtp': {'configured': True, 'host': 'smtp.office365.com', 'port': 587, 'use_tls': True},
                 'oauth2': {'enabled': True, 'username': 'mcda@psi.ch', 'token_ok': True, 'smtp_auth_ok': False},
             }
-            resp = client.post('/api/admin/email-diagnostics', json={'password': 'secret'})
+            resp = client.post(
+                '/api/admin/email-diagnostics',
+                json={},
+                headers=_auth_headers(),
+            )
 
         assert resp.status_code == 502
         assert resp.json['success'] is False

@@ -44,6 +44,8 @@ function AdminPage(props, ref) {
   const [password, setPassword] = useState('')
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [expandedStudies, setExpandedStudies] = useState(new Set())
+  const [accessToken, setAccessToken] = useState(null)
+  const [refreshToken, setRefreshToken] = useState(null)
   const { isOpen, onOpen, onClose } = useDisclosure()
   const cancelRef = useRef()
   const toast = useToast()
@@ -61,6 +63,58 @@ function AdminPage(props, ref) {
     setLoading(false)
   }, [])
 
+  /**
+   * Return Axios request config that includes the admin Bearer token header.
+   * Callers can spread this into their Axios options.
+   */
+  const authHeaders = () => ({
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+
+  /**
+   * Silently refresh the access token using the stored refresh token.
+   * Returns the new access token string on success, or null on failure.
+   */
+  const refreshAccessToken = async () => {
+    if (!refreshToken) return null
+    try {
+      const response = await axios.post(
+        `${API_URL}/admin/refresh`,
+        {},
+        { headers: { Authorization: `Bearer ${refreshToken}` } },
+      )
+      const newToken = response.data.access_token
+      setAccessToken(newToken)
+      return newToken
+    } catch {
+      // Refresh token expired or invalid – force re-login.
+      setIsAuthenticated(false)
+      setAccessToken(null)
+      setRefreshToken(null)
+      return null
+    }
+  }
+
+  /**
+   * Execute an Axios request function.  If the request fails with 401 and a
+   * refresh token is available, attempt to refresh the access token once and
+   * retry.  This keeps the user logged in across access-token expirations.
+   */
+  const withAuth = async (requestFn) => {
+    try {
+      return await requestFn(accessToken)
+    } catch (error) {
+      if (error.response?.status === 401) {
+        const newToken = await refreshAccessToken()
+        if (newToken) {
+          return await requestFn(newToken)
+        }
+        throw error
+      }
+      throw error
+    }
+  }
+
   const handleLogin = async (e) => {
     e.preventDefault()
     setIsAuthenticating(true)
@@ -69,6 +123,8 @@ function AdminPage(props, ref) {
       const response = await axios.post(`${API_URL}/admin/login`, { password })
       
       if (response.data.success) {
+        setAccessToken(response.data.access_token)
+        setRefreshToken(response.data.refresh_token)
         setIsAuthenticated(true)
         setPassword('')
       } else {
@@ -95,6 +151,8 @@ function AdminPage(props, ref) {
 
   const handleLogout = () => {
     setIsAuthenticated(false)
+    setAccessToken(null)
+    setRefreshToken(null)
     setPassword('')
   }
 

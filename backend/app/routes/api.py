@@ -1,4 +1,5 @@
 from flask import Blueprint, request, jsonify, current_app, send_file
+import functools
 import hmac
 import io
 import json
@@ -25,6 +26,24 @@ EXAMPLES_DIR = Path(__file__).resolve().parents[2] / 'examples'
 @bp.errorhandler(ServiceError)
 def handle_service_error(e):
     return jsonify({'error': str(e)}), e.status_code
+
+
+def require_admin_token(f):
+    """Decorator that enforces admin JWT Bearer token authentication.
+
+    Reads the ``Authorization: Bearer <token>`` header, verifies the token
+    with :meth:`AuthenticationService.verify_token`, and rejects requests that
+    carry no token, an invalid token, or a token whose ``role`` is not
+    ``'admin'``.
+    """
+    @functools.wraps(f)
+    def decorated(*args, **kwargs):
+        token = AuthenticationService.extract_bearer_token(request.headers)
+        payload = AuthenticationService.verify_token(token)
+        if payload is None or payload.get('role') != 'admin':
+            return jsonify({'success': False, 'error': 'Unauthorized'}), 401
+        return f(*args, **kwargs)
+    return decorated
 
 
 def _send(content, filename, mimetype):
@@ -115,20 +134,35 @@ def admin_login():
     if not password:
         return jsonify({'success': False, 'error': 'Password is required'}), 400
     if AuthenticationService(current_app.db).authenticate(password):
-        return jsonify({'success': True}), 200
+        access_token = AuthenticationService.generate_access_token('admin')
+        refresh_token = AuthenticationService.generate_refresh_token('admin')
+        return jsonify({
+            'success': True,
+            'access_token': access_token,
+            'refresh_token': refresh_token,
+        }), 200
     return jsonify({'success': False, 'error': 'Invalid password'}), 401
 
 
+@bp.route('/admin/refresh', methods=['POST'])
+def admin_refresh_token():
+    """Issue a new access token using a valid refresh token."""
+    token = AuthenticationService.extract_bearer_token(request.headers)
+    payload = AuthenticationService.verify_token(token)
+    if (
+        payload is None
+        or payload.get('type') != 'refresh'
+        or payload.get('role') != 'admin'
+    ):
+        return jsonify({'success': False, 'error': 'Invalid or expired refresh token'}), 401
+    access_token = AuthenticationService.generate_access_token('admin')
+    return jsonify({'success': True, 'access_token': access_token}), 200
+
+
 @bp.route('/admin/email-diagnostics', methods=['POST'])
+@require_admin_token
 def admin_email_diagnostics():
     """Run SMTP diagnostics (token + auth) without sending an email."""
-    data = request.get_json(silent=True) or {}
-    password = data.get('password')
-    if not password:
-        return jsonify({'success': False, 'error': 'Password is required'}), 400
-    if not AuthenticationService(current_app.db).authenticate(password):
-        return jsonify({'success': False, 'error': 'Invalid password'}), 401
-
     diagnostics = EmailService().diagnose_auth()
     response = {'success': diagnostics.get('status') == 'ok', **diagnostics}
 
@@ -140,24 +174,18 @@ def admin_email_diagnostics():
 
 
 @bp.route('/admin/notify-inactive', methods=['POST'])
+@require_admin_token
 def notify_inactive_study_sessions():
     """Send inactivity warning emails for study sessions inactive for 12+ months.
 
     Accepts an optional JSON body:
     * ``months`` (int, default 12) – inactivity threshold in months.
-    * ``password`` (str, required) – admin password for authorisation.
 
     For each inactive study session that has a ``creator_email`` stored, a
     warning email with a ZIP backup attachment is sent.  The response
     summarises how many sessions were notified and any failures.
     """
     data = request.get_json(silent=True) or {}
-    password = data.get('password')
-    if not password:
-        return jsonify({'success': False, 'error': 'Password is required'}), 400
-    if not AuthenticationService(current_app.db).authenticate(password):
-        return jsonify({'success': False, 'error': 'Invalid password'}), 401
-
     months = int(data.get('months', 12))
     svc = StudySessionService(current_app.db)
     email_svc = EmailService()
@@ -204,11 +232,11 @@ def notify_inactive_study_sessions():
 
 
 @bp.route('/admin/delete-inactive', methods=['POST'])
+@require_admin_token
 def delete_inactive_study_sessions():
     """Delete study sessions inactive for 12+ months (GDPR / data-retention).
 
-    Accepts a JSON body:
-    * ``password`` (str, required) – admin password for authorisation.
+    Accepts an optional JSON body:
     * ``months`` (int, default 12) – inactivity threshold in months.
     * ``send_backup_email`` (bool, default true) – when ``true`` a ZIP backup
       is emailed to the practitioner *before* the session is deleted.
@@ -219,12 +247,6 @@ def delete_inactive_study_sessions():
     then permanently removed.
     """
     data = request.json or {}
-    password = data.get('password')
-    if not password:
-        return jsonify({'success': False, 'error': 'Password is required'}), 400
-    if not AuthenticationService(current_app.db).authenticate(password):
-        return jsonify({'success': False, 'error': 'Invalid password'}), 401
-
     months = int(data.get('months', 12))
     raw_send = data.get('send_backup_email')
     send_backup_email = raw_send is not False and str(raw_send).lower() not in ('false', '0', 'no')
