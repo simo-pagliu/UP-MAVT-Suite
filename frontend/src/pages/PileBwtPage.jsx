@@ -86,6 +86,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   const mainContentRef = useRef(null)
   const [showUnlockConfirm, setShowUnlockConfirm] = useState(false)
   const toast = useToast()
+  const isReadOnlyLockedSession = isSessionLocked
 
   // Expose save method for navigation
   useImperativeHandle(ref, () => ({
@@ -388,6 +389,18 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     if (loading) return
     if (!comparisons.length) return
 
+    if (isSessionLocked) {
+      if (!bwtLockActive) {
+        toast({
+          title: 'Session locked by practitioner',
+          description: 'Weight elicitation is available in read-only mode only.',
+          status: 'warning',
+          isClosable: true,
+        })
+      }
+      return
+    }
+
     const criteriaMatch = bwtSignature && criteriaSignature
       ? areSignaturesEquivalent(bwtSignature, criteriaSignature)
       : false
@@ -407,16 +420,6 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       !vfMatch
 
     if (!hasMismatch) return
-
-    if (isSessionLocked && !bwtLockActive) {
-      toast({
-        title: 'Session locked by practitioner',
-        description: 'Weight elicitation updates are disabled until the practitioner/admin unlocks the session.',
-        status: 'warning',
-        isClosable: true,
-      })
-      return
-    }
 
     const changedCriteriaFromStructure = getChangedCriteriaNames(bwtSignature, criteriaSignature) || []
     const changedCriteriaFromQi = getChangedObjectKeys(bwtQiSignature, qiSignature) || []
@@ -760,6 +763,18 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     }
 
     return true
+  }
+
+  const navigateToPair = (pairIdx, comps = comparisons) => {
+    if (!pairs[pairIdx]) return
+    setCurrentPairIndex(pairIdx)
+    setSliderTouched(false)
+    setIsConsistencyError(false)
+    const targetComp = getComparisonForPair(pairIdx, comps)
+    setSliderValue(targetComp ? targetComp.data_value : getWorstDataValue(pairs[pairIdx].adjusted))
+    if (mainContentRef.current) {
+      mainContentRef.current.scrollTop = 0
+    }
   }
 
   const handleUnlockForModification = async () => {
@@ -1293,6 +1308,12 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   }
 
   const handleNextPair = async () => {
+    if (isReadOnlyLockedSession) {
+      if (currentPairIndex < pairs.length - 1) {
+        navigateToPair(currentPairIndex + 1)
+      }
+      return
+    }
     if (!ensureSessionUnlocked()) return
     
     // Don't save if there's a consistency error
@@ -1317,15 +1338,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         })
         syncBwtSignatures()
         setComparisons(updatedComparisons)
-        setCurrentPairIndex(currentPairIndex + 1)
-        setSliderTouched(false)
-        setIsConsistencyError(false)
-        const nextComp = getComparisonForPair(currentPairIndex + 1, updatedComparisons)
-        setSliderValue(nextComp ? nextComp.data_value : getWorstDataValue(pairs[currentPairIndex + 1].adjusted))
-        // Scroll to top
-        if (mainContentRef.current) {
-          mainContentRef.current.scrollTop = 0
-        }
+        navigateToPair(currentPairIndex + 1, updatedComparisons)
       } catch (error) {
         toast({
           title: 'Request failed',
@@ -1343,6 +1356,12 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   }
 
   const handlePrevPair = async () => {
+    if (isReadOnlyLockedSession) {
+      if (currentPairIndex > 0) {
+        navigateToPair(currentPairIndex - 1)
+      }
+      return
+    }
     if (!ensureSessionUnlocked()) return
     if (currentPairIndex > 0) {
       let latestComparisons = comparisons
@@ -1373,15 +1392,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         }
       }
       
-      setCurrentPairIndex(currentPairIndex - 1)
-      setSliderTouched(false)
-      setIsConsistencyError(false)
-      const prevComp = getComparisonForPair(currentPairIndex - 1, latestComparisons)
-      setSliderValue(prevComp ? prevComp.data_value : getWorstDataValue(pairs[currentPairIndex - 1].adjusted))
-      // Scroll to top
-      if (mainContentRef.current) {
-        mainContentRef.current.scrollTop = 0
-      }
+      navigateToPair(currentPairIndex - 1, latestComparisons)
     }
   }
 
@@ -1931,6 +1942,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               max={adjustedRange.max}
               step={(adjustedRange.max - adjustedRange.min) / 100}
               value={sliderValue}
+              isDisabled={isReadOnlyLockedSession}
               isReversed={!isAdjustedIncreasing}
               onChange={(value) => {
                 setSliderValue(value)
@@ -1971,6 +1983,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                   max={adjustedRange.max}
                   step={(adjustedRange.max - adjustedRange.min) / 100}
                   precision={2}
+                  isDisabled={isReadOnlyLockedSession}
                   onChange={(valueString) => {
                     setSliderInputValue(valueString)
                     setSliderTouched(true)
@@ -2022,6 +2035,25 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               rightIcon={<ChevronRightIcon />} 
               onClick={async () => {
                 if (currentPairIndex === pairs.length - 1) {
+                  if (isReadOnlyLockedSession) {
+                    if (selectedGroupIndex < allGroups.length - 1) {
+                      setSelectedGroupIndex(selectedGroupIndex + 1)
+                      setBestCriterion(null)
+                      setWorstCriterion(null)
+                      setPairs([])
+                      setPairsGroupName(null)
+                      setStep('select-criteria')
+                      setBestToWorstValue(null)
+                      setConsistencyConstraints({})
+                      setIsConsistencyError(false)
+                      if (mainContentRef.current) {
+                        mainContentRef.current.scrollTop = 0
+                      }
+                    } else if (onPageChange) {
+                      onPageChange('recap')
+                    }
+                    return
+                  }
                   // Capture the value from the first (BEST-to-WORST) comparison if not already captured
                   if (currentPairIndex === 0 && pairs[0]?.type === 'best' && bestToWorstValue === null) {
                     const vfValue = interpolateVF(pairs[0].adjusted.criterion_name, sliderValue)
@@ -2060,7 +2092,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                   await handleNextPair()
                 }
               }} 
-              isDisabled={!sliderTouched || isConsistencyError}
+              isDisabled={isReadOnlyLockedSession ? false : (!sliderTouched || isConsistencyError)}
               isLoading={saving}
               size="md"
             >
@@ -2311,8 +2343,9 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                           }
                         }
                         
-                        // Disable pairs after the first incomplete one
-                        const isDisabled = pairIdx > firstIncompletePairIndex
+                        // In locked mode, allow browsing any comparison.
+                        // In editable mode, keep sequential progression gating.
+                        const isDisabled = isReadOnlyLockedSession ? false : pairIdx > firstIncompletePairIndex
                         
                         return (
                           <Box
@@ -2327,6 +2360,10 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                             onClick={async () => {
                               if (pairIdx === currentPairIndex) return
                               if (isDisabled) return
+                              if (isReadOnlyLockedSession) {
+                                navigateToPair(pairIdx)
+                                return
+                              }
                               if (!ensureSessionUnlocked()) return
                               
                               let latestComparisons = comparisons
@@ -2355,14 +2392,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                                 }
                               }
                               
-                              setCurrentPairIndex(pairIdx)
-                              setIsConsistencyError(false)
-                              const targetComp = getComparisonForPair(pairIdx, latestComparisons)
-                              setSliderValue(targetComp ? targetComp.data_value : getWorstDataValue(pairs[pairIdx].adjusted))
-                              // Scroll to top
-                              if (mainContentRef.current) {
-                                mainContentRef.current.scrollTop = 0
-                              }
+                              navigateToPair(pairIdx, latestComparisons)
                             }}
                             _hover={isDisabled ? {} : { shadow: 'sm' }}
                           >
@@ -2495,7 +2525,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               <WarningIcon color="red.600" />
               <VStack align="start" spacing={1} flex={1}>
                 <Text fontSize="sm" color="red.800" fontWeight="semibold">
-                  This session is locked by the practitioner. Weight elicitation editing is disabled.
+                  This session is locked by the practitioner. Weight elicitation editing is disabled, but you can browse saved comparisons.
                 </Text>
                 <Text fontSize="xs" color="red.700">
                   Ask the practitioner/admin to unlock this session.
