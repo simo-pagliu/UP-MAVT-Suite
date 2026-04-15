@@ -30,7 +30,7 @@ import {
   Tooltip,
   Progress,
 } from '@chakra-ui/react'
-import { LockIcon, UnlockIcon, DeleteIcon, DownloadIcon, ArrowUpIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon } from '@chakra-ui/icons'
+import { DeleteIcon, DownloadIcon, ArrowUpIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon } from '@chakra-ui/icons'
 import { useRef, Fragment } from 'react'
 import axios from 'axios'
 import { API_URL } from '../config'
@@ -588,13 +588,11 @@ function AdminPage(props, ref) {
                           cursor="pointer"
                           display="inline-flex"
                           alignItems="center"
-                          gap={1}
                           px={3}
                           py={1}
                           onClick={() => handleToggleStatus(study._id)}
                           _hover={{ opacity: 0.8 }}
                         >
-                          {isLocked ? <LockIcon boxSize={3} /> : <UnlockIcon boxSize={3} />}
                           {isLocked ? 'Locked' : 'Unlocked'}
                         </Badge>
                       </Td>
@@ -686,15 +684,13 @@ function AdminPage(props, ref) {
                               cursor="pointer"
                               display="inline-flex"
                               alignItems="center"
-                              gap={1}
                               px={2}
                               py={1}
                               fontSize="xs"
                               onClick={() => handleToggleSessionStatus(session._id)}
                               _hover={{ opacity: 0.8 }}
                             >
-                              {sessionLocked ? <LockIcon boxSize={2} /> : <UnlockIcon boxSize={2} />}
-                              {session.session_locked ? 'Locked' : session.locked ? 'Input' : 'Unlocked'}
+                              {sessionLocked ? 'Locked' : 'Unlocked'}
                             </Badge>
                           </Td>
                           <Td>
