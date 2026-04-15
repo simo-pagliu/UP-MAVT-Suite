@@ -795,6 +795,13 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     })
   }
 
+  const isHierarchicalStudy = (criteria || []).some((criterion) => {
+    const groupName = String(criterion?.group || '').trim().toLowerCase()
+    return groupName !== '' && groupName !== 'single-group'
+  })
+
+  const weightSpaceSolutionCount = normalizeWeightSamples(weightSpaceData).length
+
   const getConsistencyPlotData = () => {
     const sessionDoc = sessions.find((session) => session?._id === selectedWeightSession)
     const comparisons = Array.isArray(sessionDoc?.bwt?.comparisons) ? sessionDoc.bwt.comparisons : []
@@ -1506,9 +1513,11 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                         </Select>
                       </HStack>
 
-                      <Text>Weight Space Plot</Text>
                       <WeightSpacePlot
                         data={weightSpaceData}
+                        isNonLinearModel={useNonLinearModel}
+                        isHierarchicalStudy={isHierarchicalStudy}
+                        solutionCount={weightSpaceSolutionCount}
                         orderedCriteria={(criteria || [])
                           .map((criterion) => criterion?.criterion_name)
                           .filter((name) => typeof name === 'string' && name.length > 0)}
@@ -2259,12 +2268,11 @@ function RankingHeatmap({ title, results }) {
 // ============================================================================
 // WEIGHT SPACE PLOT COMPONENT
 // ============================================================================
-function WeightSpacePlot({ data, orderedCriteria = [] }) {
+function WeightSpacePlot({ data, orderedCriteria = [], isNonLinearModel = false, isHierarchicalStudy = false, solutionCount = 0 }) {
   const reorderCriteria = (detectedCriteria) => {
     const canon = (value) => String(value || '').trim().toLowerCase()
     const detectedByCanon = new Map(detectedCriteria.map((name) => [canon(name), name]))
 
-    // Match input-order criteria to detected keys using normalized names.
     const preferred = []
     orderedCriteria.forEach((name) => {
       const match = detectedByCanon.get(canon(name))
@@ -2277,11 +2285,30 @@ function WeightSpacePlot({ data, orderedCriteria = [] }) {
     return [...preferred, ...remainder]
   }
 
+  const methodLabel = isHierarchicalStudy ? 'PILE-BWT' : 'BWT'
+  const explanationText = isNonLinearModel
+    ? `${methodLabel} with the non-linear model returns multiple solutions that define the weight space. This run found ${solutionCount} solution${solutionCount === 1 ? '' : 's'}.`
+    : `${methodLabel} with the linear model returns a single solution that defines the weight space.`
+
+  const header = (
+    <VStack spacing={1} align="stretch">
+      <Text fontSize="sm" fontWeight="semibold" color="gray.700">
+        Weight Space Plot
+      </Text>
+      <Text fontSize="sm" color="gray.600">
+        {explanationText}
+      </Text>
+    </VStack>
+  )
+
   if (!data) {
     return (
-      <Box bg="gray.100" h={300} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-        <Text color="gray.500">No weight space data available</Text>
-      </Box>
+      <VStack spacing={3} align="stretch">
+        {header}
+        <Box bg="gray.100" h={300} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
+          <Text color="gray.500">No weight space data available</Text>
+        </Box>
+      </VStack>
     )
   }
 
@@ -2290,10 +2317,92 @@ function WeightSpacePlot({ data, orderedCriteria = [] }) {
     const maxWeight = Math.max(...criteria.flatMap((criterion) => data[criterion]))
 
     return (
+      <VStack spacing={3} align="stretch">
+        {header}
+        <Box bg="white" border="1px" borderColor="gray.200" borderRadius="md" p={4}>
+          <VStack spacing={2} align="stretch">
+            {criteria.map((criterion) => {
+              const weights = data[criterion]
+              return (
+                <HStack key={criterion} spacing={3} align="center">
+                  <Text
+                    fontSize="xs"
+                    fontWeight="medium"
+                    width="180px"
+                    textAlign="right"
+                    flexShrink={0}
+                    isTruncated
+                    title={criterion}
+                  >
+                    {criterion}
+                  </Text>
+                  <Box flex={1} h="20px" position="relative" bg="gray.50" borderRadius="sm">
+                    {weights.map((w, i) => (
+                      <Box
+                        key={i}
+                        position="absolute"
+                        left={`${(w / (maxWeight * 1.1)) * 100}%`}
+                        top="2px"
+                        width="6px"
+                        height="16px"
+                        bg="blue.500"
+                        borderRadius="sm"
+                        opacity={0.7}
+                        title={`${w.toFixed(3)}`}
+                      />
+                    ))}
+                  </Box>
+                </HStack>
+              )
+            })}
+            <HStack spacing={3} mt={2}>
+              <Box width="180px" />
+              <HStack flex={1} justify="space-between">
+                <Text fontSize="xs" color="gray.400">0</Text>
+                <Text fontSize="xs" color="gray.400">{(maxWeight * 1.1).toFixed(2)}</Text>
+              </HStack>
+            </HStack>
+          </VStack>
+        </Box>
+      </VStack>
+    )
+  }
+
+  if (!Array.isArray(data) || data.length === 0) {
+    return (
+      <VStack spacing={3} align="stretch">
+        {header}
+        <Box bg="gray.100" h={300} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
+          <Text color="gray.500">No weight space data available</Text>
+        </Box>
+      </VStack>
+    )
+  }
+
+  const allDetected = Array.from(
+    new Set(
+      data
+        .filter((row) => row && typeof row === 'object')
+        .flatMap((row) => Object.keys(row))
+    )
+  )
+  const criteria = reorderCriteria(allDetected)
+  const criterionToValues = criteria.reduce((acc, criterion) => {
+    acc[criterion] = data
+      .map((solution) => (typeof solution?.[criterion] === 'number' ? solution[criterion] : Number(solution?.[criterion] || 0)))
+      .filter((value) => Number.isFinite(value))
+    return acc
+  }, {})
+
+  const maxWeight = Math.max(0.001, ...criteria.flatMap((criterion) => criterionToValues[criterion]))
+
+  return (
+    <VStack spacing={3} align="stretch">
+      {header}
       <Box bg="white" border="1px" borderColor="gray.200" borderRadius="md" p={4}>
         <VStack spacing={2} align="stretch">
           {criteria.map((criterion) => {
-            const weights = data[criterion]
+            const weights = criterionToValues[criterion]
             return (
               <HStack key={criterion} spacing={3} align="center">
                 <Text
@@ -2323,9 +2432,6 @@ function WeightSpacePlot({ data, orderedCriteria = [] }) {
                     />
                   ))}
                 </Box>
-                <Text fontSize="xs" color="gray.500" width="50px" flexShrink={0}>
-                  {weights.length} pts
-                </Text>
               </HStack>
             )
           })}
@@ -2335,88 +2441,10 @@ function WeightSpacePlot({ data, orderedCriteria = [] }) {
               <Text fontSize="xs" color="gray.400">0</Text>
               <Text fontSize="xs" color="gray.400">{(maxWeight * 1.1).toFixed(2)}</Text>
             </HStack>
-            <Box width="50px" />
           </HStack>
         </VStack>
       </Box>
-    )
-  }
-
-  if (!Array.isArray(data) || data.length === 0) {
-    return (
-      <Box bg="gray.100" h={300} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-        <Text color="gray.500">No weight space data available</Text>
-      </Box>
-    )
-  }
-
-  const allDetected = Array.from(
-    new Set(
-      data
-        .filter((row) => row && typeof row === 'object')
-        .flatMap((row) => Object.keys(row))
-    )
-  )
-  const criteria = reorderCriteria(allDetected)
-  const criterionToValues = criteria.reduce((acc, criterion) => {
-    acc[criterion] = data
-      .map((solution) => (typeof solution?.[criterion] === 'number' ? solution[criterion] : Number(solution?.[criterion] || 0)))
-      .filter((value) => Number.isFinite(value))
-    return acc
-  }, {})
-
-  const maxWeight = Math.max(0.001, ...criteria.flatMap((criterion) => criterionToValues[criterion]))
-
-  return (
-    <Box bg="white" border="1px" borderColor="gray.200" borderRadius="md" p={4}>
-      <VStack spacing={2} align="stretch">
-        {criteria.map((criterion) => {
-          const weights = criterionToValues[criterion]
-          return (
-            <HStack key={criterion} spacing={3} align="center">
-              <Text
-                fontSize="xs"
-                fontWeight="medium"
-                width="180px"
-                textAlign="right"
-                flexShrink={0}
-                isTruncated
-                title={criterion}
-              >
-                {criterion}
-              </Text>
-              <Box flex={1} h="20px" position="relative" bg="gray.50" borderRadius="sm">
-                {weights.map((w, i) => (
-                  <Box
-                    key={i}
-                    position="absolute"
-                    left={`${(w / (maxWeight * 1.1)) * 100}%`}
-                    top="2px"
-                    width="6px"
-                    height="16px"
-                    bg="blue.500"
-                    borderRadius="sm"
-                    opacity={0.7}
-                    title={`${w.toFixed(3)}`}
-                  />
-                ))}
-              </Box>
-              <Text fontSize="xs" color="gray.500" width="50px" flexShrink={0}>
-                {weights.length} pts
-              </Text>
-            </HStack>
-          )
-        })}
-        <HStack spacing={3} mt={2}>
-          <Box width="180px" />
-          <HStack flex={1} justify="space-between">
-            <Text fontSize="xs" color="gray.400">0</Text>
-            <Text fontSize="xs" color="gray.400">{(maxWeight * 1.1).toFixed(2)}</Text>
-          </HStack>
-          <Box width="50px" />
-        </HStack>
-      </VStack>
-    </Box>
+    </VStack>
   )
 }
 
