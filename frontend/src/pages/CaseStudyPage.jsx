@@ -32,7 +32,7 @@ import {
   useDisclosure,
   useToast,
 } from '@chakra-ui/react'
-import { DeleteIcon, LockIcon, UnlockIcon, HamburgerIcon, RepeatIcon, CopyIcon } from '@chakra-ui/icons'
+import { DeleteIcon, HamburgerIcon, RepeatIcon, CopyIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { API_URL } from '../config'
@@ -690,8 +690,18 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
                     </VStack>
                   </Td>
                   <Td>
-                    <Badge colorScheme={session.session_locked ? 'red' : 'green'}>
-                      {session.session_locked ? 'Locked' : 'Active'}
+                    <Badge
+                      colorScheme={session.session_locked ? 'red' : 'green'}
+                      cursor="pointer"
+                      display="inline-flex"
+                      alignItems="center"
+                      px={2}
+                      py={1}
+                      fontSize="xs"
+                      onClick={() => handleToggleLock(session._id, session.session_locked)}
+                      _hover={{ opacity: 0.8 }}
+                    >
+                      {session.session_locked ? 'Locked' : 'Unlocked'}
                     </Badge>
                   </Td>
                   <Td>
@@ -739,13 +749,6 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
                   </Td>
                   <Td>
                     <HStack spacing={2}>
-                      <IconButton
-                        aria-label={session.session_locked ? 'Unlock session' : 'Lock session'}
-                        icon={session.session_locked ? <UnlockIcon /> : <LockIcon />}
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleToggleLock(session._id, session.session_locked)}
-                      />
                       <IconButton
                         aria-label="Delete session"
                         icon={<DeleteIcon />}
