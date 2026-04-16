@@ -523,15 +523,23 @@ function LoginPage({ onLogin, onDocumentation }) {
                 </Button>
               </HStack>
               {emailEnabled && (
-                <Text color="gray.600" fontSize="sm">
-                  No account is created in this process. Your email is used only for essential case-study
-                  notifications (session confirmation, elicitation progress, completion alerts, and inactivity
-                  warnings) and to send you a backup copy of your data before it is deleted. Your email address
-                  is stored on servers operated by the Paul Scherrer Institute (PSI) in Switzerland and is
-                  automatically and permanently deleted together with all case-study data after{' '}
-                  <strong>12 months of inactivity</strong>. You may request erasure at any time by contacting
-                  mcda-up@psi.ch.
-                </Text>
+                <>
+                  <Text color="gray.600" fontSize="sm">
+                    No account is created in this process. Your email is used only for essential case-study
+                    notifications (session confirmation, elicitation progress, completion alerts, and inactivity
+                    warnings) and to send you a backup copy of your data before it is deleted. Your email address
+                    is stored on servers operated by the Paul Scherrer Institute (PSI) in Switzerland and is
+                    automatically and permanently deleted together with all case-study data after{' '}
+                    <strong>12 months of inactivity</strong>. You may request erasure at any time by contacting
+                    mcda-up@psi.ch.
+                  </Text>
+                  <Text color="gray.600" fontSize="sm">
+                    By providing your email address, you accept the{' '}
+                    <Link href="https://www.psi.ch/en/nutzungsbedingungen" isExternal color="blue.700">
+                      PSI privacy policy
+                    </Link>
+                  </Text>
+                </>
               )}
               {!emailEnabled && (
                 <Text color="gray.600" fontSize="sm">
@@ -572,8 +580,7 @@ function LoginPage({ onLogin, onDocumentation }) {
 
           <VStack align="start" spacing={1}>
             <Text fontWeight="semibold">Legal and policy links</Text>
-            <Link href="https://www.psi.ch/en/disclaimer-and-privacy-policy" isExternal color="blue.700">Privacy notice</Link>
-            <Link href="https://www.psi.ch/en/disclaimer-and-privacy-policy" isExternal color="blue.700">Terms of use</Link>
+            <Link href="https://www.psi.ch/en/nutzungsbedingungen" isExternal color="blue.700">Privacy Policy</Link>
           </VStack>
         </SimpleGrid>
       </Box>
