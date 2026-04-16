@@ -21,11 +21,11 @@ services:
     environment:
       MONGO_URI: mongodb://mongo:27017/elicitation
       FLASK_ENV: development
-      ADMIN_PASSWORD_FILE: /run/secrets/admin_password
-      OAUTH2_CLIENT_SECRET_FILE: /run/secrets/oauth2_client_secret
-    secrets:
-      - admin_password
-      - oauth2_client_secret
+      ADMIN_PASSWORD: ${MCDA_UP_ADMIN_PASSWORD}
+      OAUTH2_CLIENT_SECRET: ${MCDA_UP_OAUTH2_SECRET}
+      # File-based secret fallback (uncomment to use mounted secret files):
+      # ADMIN_PASSWORD_FILE: /run/secrets/admin_password
+      # OAUTH2_CLIENT_SECRET_FILE: /run/secrets/oauth2_client_secret
     depends_on:
       - mongo
     volumes:
@@ -72,9 +72,3 @@ volumes:
 networks:
   elicitation-network:
     driver: bridge
-
-secrets:
-  admin_password:
-    file: ./secrets/admin_password.txt
-  oauth2_client_secret:
-    file: ./secrets/oauth2_client_secret.txt

@@ -36,11 +36,36 @@ cd UP-MAVT-Suite
 cp .env.example .env
 ```
 
-**3. Edit `.env` and set your values**
+**3. Configure secrets (choose one method)**
+
+The backend supports both direct environment injection and file-based secrets.
+
+Method A: Direct environment injection (recommended when your platform injects env vars)
+
+```env
+ADMIN_PASSWORD=${MCDA_UP_ADMIN_PASSWORD}
+OAUTH2_CLIENT_SECRET=${MCDA_UP_OAUTH2_SECRET}
+```
+
+In this mode, your deployment environment must define `MCDA_UP_ADMIN_PASSWORD` and `MCDA_UP_OAUTH2_SECRET`.
+
+Method B: File-based secrets (`*_FILE`)
+
+Set file path variables so the app reads secrets from files inside the backend container:
+
+```env
+ADMIN_PASSWORD_FILE=/run/secrets/admin_password
+OAUTH2_CLIENT_SECRET_FILE=/run/secrets/oauth2_client_secret
+```
+
+The `docker-compose.yml` backend section already includes these two lines as commented fallback settings. Uncomment them when using file-based secrets, and make sure your deployment mounts the secret files at those paths.
+
+**4. Set remaining `.env` values**
 
 | Variable | Description |
 |---|---|
-| `ADMIN_PASSWORD` | Password for the admin panel |
+| `ADMIN_PASSWORD` | Admin password consumed by the backend (required unless `ADMIN_PASSWORD_FILE` is used) |
+| `ADMIN_PASSWORD_FILE` | Optional file path containing admin password (file-based secret mode) |
 | `DISABLE_EMAIL` | Set to `true` to disable the entire email system (default: `false`). When disabled, email verification is skipped during practitioner onboarding, and all transactional emails are suppressed. SMTP/OAuth2 configuration is not required when email is disabled. |
 | `SMTP_HOST` | SMTP server hostname (leave blank to disable email, or set `DISABLE_EMAIL=true`) |
 | `SMTP_PORT` | SMTP port (e.g. `587` for STARTTLS) |
@@ -49,7 +74,8 @@ cp .env.example .env
 | `EMAIL_AUTH_MODE` | `basic` (default) or `oauth2` (required for Microsoft 365 tenants with basic auth disabled) |
 | `OAUTH2_TENANT_ID` | Microsoft Entra tenant ID (for `oauth2`) |
 | `OAUTH2_CLIENT_ID` | Microsoft Entra app client ID (for `oauth2`) |
-| `OAUTH2_CLIENT_SECRET` | Microsoft Entra app client secret (for `oauth2`) |
+| `OAUTH2_CLIENT_SECRET` | Microsoft Entra app client secret (for `oauth2`, required unless `OAUTH2_CLIENT_SECRET_FILE` is used) |
+| `OAUTH2_CLIENT_SECRET_FILE` | Optional file path containing OAuth2 client secret (file-based secret mode) |
 | `OAUTH2_SCOPE` | OAuth scope (default `https://outlook.office365.com/.default`) |
 | `OAUTH2_TOKEN_URL` | Optional OAuth token endpoint override |
 | `OAUTH2_USERNAME` | Optional SMTP identity override for XOAUTH2 (defaults to `SMTP_USER`) |
@@ -57,13 +83,13 @@ cp .env.example .env
 | `EMAIL_FROM` | Sender address shown in outgoing emails |
 | `APP_BASE_URL` | Public URL of the frontend (e.g. `https://yourdomain.com`) |
 
-**4. Build and start all services**
+**5. Build and start all services**
 
 ```bash
 docker compose up --build -d
 ```
 
-**5. Open the application**
+**6. Open the application**
 
 Navigate to [http://localhost:3000](http://localhost:3000) in your browser.
 
