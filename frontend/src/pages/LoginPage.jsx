@@ -15,7 +15,7 @@ import {
   useToast,
 } from '@chakra-ui/react'
 import axios from 'axios'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { API_URL } from '../config'
 
 function LoginPage({ onLogin, onDocumentation }) {
@@ -28,8 +28,23 @@ function LoginPage({ onLogin, onDocumentation }) {
   const [verificationError, setVerificationError] = useState('')
   const [loading, setLoading] = useState(false)
   const [verificationLoading, setVerificationLoading] = useState(false)
+  const [emailEnabled, setEmailEnabled] = useState(true)
   const uploadFileRef = useRef(null)
   const toast = useToast()
+
+  // Fetch email status on component mount
+  useEffect(() => {
+    const fetchEmailStatus = async () => {
+      try {
+        const response = await axios.get(`${API_URL}/config/email-status`)
+        setEmailEnabled(response.data.email_enabled)
+      } catch (error) {
+        // If error, assume email is enabled (graceful fallback)
+        setEmailEnabled(true)
+      }
+    }
+    fetchEmailStatus()
+  }, [])
 
   const validateEmailInput = (value) => {
     if (!String(value || '').trim()) {
@@ -109,6 +124,37 @@ function LoginPage({ onLogin, onDocumentation }) {
   }
 
   const handleCreatePractitionerSession = async () => {
+    // When email is disabled, we can create directly without email verification
+    if (!emailEnabled) {
+      setLoading(true)
+      try {
+        const response = await axios.post(`${API_URL}/study-session`, {
+          auto_generate: true,
+        })
+        const createdStudyId = response.data?.study_session_id || ''
+        onLogin(createdStudyId, createdStudyId, 'practitioner')
+        toast({
+          title: 'Study session created',
+          description: `Study code: ${createdStudyId}`,
+          status: 'success',
+          duration: 3000,
+          isClosable: true,
+        })
+      } catch (error) {
+        toast({
+          title: 'Request failed',
+          description: error.response?.data?.error || 'Failed to create study session',
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        })
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
+    // When email is enabled, require email and verification
     if (!email.trim()) {
       setVerificationError('Enter and verify your email before creating the case study.')
       return
@@ -147,7 +193,7 @@ function LoginPage({ onLogin, onDocumentation }) {
   }
 
   const handleUploadCaseStudy = async () => {
-    if (!email.trim() || !isEmailVerified) {
+    if (emailEnabled && (!email.trim() || !isEmailVerified)) {
       setVerificationError('Verify your email before uploading a case study backup.')
       return
     }
@@ -158,7 +204,9 @@ function LoginPage({ onLogin, onDocumentation }) {
     setLoading(true)
     const formData = new FormData()
     formData.append('file', file)
-    formData.append('contact_email', email.trim())
+    if (emailEnabled) {
+      formData.append('contact_email', email.trim())
+    }
 
     try {
       const response = await axios.post(
@@ -257,12 +305,18 @@ function LoginPage({ onLogin, onDocumentation }) {
   }
 
   const getPrimaryActionLabel = () => {
+    if (!emailEnabled) {
+      return 'Create case study'
+    }
     if (!verificationCodeSent) return 'Send code'
     if (!isEmailVerified) return 'Verify code'
     return 'Create case study'
   }
 
   const getPrimaryInstruction = () => {
+    if (!emailEnabled) {
+      return 'Click the button to create a new case study without email verification.'
+    }
     if (!verificationCodeSent) {
       return 'Enter your email, then click the button to send a verification code.'
     }
@@ -273,6 +327,10 @@ function LoginPage({ onLogin, onDocumentation }) {
   }
 
   const handlePrimaryAction = async () => {
+    if (!emailEnabled) {
+      await handleCreatePractitionerSession()
+      return
+    }
     if (!verificationCodeSent) {
       await handleSendVerificationCode()
       return
@@ -402,7 +460,7 @@ function LoginPage({ onLogin, onDocumentation }) {
               <Text color="gray.600" fontSize="sm">
                 {getPrimaryInstruction()}
               </Text>
-              {!isEmailVerified && (
+              {emailEnabled && !isEmailVerified && (
                 <Input
                   placeholder={!verificationCodeSent ? 'Email address' : 'Verification code'}
                   value={entryValue}
@@ -422,18 +480,18 @@ function LoginPage({ onLogin, onDocumentation }) {
                   bg="white"
                 />
               )}
-              {isEmailVerified && (
+              {emailEnabled && isEmailVerified && (
                 <Text color="green.700" fontSize="sm">
                   Verified email: {email}
                 </Text>
               )}
-              {verificationError && (
+              {emailEnabled && verificationError && (
                 <Text color="red.600" fontSize="sm">
                   {verificationError}
                 </Text>
               )}
               <HStack spacing={3}>
-                {verificationCodeSent && !isEmailVerified && (
+                {emailEnabled && verificationCodeSent && !isEmailVerified && (
                   <Button
                     variant="ghost"
                     onClick={handleBack}
@@ -443,7 +501,7 @@ function LoginPage({ onLogin, onDocumentation }) {
                     Back
                   </Button>
                 )}
-                {isEmailVerified && (
+                {(!emailEnabled || isEmailVerified) && (
                   <Button
                     variant="outline"
                     colorScheme="blue"
@@ -456,23 +514,30 @@ function LoginPage({ onLogin, onDocumentation }) {
                 )}
                 <Button
                   colorScheme="blue"
-                  variant={isEmailVerified ? 'solid' : 'outline'}
+                  variant={emailEnabled && isEmailVerified ? 'solid' : (emailEnabled ? 'outline' : 'solid')}
                   isLoading={loading || verificationLoading}
                   onClick={handlePrimaryAction}
-                  w={verificationCodeSent ? '50%' : '100%'}
+                  w={(!emailEnabled || (emailEnabled && verificationCodeSent)) ? '50%' : '100%'}
                 >
                   {getPrimaryActionLabel()}
                 </Button>
               </HStack>
-              <Text color="gray.600" fontSize="sm">
-                No account is created in this process. Your email is used only for essential case-study
-                notifications (session confirmation, elicitation progress, completion alerts, and inactivity
-                warnings) and to send you a backup copy of your data before it is deleted. Your email address
-                is stored on servers operated by the Paul Scherrer Institute (PSI) in Switzerland and is
-                automatically and permanently deleted together with all case-study data after{' '}
-                <strong>12 months of inactivity</strong>. You may request erasure at any time by contacting
-                mcda-up@psi.ch.
-              </Text>
+              {emailEnabled && (
+                <Text color="gray.600" fontSize="sm">
+                  No account is created in this process. Your email is used only for essential case-study
+                  notifications (session confirmation, elicitation progress, completion alerts, and inactivity
+                  warnings) and to send you a backup copy of your data before it is deleted. Your email address
+                  is stored on servers operated by the Paul Scherrer Institute (PSI) in Switzerland and is
+                  automatically and permanently deleted together with all case-study data after{' '}
+                  <strong>12 months of inactivity</strong>. You may request erasure at any time by contacting
+                  mcda-up@psi.ch.
+                </Text>
+              )}
+              {!emailEnabled && (
+                <Text color="gray.600" fontSize="sm">
+                  Email notifications are disabled. You can create and manage case studies directly without providing an email address.
+                </Text>
+              )}
               <Input
                 ref={uploadFileRef}
                 type="file"
@@ -496,11 +561,13 @@ function LoginPage({ onLogin, onDocumentation }) {
             <Text fontWeight="semibold">Disclaimers</Text>
             <Text fontSize="sm" color="gray.600">This software open-source, licensed under MIT license</Text>
             <Text fontSize="sm" color="gray.600">No warranty or guarantee of fitness for purpose.</Text>
-            <Text fontSize="sm" color="gray.600">
-              Practitioner email addresses are stored solely for operational notifications and are
-              automatically deleted after 12 months of inactivity in accordance with EU GDPR and the
-              Swiss nFADP.
-            </Text>
+            {emailEnabled && (
+              <Text fontSize="sm" color="gray.600">
+                Practitioner email addresses are stored solely for operational notifications and are
+                automatically deleted after 12 months of inactivity in accordance with EU GDPR and the
+                Swiss nFADP.
+              </Text>
+            )}
           </VStack>
 
           <VStack align="start" spacing={1}>

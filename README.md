@@ -41,7 +41,8 @@ cp .env.example .env
 | Variable | Description |
 |---|---|
 | `ADMIN_PASSWORD` | Password for the admin panel |
-| `SMTP_HOST` | SMTP server hostname (leave blank to disable email) |
+| `DISABLE_EMAIL` | Set to `true` to disable the entire email system (default: `false`). When disabled, email verification is skipped during practitioner onboarding, and all transactional emails are suppressed. SMTP/OAuth2 configuration is not required when email is disabled. |
+| `SMTP_HOST` | SMTP server hostname (leave blank to disable email, or set `DISABLE_EMAIL=true`) |
 | `SMTP_PORT` | SMTP port (e.g. `587` for STARTTLS) |
 | `SMTP_USER` | SMTP username (or mailbox identity for OAuth2) |
 | `SMTP_PASSWORD` | SMTP password (only for `EMAIL_AUTH_MODE=basic`) |
