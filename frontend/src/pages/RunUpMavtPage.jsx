@@ -74,6 +74,17 @@ const HEATMAP_CELL_GAP = 4
 const HEATMAP_ROW_LABEL_WIDTH = 90
 const HEATMAP_FALLBACK_WIDTH = 920
 const HEATMAP_FALLBACK_HEIGHT = 300
+const SVG_INLINE_STYLE_PROPS = [
+  'fill',
+  'fill-opacity',
+  'stroke',
+  'stroke-opacity',
+  'stroke-width',
+  'opacity',
+  'font-family',
+  'font-size',
+  'font-weight',
+]
 
 // ============================================================================
 // MAIN COMPONENT
@@ -924,6 +935,32 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const buildSvgMarkupFromElement = (svgElement) => {
     if (!svgElement) return null
     const clonedSvg = svgElement.cloneNode(true)
+    const applyInlineComputedStyles = (sourceNode, cloneNode) => {
+      if (!(sourceNode instanceof Element) || !(cloneNode instanceof Element)) return
+      const computedStyle = window.getComputedStyle(sourceNode)
+      SVG_INLINE_STYLE_PROPS.forEach((property) => {
+        const value = computedStyle.getPropertyValue(property)
+        if (!value) return
+        cloneNode.style.setProperty(property, value)
+      })
+
+      const sourceChildren = sourceNode.children
+      const cloneChildren = cloneNode.children
+      const childCount = Math.min(sourceChildren.length, cloneChildren.length)
+      for (let childIndex = 0; childIndex < childCount; childIndex += 1) {
+        applyInlineComputedStyles(sourceChildren[childIndex], cloneChildren[childIndex])
+      }
+    }
+
+    applyInlineComputedStyles(svgElement, clonedSvg)
+    const bounds = svgElement.getBoundingClientRect()
+    const width = Math.max(1, Math.round(bounds.width || DEFAULT_PNG_WIDTH))
+    const height = Math.max(1, Math.round(bounds.height || DEFAULT_PNG_HEIGHT))
+    clonedSvg.setAttribute('width', String(width))
+    clonedSvg.setAttribute('height', String(height))
+    if (!clonedSvg.getAttribute('viewBox')) {
+      clonedSvg.setAttribute('viewBox', `0 0 ${width} ${height}`)
+    }
     clonedSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
     clonedSvg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
     return new XMLSerializer().serializeToString(clonedSvg)
