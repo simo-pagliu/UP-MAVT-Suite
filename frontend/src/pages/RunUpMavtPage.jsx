@@ -1164,7 +1164,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
         const imageTargets = []
 
-        chartTargets.forEach((target) => {
+        for (const target of chartTargets) {
           if (target.type === 'weight-space') {
             const weightSpaceRendered = buildWeightSpacePlotSvg({
               data: weightSpaceData,
@@ -1175,33 +1175,33 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
               isHierarchicalStudy,
               solutionCount: weightSpaceSolutionCount,
             })
-            if (!weightSpaceRendered?.svgMarkup) return
+            if (!weightSpaceRendered?.svgMarkup) continue
             imageTargets.push({
               filenameBase: target.filenameBase,
               svgMarkup: weightSpaceRendered.svgMarkup,
               width: weightSpaceRendered.width,
               height: weightSpaceRendered.height,
             })
-            return
+            continue
           }
 
           const container = document.querySelector(`[data-export-id="${target.exportId}"]`)
           const svgElement = getPlotSvgElement(container)
-          if (!svgElement) return
+          if (!svgElement) continue
           const svgMarkup = buildSvgMarkupFromElement(svgElement)
-          if (!svgMarkup) return
+          if (!svgMarkup) continue
           const bounds = svgElement.getBoundingClientRect()
           const width = Math.max(1, Math.round(bounds.width || DEFAULT_PNG_WIDTH))
           const height = Math.max(1, Math.round(bounds.height || DEFAULT_PNG_HEIGHT))
           imageTargets.push({ filenameBase: target.filenameBase, svgMarkup, width, height })
-        })
+        }
 
-        heatmapTargets.forEach((target) => {
+        for (const target of heatmapTargets) {
           const svgMarkup = buildRankingHeatmapSvg({ title: target.title, results: target.results })
-          if (!svgMarkup) return
+          if (!svgMarkup) continue
           const { width, height } = getRankingHeatmapDimensions(target.results)
           imageTargets.push({ filenameBase: target.filenameBase, svgMarkup, width, height })
-        })
+        }
 
         if (imageTargets.length > 0) {
           exportedArtifacts += 1
@@ -1861,14 +1861,14 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                             <IconButton
                               aria-label="Download declared vs computed ratios image"
                               icon={<DownloadIcon />}
-                                size="sm"
-                                variant="ghost"
-                                position="absolute"
-                                top={2}
-                                right={2}
-                                zIndex={2}
-                                onClick={() => handleDownloadChartPng('step1_declared_computed_ratios', 'declared_computed_ratios')}
-                              />
+                              size="sm"
+                              variant="ghost"
+                              position="absolute"
+                              top={2}
+                              right={2}
+                              zIndex={2}
+                              onClick={() => handleDownloadChartPng('step1_declared_computed_ratios', 'declared_computed_ratios')}
+                            />
                           </Tooltip>
                           <ResponsiveContainer width="100%" height={Math.max(300, step1ConsistencyComparisons.length * 28 + 100)}>
                             <ScatterChart
@@ -2488,6 +2488,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     </Text>
                     <HStack spacing={3} flexWrap="wrap">
                       <Button
+                        leftIcon={<DownloadIcon />}
                         colorScheme="blue"
                         variant="solid"
                         onClick={onExportResultsOpen}
