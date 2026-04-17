@@ -451,16 +451,15 @@ function LoginPage({ onLogin, onDocumentation }) {
             <VStack spacing={4} align="stretch">
               <Box>
                 <Heading size="md" mb={2}>
-                  Do you want to:
+                  Start here
                 </Heading>
-                <Text color="gray.600" fontSize="sm">
-                  Access an existing session, create a new session, or upload a case study?
-                </Text>
               </Box>
-              <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3}>
+              <VStack spacing={3} align="stretch">
                 <Button
                   variant={selectedFlow === 'access' ? 'solid' : 'outline'}
                   colorScheme="blue"
+                  size="lg"
+                  w="full"
                   onClick={() => handleFlowSelection('access')}
                 >
                   Access an existing session
@@ -468,18 +467,22 @@ function LoginPage({ onLogin, onDocumentation }) {
                 <Button
                   variant={isCreateFlow ? 'solid' : 'outline'}
                   colorScheme="blue"
+                  size="lg"
+                  w="full"
                   onClick={() => handleFlowSelection('create')}
                 >
-                  Create a new session
+                  Create a new empty case study
                 </Button>
                 <Button
                   variant={isUploadFlow ? 'solid' : 'outline'}
                   colorScheme="blue"
+                  size="lg"
+                  w="full"
                   onClick={() => handleFlowSelection('upload')}
                 >
-                  Upload a case study
+                  Upload a case study (.zip file)
                 </Button>
-              </SimpleGrid>
+              </VStack>
             </VStack>
 
             {selectedFlow === 'access' && (
@@ -525,8 +528,9 @@ function LoginPage({ onLogin, onDocumentation }) {
                     Do you agree to share your email?
                   </Text>
                   <Text color="gray.600" fontSize="sm">
-                    Your email helps with session recovery, updates, and support. By providing your email, you
-                    agree to the{' '}
+                    Without your email, you may permanently lose access to this case study if you do not save your
+                    code. Your email also helps with session recovery, updates, and support. By providing your email,
+                    you agree to the{' '}
                     <Link href={PSI_TERMS_OF_USE_URL} isExternal color="blue.700">
                       PSI terms of use
                     </Link>
