@@ -965,7 +965,9 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           <Text color="gray.700">
             The workflow is designed to examine all aspects of the framework, including consensus among multiple opinions, dominance patterns,
             compensatory dynamics for selecting the aggregation model, overall uncertainty assessment, and the final results.
-            The UP-MAVT code implements two Monte Carlo approaches — "strict" and "non-strict", each serving a distinct purpose.{' '}
+            The UP-MAVT code implements two Monte Carlo approaches with distinct roles: Strict Monte Carlo (SMC) and Non-Strict Monte Carlo (NSMC).
+            {' '}SMC is used to produce per-decision-maker results, generating a value distribution for each alternative and for each decision maker; these outputs support the analysis phase.
+            {' '}NSMC, in contrast, pools subjective information across decision makers to produce one conservative, aggregated value distribution per alternative.{' '}
             <Link color="blue.600" textDecoration="underline" cursor="pointer" onClick={onMcModesOpen}>
               The logic behind these methods is detailed in this image.
             </Link>
