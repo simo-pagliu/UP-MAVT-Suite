@@ -99,8 +99,10 @@ function inlineSvgComputedStyles(sourceNode, cloneNode) {
   const computedStyle = window.getComputedStyle(sourceNode)
   SVG_INLINE_STYLE_PROPS.forEach((property) => {
     const value = computedStyle.getPropertyValue(property)
-    if (value === null || value === undefined || value.trim() === '') return
-    cloneNode.style.setProperty(property, value)
+    if (value === null || value === undefined) return
+    const normalizedValue = String(value).trim()
+    if (normalizedValue === '') return
+    cloneNode.style.setProperty(property, normalizedValue)
   })
 
   const sourceChildren = sourceNode.children

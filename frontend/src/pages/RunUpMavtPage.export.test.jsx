@@ -140,17 +140,21 @@ describe('RunUpMavtPage export helpers', () => {
     path.setAttribute('class', 'export-style')
     group.appendChild(path)
     sourceSvg.appendChild(group)
+    document.body.appendChild(sourceSvg)
 
     const cloneSvg = sourceSvg.cloneNode(true)
+    document.body.appendChild(cloneSvg)
     const clonePath = cloneSvg.querySelector('path')
     expect(clonePath.style.fill).toBe('')
     expect(clonePath.style.fillOpacity).toBe('')
 
     inlineSvgComputedStyles(sourceSvg, cloneSvg)
 
-    expect(clonePath.style.fill).toContain('25')
+    expect(clonePath.style.fill).toBe('rgb(25, 118, 210)')
     expect(clonePath.style.fillOpacity).toBe('0')
     expect(clonePath.style.strokeWidth).toBe('0')
+    document.body.removeChild(cloneSvg)
+    document.body.removeChild(sourceSvg)
     document.head.removeChild(styleTag)
   })
 })
