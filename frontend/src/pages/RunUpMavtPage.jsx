@@ -974,6 +974,160 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     image.src = svgUrl
   })
 
+  const escapeSvgText = (value) => String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+
+  const createPolylinePath = (points) => points.length > 0
+    ? `M ${points.map((point) => `${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' L ')}`
+    : ''
+
+  const createClosedAreaPath = (points, baselineY) => {
+    if (points.length === 0) return ''
+    const linePart = points.map((point) => `${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' L ')
+    const firstPoint = points[0]
+    const lastPoint = points[points.length - 1]
+    return `M ${firstPoint.x.toFixed(2)} ${baselineY.toFixed(2)} L ${linePart} L ${lastPoint.x.toFixed(2)} ${baselineY.toFixed(2)} Z`
+  }
+
+  const buildConsistencyPlotSvg = ({ title, comparisons, data }) => {
+    if (!Array.isArray(comparisons) || comparisons.length === 0 || !Array.isArray(data) || data.length === 0) return null
+
+    const width = 980
+    const top = 50
+    const right = 30
+    const bottom = 55
+    const left = 250
+    const plotWidth = width - left - right
+    const plotHeight = Math.max(220, comparisons.length * 30)
+    const height = top + plotHeight + bottom
+
+    const values = data.map((point) => Number(point?.value)).filter((value) => Number.isFinite(value))
+    const maxValue = Math.max(1, ...values)
+    const minValue = Math.min(0, ...values)
+    const yMin = -0.5
+    const yMax = Math.max(0.5, comparisons.length - 0.5)
+
+    const scaleX = (value) => left + ((value - minValue) / (maxValue - minValue || 1)) * plotWidth
+    const scaleY = (value) => top + ((yMax - value) / (yMax - yMin || 1)) * plotHeight
+
+    const xTicks = Array.from({ length: 6 }, (_, idx) => minValue + ((maxValue - minValue) * idx) / 5)
+    const yTicks = comparisons.map((comparison, idx) => ({ label: comparison, y: idx }))
+
+    const declaredPoints = data.filter((point) => point?.type === 'declared')
+    const computedPoints = data.filter((point) => point?.type === 'computed')
+
+    return `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+        <rect width="100%" height="100%" fill="#ffffff" />
+        <text x="${left}" y="26" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#1f2937">${escapeSvgText(title)}</text>
+        <text x="${left}" y="42" font-family="Arial, sans-serif" font-size="12" fill="#6b7280">Declared ratios compared to computed weight ratios</text>
+
+        ${xTicks.map((tick) => {
+          const x = scaleX(tick)
+          return `
+            <line x1="${x}" y1="${top}" x2="${x}" y2="${top + plotHeight}" stroke="#e5e7eb" stroke-width="1" />
+            <text x="${x}" y="${top + plotHeight + 22}" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#6b7280">${Number(tick).toFixed(2)}</text>
+          `
+        }).join('')}
+
+        ${yTicks.map(({ label, y }) => {
+          const yPos = scaleY(y)
+          return `
+            <line x1="${left}" y1="${yPos}" x2="${left + plotWidth}" y2="${yPos}" stroke="#f3f4f6" stroke-width="1" />
+            <text x="${left - 10}" y="${yPos + 4}" text-anchor="end" font-family="Arial, sans-serif" font-size="11" fill="#374151">${escapeSvgText(label)}</text>
+          `
+        }).join('')}
+
+        ${computedPoints.map((point) => `
+          <circle cx="${scaleX(point.value)}" cy="${scaleY(point.yPlot)}" r="4" fill="#48BB78" fill-opacity="0.72" />
+        `).join('')}
+
+        ${declaredPoints.map((point) => `
+          <polygon points="${scaleX(point.value) - 5},${scaleY(point.yPlot) - 5} ${scaleX(point.value) + 5},${scaleY(point.yPlot)} ${scaleX(point.value) - 5},${scaleY(point.yPlot) + 5} ${scaleX(point.value) - 10},${scaleY(point.yPlot)}" fill="#DD6B20" stroke="#DD6B20" />
+        `).join('')}
+
+        <line x1="${left}" y1="${top + plotHeight}" x2="${left + plotWidth}" y2="${top + plotHeight}" stroke="#9ca3af" stroke-width="1.2" />
+        <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" stroke="#9ca3af" stroke-width="1.2" />
+        <text x="${left + plotWidth / 2}" y="${height - 16}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#4b5563">Ratio value</text>
+
+        <rect x="${left + plotWidth - 280}" y="${top - 30}" width="260" height="22" rx="4" fill="#ffffff" stroke="#e5e7eb" />
+        <circle cx="${left + plotWidth - 262}" cy="${top - 19}" r="4" fill="#48BB78" fill-opacity="0.72" />
+        <text x="${left + plotWidth - 250}" y="${top - 15}" font-family="Arial, sans-serif" font-size="11" fill="#374151">Computed</text>
+        <polygon points="${left + plotWidth - 198},${top - 24} ${left + plotWidth - 188},${top - 19} ${left + plotWidth - 198},${top - 14} ${left + plotWidth - 208},${top - 19}" fill="#DD6B20" stroke="#DD6B20" />
+        <text x="${left + plotWidth - 176}" y="${top - 15}" font-family="Arial, sans-serif" font-size="11" fill="#374151">Declared</text>
+      </svg>
+    `.replace(/\n\s+/g, '\n').trim()
+  }
+
+  const buildDistributionPlotSvg = ({ title, altName, densityData, expertNames }) => {
+    if (!Array.isArray(densityData) || densityData.length === 0 || !Array.isArray(expertNames) || expertNames.length === 0) return null
+
+    const width = 980
+    const top = 50
+    const right = 30
+    const bottom = 55
+    const left = 70
+    const plotWidth = width - left - right
+    const plotHeight = 250
+    const height = top + plotHeight + bottom
+
+    const maxDensity = Math.max(0.001, ...densityData.flatMap((row) => expertNames.map((name) => Number(row?.[name]) || 0)))
+    const scaleX = (value) => left + Math.max(0, Math.min(1, value)) * plotWidth
+    const scaleY = (value) => top + ((maxDensity - value) / maxDensity) * plotHeight
+    const xTicks = [0, 0.2, 0.4, 0.6, 0.8, 1]
+
+    const series = expertNames.map((expertName, idx) => {
+      const color = STEP2_COLORS[idx % STEP2_COLORS.length]
+      const points = densityData.map((row) => ({ x: scaleX(Number(row?.x) || 0), y: scaleY(Number(row?.[expertName]) || 0) }))
+      return { expertName, color, points }
+    }).filter((entry) => entry.points.some((point) => Number.isFinite(point.x) && Number.isFinite(point.y)))
+
+    const fillPolygons = series.map((entry) => {
+      const firstPoint = entry.points[0]
+      const lastPoint = entry.points[entry.points.length - 1]
+      const polygonPoints = [
+        `${firstPoint.x.toFixed(2)},${(top + plotHeight).toFixed(2)}`,
+        ...entry.points.map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`),
+        `${lastPoint.x.toFixed(2)},${(top + plotHeight).toFixed(2)}`,
+      ].join(' ')
+      return { ...entry, polygonPoints }
+    })
+
+    return `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+        <rect width="100%" height="100%" fill="#ffffff" />
+        <text x="${left}" y="26" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#1f2937">${escapeSvgText(title)}</text>
+        <text x="${left}" y="42" font-family="Arial, sans-serif" font-size="12" fill="#6b7280">${escapeSvgText(altName)}</text>
+
+        ${xTicks.map((tick) => {
+          const x = scaleX(tick)
+          return `
+            <line x1="${x}" y1="${top}" x2="${x}" y2="${top + plotHeight}" stroke="#e5e7eb" stroke-width="1" />
+            <text x="${x}" y="${top + plotHeight + 22}" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#6b7280">${Number(tick).toFixed(1)}</text>
+          `
+        }).join('')}
+
+        <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" stroke="#9ca3af" stroke-width="1.2" />
+        <line x1="${left}" y1="${top + plotHeight}" x2="${left + plotWidth}" y2="${top + plotHeight}" stroke="#9ca3af" stroke-width="1.2" />
+        <text x="${left + plotWidth / 2}" y="${height - 16}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#4b5563">Value</text>
+
+        ${fillPolygons.map((entry, idx) => `
+          <polygon points="${entry.polygonPoints}" fill="${entry.color}" fill-opacity="0.22" stroke="none" />
+          <text x="${left + idx * 140}" y="${top - 14}" font-family="Arial, sans-serif" font-size="11" fill="${entry.color}">${escapeSvgText(entry.expertName)}</text>
+          <rect x="${left + idx * 140 - 14}" y="${top - 22}" width="10" height="10" fill="${entry.color}" fill-opacity="0.22" stroke="${entry.color}" />
+        `).join('')}
+
+        ${series.map((entry) => `
+          <path d="${createPolylinePath(entry.points)}" fill="none" stroke="${entry.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
+        `).join('')}
+      </svg>
+    `.replace(/\n\s+/g, '\n').trim()
+  }
+
   const handleDownloadChartPng = async (exportId, filenameBase) => {
     const container = document.querySelector(`[data-export-id="${exportId}"]`)
     const svgElement = getPlotSvgElement(container)
@@ -1167,52 +1321,75 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       }
 
       if (exportIncludePlotImages) {
+        const imageTargets = []
+
         const consistencyData = getConsistencyPlotData()
-        const chartTargets = buildPipelineChartExportTargets({
-          hasWeightSpacePlot: Boolean(weightSpaceData),
-          hasStep1Consistency: consistencyData.data.length > 0,
-          step2AlternativeNames: step2Results?.alternative_names,
-          step5AlternativeNames: step5Results?.alternative_names,
+        const consistencySvg = buildConsistencyPlotSvg({
+          title: 'Declared vs Computed Ratios',
+          comparisons: consistencyData.comparisons,
+          data: consistencyData.data,
         })
+        if (consistencySvg) {
+          const width = 980
+          const height = Math.max(220, 50 + Math.max(220, consistencyData.comparisons.length * 30) + 55)
+          imageTargets.push({
+            filenameBase: 'step1_declared_computed_ratios',
+            svgMarkup: consistencySvg,
+            width,
+            height,
+          })
+        }
+
+        const weightSpaceRendered = weightSpaceData
+          ? buildWeightSpacePlotSvg({
+            data: weightSpaceData,
+            orderedCriteria: (criteria || [])
+              .map((criterion) => criterion?.criterion_name)
+              .filter((name) => typeof name === 'string' && name.length > 0),
+            isNonLinearModel: useNonLinearModel,
+            isHierarchicalStudy,
+            solutionCount: weightSpaceSolutionCount,
+          })
+          : null
+
+        if (weightSpaceRendered?.svgMarkup) {
+          imageTargets.push({
+            filenameBase: 'step1_weight_space_plot',
+            svgMarkup: weightSpaceRendered.svgMarkup,
+            width: weightSpaceRendered.width,
+            height: weightSpaceRendered.height,
+          })
+        }
+
+        const appendDistributionTargets = (stepResults, stepPrefix) => {
+          if (!stepResults?.alternative_names) return
+          stepResults.alternative_names.forEach((altName, altIndex) => {
+            const distData = getDistributionDataForAlternative(stepResults, altIndex)
+            if (!distData) return
+            const svgMarkup = buildDistributionPlotSvg({
+              title: `${stepPrefix === 'step2' ? 'Distribution of Values' : 'Distribution of Values'}`,
+              altName,
+              densityData: distData.densityData,
+              expertNames: distData.expertNames,
+            })
+            if (!svgMarkup) return
+            imageTargets.push({
+              filenameBase: `${stepPrefix}_distribution_${altIndex}`,
+              svgMarkup,
+              width: 980,
+              height: 355,
+            })
+          })
+        }
+
+        appendDistributionTargets(step2Results, 'step2')
+        appendDistributionTargets(step5Results, 'step5')
+
         const heatmapTargets = buildPipelineHeatmapExports({
           step3Results,
           step4Results,
-          step6Results: exportIncludeResultsCsv ? null : step6Results,
+          step6Results,
         })
-
-        const imageTargets = []
-
-        for (const target of chartTargets) {
-          if (target.type === 'weight-space') {
-            const weightSpaceRendered = buildWeightSpacePlotSvg({
-              data: weightSpaceData,
-              orderedCriteria: (criteria || [])
-                .map((criterion) => criterion?.criterion_name)
-                .filter((name) => typeof name === 'string' && name.length > 0),
-              isNonLinearModel: useNonLinearModel,
-              isHierarchicalStudy,
-              solutionCount: weightSpaceSolutionCount,
-            })
-            if (!weightSpaceRendered?.svgMarkup) continue
-            imageTargets.push({
-              filenameBase: target.filenameBase,
-              svgMarkup: weightSpaceRendered.svgMarkup,
-              width: weightSpaceRendered.width,
-              height: weightSpaceRendered.height,
-            })
-            continue
-          }
-
-          const container = document.querySelector(`[data-export-id="${target.exportId}"]`)
-          const svgElement = getPlotSvgElement(container)
-          if (!svgElement) continue
-          const svgMarkup = buildSvgMarkupFromElement(svgElement)
-          if (!svgMarkup) continue
-          const bounds = svgElement.getBoundingClientRect()
-          const width = Math.max(1, Math.round(bounds.width || DEFAULT_PNG_WIDTH))
-          const height = Math.max(1, Math.round(bounds.height || DEFAULT_PNG_HEIGHT))
-          imageTargets.push({ filenameBase: target.filenameBase, svgMarkup, width, height })
-        }
 
         for (const target of heatmapTargets) {
           const svgMarkup = buildRankingHeatmapSvg({ title: target.title, results: target.results })
