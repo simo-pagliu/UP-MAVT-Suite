@@ -86,6 +86,31 @@ const SVG_INLINE_STYLE_PROPS = [
   'font-weight',
 ]
 
+function inlineSvgComputedStyles(sourceNode, cloneNode) {
+  if (
+    typeof window === 'undefined'
+    || typeof window.getComputedStyle !== 'function'
+    || !(sourceNode instanceof Element)
+    || !(cloneNode instanceof Element)
+  ) {
+    return
+  }
+
+  const computedStyle = window.getComputedStyle(sourceNode)
+  SVG_INLINE_STYLE_PROPS.forEach((property) => {
+    const value = computedStyle.getPropertyValue(property)
+    if (value === null || value === undefined || value.trim() === '') return
+    cloneNode.style.setProperty(property, value)
+  })
+
+  const sourceChildren = sourceNode.children
+  const cloneChildren = cloneNode.children
+  const childCount = Math.min(sourceChildren.length, cloneChildren.length)
+  for (let childIndex = 0; childIndex < childCount; childIndex += 1) {
+    inlineSvgComputedStyles(sourceChildren[childIndex], cloneChildren[childIndex])
+  }
+}
+
 // ============================================================================
 // MAIN COMPONENT
 // ============================================================================
@@ -935,24 +960,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const buildSvgMarkupFromElement = (svgElement) => {
     if (!svgElement) return null
     const clonedSvg = svgElement.cloneNode(true)
-    const applyInlineComputedStyles = (sourceNode, cloneNode) => {
-      if (!(sourceNode instanceof Element) || !(cloneNode instanceof Element)) return
-      const computedStyle = window.getComputedStyle(sourceNode)
-      SVG_INLINE_STYLE_PROPS.forEach((property) => {
-        const value = computedStyle.getPropertyValue(property)
-        if (!value) return
-        cloneNode.style.setProperty(property, value)
-      })
-
-      const sourceChildren = sourceNode.children
-      const cloneChildren = cloneNode.children
-      const childCount = Math.min(sourceChildren.length, cloneChildren.length)
-      for (let childIndex = 0; childIndex < childCount; childIndex += 1) {
-        applyInlineComputedStyles(sourceChildren[childIndex], cloneChildren[childIndex])
-      }
-    }
-
-    applyInlineComputedStyles(svgElement, clonedSvg)
+    inlineSvgComputedStyles(svgElement, clonedSvg)
     const bounds = svgElement.getBoundingClientRect()
     const width = Math.max(1, Math.round(bounds.width || DEFAULT_PNG_WIDTH))
     const height = Math.max(1, Math.round(bounds.height || DEFAULT_PNG_HEIGHT))
@@ -3544,6 +3552,7 @@ export {
   buildPipelineChartExportTargets,
   buildPipelineHeatmapExports,
   buildWeightSpacePlotSvg,
+  inlineSvgComputedStyles,
 }
 
 export default RunUpMavtPage

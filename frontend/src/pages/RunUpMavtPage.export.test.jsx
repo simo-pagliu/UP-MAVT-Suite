@@ -7,6 +7,7 @@ import {
   buildPipelineChartExportTargets,
   buildPipelineHeatmapExports,
   buildWeightSpacePlotSvg,
+  inlineSvgComputedStyles,
 } from './RunUpMavtPage'
 
 const sampleResults = {
@@ -125,5 +126,31 @@ describe('RunUpMavtPage export helpers', () => {
     expect(rendered.svgMarkup).toContain('<svg')
     expect(rendered.svgMarkup).toContain('Weight Space Plot')
     expect(rendered.svgMarkup).toContain('C2')
+  })
+
+  it('inlines computed SVG styles recursively, including zero values', () => {
+    const styleTag = document.createElement('style')
+    styleTag.textContent = '.export-style { fill: rgb(25, 118, 210); fill-opacity: 0; stroke-width: 0; }'
+    document.head.appendChild(styleTag)
+
+    const svgNs = 'http://www.w3.org/2000/svg'
+    const sourceSvg = document.createElementNS(svgNs, 'svg')
+    const group = document.createElementNS(svgNs, 'g')
+    const path = document.createElementNS(svgNs, 'path')
+    path.setAttribute('class', 'export-style')
+    group.appendChild(path)
+    sourceSvg.appendChild(group)
+
+    const cloneSvg = sourceSvg.cloneNode(true)
+    const clonePath = cloneSvg.querySelector('path')
+    expect(clonePath.style.fill).toBe('')
+    expect(clonePath.style.fillOpacity).toBe('')
+
+    inlineSvgComputedStyles(sourceSvg, cloneSvg)
+
+    expect(clonePath.style.fill).toContain('25')
+    expect(clonePath.style.fillOpacity).toBe('0')
+    expect(clonePath.style.strokeWidth).toBe('0')
+    document.head.removeChild(styleTag)
   })
 })
