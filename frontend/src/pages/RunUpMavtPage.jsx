@@ -65,6 +65,14 @@ import {
 } from '../utils/sessionUtils'
 
 const STEP2_COLORS = ['#3182CE', '#E57373', '#C77DFF', '#4DD0E1', '#38A169', '#D69E2E']
+const PNG_SCALE_FACTOR = 2
+const DEFAULT_PNG_WIDTH = 1200
+const DEFAULT_PNG_HEIGHT = 700
+const HEATMAP_CELL_SIZE = 70
+const HEATMAP_CELL_GAP = 4
+const HEATMAP_ROW_LABEL_WIDTH = 90
+const HEATMAP_FALLBACK_WIDTH = 920
+const HEATMAP_FALLBACK_HEIGHT = 300
 
 // ============================================================================
 // MAIN COMPONENT
@@ -906,7 +914,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     window.URL.revokeObjectURL(objectUrl)
   }
 
-  const makeFileSafeSlug = (value) => String(value || '')
+  const sanitizeFilename = (value) => String(value || '')
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, '_')
@@ -920,7 +928,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     return new XMLSerializer().serializeToString(clonedSvg)
   }
 
-  const renderSvgMarkupToPngBlob = (svgMarkup, width = 1200, height = 700) => new Promise((resolve, reject) => {
+  const renderSvgMarkupToPngBlob = (svgMarkup, width = DEFAULT_PNG_WIDTH, height = DEFAULT_PNG_HEIGHT) => new Promise((resolve, reject) => {
     const svgBlob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' })
     const svgUrl = window.URL.createObjectURL(svgBlob)
     const image = new Image()
@@ -932,7 +940,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       const ctx = canvas.getContext('2d')
       if (!ctx) {
         window.URL.revokeObjectURL(svgUrl)
-        reject(new Error('Unable to initialize image export canvas'))
+        reject(new Error('Canvas context could not be created for image export'))
         return
       }
       ctx.fillStyle = '#ffffff'
@@ -941,7 +949,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       canvas.toBlob((blob) => {
         window.URL.revokeObjectURL(svgUrl)
         if (!blob) {
-          reject(new Error('Unable to encode chart PNG'))
+          reject(new Error('Failed to generate PNG blob from canvas'))
           return
         }
         resolve(blob)
@@ -950,7 +958,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
     image.onerror = () => {
       window.URL.revokeObjectURL(svgUrl)
-      reject(new Error('Unable to render chart for PNG export'))
+      reject(new Error('Failed to load SVG image for PNG conversion'))
     }
 
     image.src = svgUrl
@@ -972,10 +980,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
     try {
       const bounds = svgElement.getBoundingClientRect()
-      const width = Math.max(1, Math.round(bounds.width || 1200))
-      const height = Math.max(1, Math.round(bounds.height || 700))
-      const pngBlob = await renderSvgMarkupToPngBlob(svgMarkup, width * 2, height * 2)
-      triggerDownloadFromBlob(pngBlob, `${makeFileSafeSlug(filenameBase)}.png`)
+      const width = Math.max(1, Math.round(bounds.width || DEFAULT_PNG_WIDTH))
+      const height = Math.max(1, Math.round(bounds.height || DEFAULT_PNG_HEIGHT))
+      const pngBlob = await renderSvgMarkupToPngBlob(svgMarkup, width * PNG_SCALE_FACTOR, height * PNG_SCALE_FACTOR)
+      triggerDownloadFromBlob(pngBlob, `${sanitizeFilename(filenameBase)}.png`)
     } catch (error) {
       toast({
         title: 'Unable to export image',
@@ -1000,8 +1008,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
     try {
       const { width, height } = getRankingHeatmapDimensions(results)
-      const pngBlob = await renderSvgMarkupToPngBlob(svgMarkup, width * 2, height * 2)
-      triggerDownloadFromBlob(pngBlob, `${makeFileSafeSlug(filenameBase)}.png`)
+      const pngBlob = await renderSvgMarkupToPngBlob(svgMarkup, width * PNG_SCALE_FACTOR, height * PNG_SCALE_FACTOR)
+      triggerDownloadFromBlob(pngBlob, `${sanitizeFilename(filenameBase)}.png`)
     } catch (error) {
       toast({
         title: 'Unable to export image',
@@ -1065,33 +1073,33 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
       if (exportIncludeData) {
         const dataZipExported = await handleExportWorkflowDataZip({ showSuccessToast: false })
-        if (dataZipExported) exportedFiles += 1
+        if (dataZipExported === true) exportedFiles += 1
       }
 
       if (exportIncludePng || exportIncludeSvg) {
         const svgMarkup = buildRankingHeatmapSvg({ title: 'Results Heatmap', results: step6Results })
         if (!svgMarkup) {
-          throw new Error('Run Step 6 first to export the final results image.')
+          throw new Error('Unable to generate heatmap SVG from results.')
         }
 
         if (exportIncludeSvg) {
           triggerDownloadFromBlob(
             new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' }),
-            `${makeFileSafeSlug('results_heatmap')}.svg`
+            `${sanitizeFilename('results_heatmap')}.svg`
           )
           exportedFiles += 1
         }
 
         if (exportIncludePng) {
           const { width, height } = getRankingHeatmapDimensions(step6Results)
-          const pngBlob = await renderSvgMarkupToPngBlob(svgMarkup, width * 2, height * 2)
-          triggerDownloadFromBlob(pngBlob, `${makeFileSafeSlug('results_heatmap')}.png`)
+          const pngBlob = await renderSvgMarkupToPngBlob(svgMarkup, width * PNG_SCALE_FACTOR, height * PNG_SCALE_FACTOR)
+          triggerDownloadFromBlob(pngBlob, `${sanitizeFilename('results_heatmap')}.png`)
           exportedFiles += 1
         }
       }
 
       if (exportedFiles === 0) {
-        throw new Error('No files were exported. Please verify your selections and try again.')
+        throw new Error('No files were exported despite your selections. Please try again.')
       }
 
       toast({
@@ -2509,20 +2517,21 @@ function escapeSvgText(value) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
+    .replace(/`/g, '&#96;')
 }
 
 function getRankingHeatmapDimensions(results) {
   const matrix = buildRankProbabilityMatrix(results)
   if (!matrix) {
-    return { width: 920, height: 300 }
+    return { width: HEATMAP_FALLBACK_WIDTH, height: HEATMAP_FALLBACK_HEIGHT }
   }
 
   const { alternatives } = matrix
-  const cellSize = 70
-  const cellGap = 4
-  const rowLabelWidth = 90
+  const cellSize = HEATMAP_CELL_SIZE
+  const cellGap = HEATMAP_CELL_GAP
+  const rowLabelWidth = HEATMAP_ROW_LABEL_WIDTH
   const minGridWidth = rowLabelWidth + alternatives.length * (cellSize + cellGap)
-  const width = Math.max(920, minGridWidth + 24)
+  const width = Math.max(HEATMAP_FALLBACK_WIDTH, minGridWidth + 24)
   const height = 90 + alternatives.length * (cellSize + cellGap) + 24
 
   return { width, height }
@@ -2533,13 +2542,13 @@ function buildRankingHeatmapSvg({ title, results }) {
   if (!matrix) return null
 
   const { alternatives, probabilities } = matrix
-  const cellSize = 70
-  const cellGap = 4
-  const rowLabelWidth = 90
+  const cellSize = HEATMAP_CELL_SIZE
+  const cellGap = HEATMAP_CELL_GAP
+  const rowLabelWidth = HEATMAP_ROW_LABEL_WIDTH
   const leftPad = 12
   const topPad = 44
   const textY = 24
-  const width = Math.max(920, rowLabelWidth + alternatives.length * (cellSize + cellGap) + 24)
+  const width = Math.max(HEATMAP_FALLBACK_WIDTH, rowLabelWidth + alternatives.length * (cellSize + cellGap) + 24)
   const height = topPad + (alternatives.length + 1) * (cellSize + cellGap) + 18
   const gridX = leftPad + rowLabelWidth
   const gridY = topPad
@@ -2592,9 +2601,9 @@ function RankingHeatmap({ title, results, onDownloadPng }) {
   }
 
   const { alternatives, probabilities } = matrix
-  const cellSize = 70
-  const cellGap = 4
-  const rowLabelWidth = 90
+  const cellSize = HEATMAP_CELL_SIZE
+  const cellGap = HEATMAP_CELL_GAP
+  const rowLabelWidth = HEATMAP_ROW_LABEL_WIDTH
   const minGridWidth = rowLabelWidth + alternatives.length * (cellSize + cellGap)
 
   return (

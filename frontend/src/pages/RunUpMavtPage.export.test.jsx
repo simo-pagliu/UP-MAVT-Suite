@@ -43,4 +43,26 @@ describe('RunUpMavtPage export helpers', () => {
     expect(dimensions.width).toBe(920)
     expect(dimensions.height).toBe(300)
   })
+
+  it('handles single-alternative and multi-alternative edge cases', () => {
+    const single = buildRankProbabilityMatrix({
+      alternative_names: ['Only Alt'],
+      aggregated_results: [[0.42], [0.21]],
+    })
+    expect(single.probabilities).toEqual([[1]])
+
+    const manyAlternatives = {
+      alternative_names: ['A', 'B', 'C', 'D', 'E'],
+      aggregated_results: [
+        [5, 4, 3, 2, 1],
+        [4, 5, 3, 2, 1],
+      ],
+    }
+    const svg = buildRankingHeatmapSvg({ title: 'Many', results: manyAlternatives })
+    const dimensions = getRankingHeatmapDimensions(manyAlternatives)
+
+    expect(svg).toContain('Rank 5')
+    expect(dimensions.width).toBeGreaterThanOrEqual(920)
+    expect(dimensions.height).toBeGreaterThan(300)
+  })
 })
