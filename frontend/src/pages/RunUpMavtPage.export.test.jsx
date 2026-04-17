@@ -1,10 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildRankProbabilityMatrix,
+  buildRankProbabilityCsv,
   buildRankingHeatmapSvg,
   getRankingHeatmapDimensions,
   buildPipelineChartExportTargets,
   buildPipelineHeatmapExports,
+  buildWeightSpacePlotSvg,
 } from './RunUpMavtPage'
 
 const sampleResults = {
@@ -38,6 +40,12 @@ describe('RunUpMavtPage export helpers', () => {
     expect(svg).toContain('Alt A')
     expect(svg).toContain('Rank 1')
     expect(svg).toContain('%')
+  })
+
+  it('builds CSV output for rank probabilities', () => {
+    const csv = buildRankProbabilityCsv(sampleResults)
+    expect(csv).toContain('rank,Alt A,Alt B')
+    expect(csv).toContain('1,0.666667,0.333333')
   })
 
   it('returns fallback dimensions when heatmap data is missing', () => {
@@ -83,6 +91,11 @@ describe('RunUpMavtPage export helpers', () => {
     ])
   })
 
+  it('includes weight-space target when available', () => {
+    const targets = buildPipelineChartExportTargets({ hasWeightSpacePlot: true })
+    expect(targets.map((target) => target.filenameBase)).toContain('step1_weight_space_plot')
+  })
+
   it('builds heatmap export descriptors for available steps only', () => {
     const targets = buildPipelineHeatmapExports({
       step3Results: { alternative_names: ['A'], aggregated_results: [[1]] },
@@ -100,5 +113,17 @@ describe('RunUpMavtPage export helpers', () => {
       'step4_sum_aggregation_heatmap',
       'step4_har_aggregation_heatmap',
     ])
+  })
+
+  it('builds SVG markup for weight-space export', () => {
+    const rendered = buildWeightSpacePlotSvg({
+      data: [{ C1: 0.6, C2: 0.4 }, { C1: 0.5, C2: 0.5 }],
+      orderedCriteria: ['C2', 'C1'],
+      isNonLinearModel: true,
+      solutionCount: 2,
+    })
+    expect(rendered.svgMarkup).toContain('<svg')
+    expect(rendered.svgMarkup).toContain('Weight Space Plot')
+    expect(rendered.svgMarkup).toContain('C2')
   })
 })

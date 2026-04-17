@@ -41,6 +41,7 @@ import {
 } from '@chakra-ui/react'
 import { DownloadIcon, ExternalLinkIcon } from '@chakra-ui/icons'
 import axios from 'axios'
+import JSZip from 'jszip'
 import PdfModal from '../components/PdfModal'
 
 import {
@@ -135,7 +136,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [step6Results, setStep6Results] = useState(null)
   const [exportingDataZip, setExportingDataZip] = useState(false)
   const [exportingResults, setExportingResults] = useState(false)
-  const [exportIncludeData, setExportIncludeData] = useState(true)
+  const [exportIncludeResultsCsv, setExportIncludeResultsCsv] = useState(true)
+  const [exportIncludeFullData, setExportIncludeFullData] = useState(true)
   const [exportIncludePng, setExportIncludePng] = useState(true)
   const [exportIncludeSvg, setExportIncludeSvg] = useState(false)
   // PDF Modal states
@@ -928,6 +930,15 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     return new XMLSerializer().serializeToString(clonedSvg)
   }
 
+  const getPlotSvgElement = (container) => {
+    if (!container) return null
+    const rechartsSvg = container.querySelector('svg.recharts-surface')
+    if (rechartsSvg) return rechartsSvg
+    const nonButtonSvg = Array.from(container.querySelectorAll('svg'))
+      .find((candidate) => !candidate.closest('button'))
+    return nonButtonSvg || null
+  }
+
   const renderSvgMarkupToPngBlob = (svgMarkup, width = DEFAULT_PNG_WIDTH, height = DEFAULT_PNG_HEIGHT) => new Promise((resolve, reject) => {
     const svgBlob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' })
     const svgUrl = window.URL.createObjectURL(svgBlob)
@@ -966,7 +977,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
   const handleDownloadChartPng = async (exportId, filenameBase) => {
     const container = document.querySelector(`[data-export-id="${exportId}"]`)
-    const svgElement = container?.querySelector('svg')
+    const svgElement = getPlotSvgElement(container)
     const svgMarkup = buildSvgMarkupFromElement(svgElement)
     if (!svgMarkup) {
       toast({
@@ -1020,20 +1031,63 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     }
   }
 
+  const handleDownloadWeightSpacePng = async () => {
+    const rendered = buildWeightSpacePlotSvg({
+      data: weightSpaceData,
+      orderedCriteria: (criteria || [])
+        .map((criterion) => criterion?.criterion_name)
+        .filter((name) => typeof name === 'string' && name.length > 0),
+      isNonLinearModel: useNonLinearModel,
+      isHierarchicalStudy,
+      solutionCount: weightSpaceSolutionCount,
+    })
+
+    if (!rendered?.svgMarkup) {
+      toast({
+        title: 'Image not available',
+        description: 'No weight space plot is available yet.',
+        status: 'warning',
+        duration: 3500,
+      })
+      return
+    }
+
+    try {
+      const pngBlob = await renderSvgMarkupToPngBlob(
+        rendered.svgMarkup,
+        rendered.width * PNG_SCALE_FACTOR,
+        rendered.height * PNG_SCALE_FACTOR
+      )
+      triggerDownloadFromBlob(pngBlob, `${sanitizeFilename('step1_weight_space_plot')}.png`)
+    } catch (error) {
+      toast({
+        title: 'Unable to export image',
+        description: error.message,
+        status: 'error',
+        duration: 5000,
+      })
+    }
+  }
+
+  const fetchWorkflowDataZipBlob = async () => {
+    const response = await axios.get(
+      `${API_URL}/study-session/${studySessionId}/workflow-export/data`,
+      { responseType: 'blob' }
+    )
+
+    const disposition = response.headers['content-disposition'] || ''
+    const filenameMatch = disposition.match(/filename="?([^";]+)"?/i)
+    const filename = filenameMatch?.[1] || 'upmavt_data.zip'
+    return { blob: response.data, filename }
+  }
+
   const handleExportWorkflowDataZip = async ({ showSuccessToast = true } = {}) => {
     if (!studySessionId) return
 
     setExportingDataZip(true)
     try {
-      const response = await axios.get(
-        `${API_URL}/study-session/${studySessionId}/workflow-export/data`,
-        { responseType: 'blob' }
-      )
-
-      const disposition = response.headers['content-disposition'] || ''
-      const filenameMatch = disposition.match(/filename="?([^";]+)"?/i)
-      const filename = filenameMatch?.[1] || 'upmavt_data.zip'
-      triggerDownloadFromBlob(response.data, filename)
+      const { blob, filename } = await fetchWorkflowDataZipBlob()
+      triggerDownloadFromBlob(blob, filename)
 
       if (showSuccessToast) {
         toast({
@@ -1058,7 +1112,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   }
 
   const handleExportFinalResults = async () => {
-    if (!exportIncludeData && !exportIncludePng && !exportIncludeSvg) {
+    if (!exportIncludeResultsCsv && !exportIncludeFullData && !exportIncludePng && !exportIncludeSvg) {
       toast({
         title: 'Choose at least one export item',
         status: 'warning',
@@ -1069,16 +1123,35 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
     setExportingResults(true)
     try {
-      let exportedFiles = 0
+      const exportZip = new JSZip()
+      let exportedArtifacts = 0
 
-      if (exportIncludeData) {
-        const dataZipExported = await handleExportWorkflowDataZip({ showSuccessToast: false })
-        if (dataZipExported === true) exportedFiles += 1
+      if (exportIncludeResultsCsv) {
+        const resultsCsv = buildRankProbabilityCsv(step6Results)
+        if (resultsCsv) {
+          exportZip.file('results/final_results_rank_probabilities.csv', resultsCsv)
+          exportedArtifacts += 1
+        }
+      }
+
+      if (exportIncludeFullData) {
+        const { blob: fullDataZipBlob } = await fetchWorkflowDataZipBlob()
+        const fullDataZip = await JSZip.loadAsync(fullDataZipBlob)
+        const fullDataFiles = Object.values(fullDataZip.files)
+        for (const zipEntry of fullDataFiles) {
+          if (zipEntry.dir) continue
+          const content = await zipEntry.async('uint8array')
+          exportZip.file(`full_data/${zipEntry.name}`, content)
+        }
+        if (fullDataFiles.some((entry) => !entry.dir)) {
+          exportedArtifacts += 1
+        }
       }
 
       if (exportIncludePng || exportIncludeSvg) {
         const consistencyData = getConsistencyPlotData()
         const chartTargets = buildPipelineChartExportTargets({
+          hasWeightSpacePlot: Boolean(weightSpaceData),
           hasStep1Consistency: consistencyData.data.length > 0,
           step2AlternativeNames: step2Results?.alternative_names,
           step5AlternativeNames: step5Results?.alternative_names,
@@ -1089,66 +1162,82 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           step6Results,
         })
 
-        for (const target of chartTargets) {
+        const imageTargets = []
+
+        chartTargets.forEach((target) => {
+          if (target.type === 'weight-space') {
+            const weightSpaceRendered = buildWeightSpacePlotSvg({
+              data: weightSpaceData,
+              orderedCriteria: (criteria || [])
+                .map((criterion) => criterion?.criterion_name)
+                .filter((name) => typeof name === 'string' && name.length > 0),
+              isNonLinearModel: useNonLinearModel,
+              isHierarchicalStudy,
+              solutionCount: weightSpaceSolutionCount,
+            })
+            if (!weightSpaceRendered?.svgMarkup) return
+            imageTargets.push({
+              filenameBase: target.filenameBase,
+              svgMarkup: weightSpaceRendered.svgMarkup,
+              width: weightSpaceRendered.width,
+              height: weightSpaceRendered.height,
+            })
+            return
+          }
+
           const container = document.querySelector(`[data-export-id="${target.exportId}"]`)
-          const svgElement = container?.querySelector('svg')
-          if (!svgElement) continue
-
+          const svgElement = getPlotSvgElement(container)
+          if (!svgElement) return
           const svgMarkup = buildSvgMarkupFromElement(svgElement)
-          if (!svgMarkup) continue
+          if (!svgMarkup) return
+          const bounds = svgElement.getBoundingClientRect()
+          const width = Math.max(1, Math.round(bounds.width || DEFAULT_PNG_WIDTH))
+          const height = Math.max(1, Math.round(bounds.height || DEFAULT_PNG_HEIGHT))
+          imageTargets.push({ filenameBase: target.filenameBase, svgMarkup, width, height })
+        })
 
-          if (exportIncludeSvg) {
-            triggerDownloadFromBlob(
-              new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' }),
-              `${sanitizeFilename(target.filenameBase)}.svg`
-            )
-            exportedFiles += 1
-          }
+        heatmapTargets.forEach((target) => {
+          const svgMarkup = buildRankingHeatmapSvg({ title: target.title, results: target.results })
+          if (!svgMarkup) return
+          const { width, height } = getRankingHeatmapDimensions(target.results)
+          imageTargets.push({ filenameBase: target.filenameBase, svgMarkup, width, height })
+        })
 
-          if (exportIncludePng) {
-            try {
-              const bounds = svgElement.getBoundingClientRect()
-              const width = Math.max(1, Math.round(bounds.width || DEFAULT_PNG_WIDTH))
-              const height = Math.max(1, Math.round(bounds.height || DEFAULT_PNG_HEIGHT))
-              const pngBlob = await renderSvgMarkupToPngBlob(svgMarkup, width * PNG_SCALE_FACTOR, height * PNG_SCALE_FACTOR)
-              triggerDownloadFromBlob(pngBlob, `${sanitizeFilename(target.filenameBase)}.png`)
-              exportedFiles += 1
-            } catch (error) {
-              console.error(`Unable to export chart ${target.exportId} as PNG`, error)
-            }
-          }
+        if (imageTargets.length > 0) {
+          exportedArtifacts += 1
         }
 
-        for (const target of heatmapTargets) {
-          const svgMarkup = buildRankingHeatmapSvg({ title: target.title, results: target.results })
-          if (!svgMarkup) continue
-
+        for (const image of imageTargets) {
           if (exportIncludeSvg) {
-            triggerDownloadFromBlob(
-              new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' }),
-              `${sanitizeFilename(target.filenameBase)}.svg`
-            )
-            exportedFiles += 1
+            exportZip.file(`images/${sanitizeFilename(image.filenameBase)}.svg`, image.svgMarkup)
           }
 
           if (exportIncludePng) {
             try {
-              const { width, height } = getRankingHeatmapDimensions(target.results)
-              const pngBlob = await renderSvgMarkupToPngBlob(svgMarkup, width * PNG_SCALE_FACTOR, height * PNG_SCALE_FACTOR)
-              triggerDownloadFromBlob(pngBlob, `${sanitizeFilename(target.filenameBase)}.png`)
-              exportedFiles += 1
+              const pngBlob = await renderSvgMarkupToPngBlob(
+                image.svgMarkup,
+                image.width * PNG_SCALE_FACTOR,
+                image.height * PNG_SCALE_FACTOR
+              )
+              exportZip.file(`images/${sanitizeFilename(image.filenameBase)}.png`, pngBlob)
             } catch (error) {
-              console.error(`Unable to export heatmap ${target.filenameBase} as PNG`, error)
+              console.error(`Unable to export ${image.filenameBase} as PNG`, error)
             }
           }
         }
       }
 
+      if (!exportedArtifacts) {
+        exportZip.file('README.txt', 'No selected artifacts were available for this session export.')
+      }
+
+      const zipBlob = await exportZip.generateAsync({ type: 'blob' })
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+      triggerDownloadFromBlob(zipBlob, `upmavt_export_${timestamp}.zip`)
+
       toast({
         title: 'Results exported',
-        description: exportedFiles > 0
-          ? `Downloaded ${exportedFiles} selected file${exportedFiles === 1 ? '' : 's'}.`
-          : 'Export completed.',
+        description: 'Your selected artifacts were packaged into a single ZIP download.',
         status: 'success',
         duration: 3500,
       })
@@ -1759,6 +1848,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                         isNonLinearModel={useNonLinearModel}
                         isHierarchicalStudy={isHierarchicalStudy}
                         solutionCount={weightSpaceSolutionCount}
+                        onDownloadPng={handleDownloadWeightSpacePng}
                         orderedCriteria={(criteria || [])
                           .map((criterion) => criterion?.criterion_name)
                           .filter((name) => typeof name === 'string' && name.length > 0)}
@@ -1771,14 +1861,14 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                             <IconButton
                               aria-label="Download declared vs computed ratios image"
                               icon={<DownloadIcon />}
-                              size="sm"
-                              variant="ghost"
-                              position="absolute"
-                              top={2}
-                              left={2}
-                              zIndex={2}
-                              onClick={() => handleDownloadChartPng('step1_declared_computed_ratios', 'declared_computed_ratios')}
-                            />
+                                size="sm"
+                                variant="ghost"
+                                position="absolute"
+                                top={2}
+                                right={2}
+                                zIndex={2}
+                                onClick={() => handleDownloadChartPng('step1_declared_computed_ratios', 'declared_computed_ratios')}
+                              />
                           </Tooltip>
                           <ResponsiveContainer width="100%" height={Math.max(300, step1ConsistencyComparisons.length * 28 + 100)}>
                             <ScatterChart
@@ -1967,7 +2057,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   variant="ghost"
                                   position="absolute"
                                   top={2}
-                                  left={2}
+                                  right={2}
                                   zIndex={2}
                                   onClick={() => handleDownloadChartPng(`step2_distribution_${altIndex}`, `step2_distribution_${altName}`)}
                                 />
@@ -2265,7 +2355,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   variant="ghost"
                                   position="absolute"
                                   top={2}
-                                  left={2}
+                                  right={2}
                                   zIndex={2}
                                   onClick={() => handleDownloadChartPng(`step5_distribution_${altIndex}`, `step5_distribution_${altName}`)}
                                 />
@@ -2394,23 +2484,12 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   <Divider my={4} />
                   <VStack spacing={3} align="stretch">
                     <Text color="gray.600" fontSize="sm">
-                      Download the complete workflow data ZIP after Step 6 is completed.
+                      Export the selected results artifacts from the full Run UP-MAVT pipeline.
                     </Text>
                     <HStack spacing={3} flexWrap="wrap">
                       <Button
-                        leftIcon={<DownloadIcon />}
                         colorScheme="blue"
                         variant="solid"
-                        onClick={handleExportWorkflowDataZip}
-                        isLoading={exportingDataZip}
-                        loadingText="Preparing Data ZIP"
-                        isDisabled={!getStepStatus(6)?.completed}
-                        alignSelf="flex-start"
-                      >
-                        Download Data ZIP
-                      </Button>
-                      <Button
-                        variant="outline"
                         onClick={onExportResultsOpen}
                         isDisabled={!getStepStatus(6)?.completed}
                         alignSelf="flex-start"
@@ -2446,13 +2525,19 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
             <ModalBody>
               <VStack spacing={3} align="stretch">
                 <Text fontSize="sm" color="gray.600">
-                  Select which outputs to export from the final results.
+                  Select which outputs to export from the Run UP-MAVT pipeline.
                 </Text>
                 <Checkbox
-                  isChecked={exportIncludeData}
-                  onChange={(e) => setExportIncludeData(e.target.checked)}
+                  isChecked={exportIncludeResultsCsv}
+                  onChange={(e) => setExportIncludeResultsCsv(e.target.checked)}
                 >
-                  Include CSV data (Data ZIP)
+                  Include results CSV (final rank probabilities)
+                </Checkbox>
+                <Checkbox
+                  isChecked={exportIncludeFullData}
+                  onChange={(e) => setExportIncludeFullData(e.target.checked)}
+                >
+                  Include full data (input + all Monte Carlo CSV outputs)
                 </Checkbox>
                 <Checkbox
                   isChecked={exportIncludePng}
@@ -2581,6 +2666,17 @@ function getRankingHeatmapDimensions(results) {
   return { width, height }
 }
 
+function buildRankProbabilityCsv(results) {
+  const matrix = buildRankProbabilityMatrix(results)
+  if (!matrix) return null
+
+  const headers = ['rank', ...matrix.alternatives]
+  const rows = matrix.probabilities.map((rankRow, rankIndex) => (
+    [rankIndex + 1, ...rankRow.map((probability) => Number(probability).toFixed(6))]
+  ))
+  return [headers.join(','), ...rows.map((row) => row.join(','))].join('\n')
+}
+
 function buildRankingHeatmapSvg({ title, results }) {
   const matrix = buildRankProbabilityMatrix(results)
   if (!matrix) return null
@@ -2634,6 +2730,7 @@ function buildRankingHeatmapSvg({ title, results }) {
 }
 
 function buildPipelineChartExportTargets({
+  hasWeightSpacePlot = false,
   hasStep1Consistency = false,
   step2AlternativeNames = [],
   step5AlternativeNames = [],
@@ -2653,6 +2750,12 @@ function buildPipelineChartExportTargets({
     targets.push({
       exportId: 'step1_declared_computed_ratios',
       filenameBase: 'step1_declared_computed_ratios',
+    })
+  }
+  if (hasWeightSpacePlot) {
+    targets.push({
+      type: 'weight-space',
+      filenameBase: 'step1_weight_space_plot',
     })
   }
 
@@ -2704,6 +2807,110 @@ function buildPipelineHeatmapExports({ step3Results, step4Results, step6Results 
   }
 
   return targets
+}
+
+function normalizeWeightSpaceRows(data, orderedCriteria = []) {
+  if (!data) return null
+
+  const canon = (value) => String(value || '').trim().toLowerCase()
+  const reorderCriteria = (detectedCriteria) => {
+    const detectedByCanon = new Map(detectedCriteria.map((name) => [canon(name), name]))
+    const preferred = []
+    orderedCriteria.forEach((name) => {
+      const match = detectedByCanon.get(canon(name))
+      if (match && !preferred.includes(match)) {
+        preferred.push(match)
+      }
+    })
+    const remainder = detectedCriteria.filter((name) => !preferred.includes(name))
+    return [...preferred, ...remainder]
+  }
+
+  if (!Array.isArray(data) && typeof data === 'object' && Object.keys(data).length > 0) {
+    const criteria = reorderCriteria(Object.keys(data))
+    const criterionToValues = criteria.reduce((acc, criterion) => {
+      const rawValues = Array.isArray(data[criterion]) ? data[criterion] : [data[criterion]]
+      acc[criterion] = rawValues
+        .map((value) => (typeof value === 'number' ? value : Number(value)))
+        .filter((value) => Number.isFinite(value))
+      return acc
+    }, {})
+    const maxWeight = Math.max(0.001, ...criteria.flatMap((criterion) => criterionToValues[criterion]))
+    return { criteria, criterionToValues, maxWeight }
+  }
+
+  if (!Array.isArray(data) || data.length === 0) return null
+
+  const allDetected = Array.from(
+    new Set(
+      data
+        .filter((row) => row && typeof row === 'object')
+        .flatMap((row) => Object.keys(row))
+    )
+  )
+  const criteria = reorderCriteria(allDetected)
+  const criterionToValues = criteria.reduce((acc, criterion) => {
+    acc[criterion] = data
+      .map((solution) => (typeof solution?.[criterion] === 'number' ? solution[criterion] : Number(solution?.[criterion] || 0)))
+      .filter((value) => Number.isFinite(value))
+    return acc
+  }, {})
+  const maxWeight = Math.max(0.001, ...criteria.flatMap((criterion) => criterionToValues[criterion]))
+  return { criteria, criterionToValues, maxWeight }
+}
+
+function buildWeightSpacePlotSvg({
+  data,
+  orderedCriteria = [],
+  isNonLinearModel = false,
+  isHierarchicalStudy = false,
+  solutionCount = 0,
+}) {
+  const normalized = normalizeWeightSpaceRows(data, orderedCriteria)
+  if (!normalized || normalized.criteria.length === 0) return null
+
+  const methodLabel = isHierarchicalStudy ? 'PILE-BWT' : 'BWT'
+  const explanationText = isNonLinearModel
+    ? `${methodLabel} non-linear model (${solutionCount} solution${solutionCount === 1 ? '' : 's'})`
+    : `${methodLabel} linear model`
+
+  const rowHeight = 24
+  const topPad = 58
+  const leftLabel = 220
+  const plotWidth = 760
+  const width = leftLabel + plotWidth + 20
+  const height = topPad + normalized.criteria.length * rowHeight + 50
+  const axisMax = normalized.maxWeight * 1.1
+
+  const rowsMarkup = normalized.criteria.map((criterion, rowIndex) => {
+    const y = topPad + rowIndex * rowHeight
+    const values = normalized.criterionToValues[criterion] || []
+    const marks = values.map((weight) => {
+      const x = leftLabel + (Number(weight) / axisMax) * plotWidth
+      return `<rect x="${x}" y="${y + 3}" width="5" height="16" rx="2" ry="2" fill="#3182CE" fill-opacity="0.75" />`
+    }).join('')
+
+    return `
+      <text x="${leftLabel - 10}" y="${y + 15}" text-anchor="end" font-size="12" fill="#1A202C">${escapeSvgText(criterion)}</text>
+      <rect x="${leftLabel}" y="${y + 2}" width="${plotWidth}" height="18" rx="4" ry="4" fill="#F7FAFC" />
+      ${marks}
+    `
+  }).join('')
+
+  return {
+    width,
+    height,
+    svgMarkup: `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+        <rect x="0" y="0" width="${width}" height="${height}" fill="#FFFFFF" />
+        <text x="16" y="24" font-size="16" font-weight="700" fill="#1A202C">Weight Space Plot</text>
+        <text x="16" y="42" font-size="12" fill="#4A5568">${escapeSvgText(explanationText)}</text>
+        ${rowsMarkup}
+        <text x="${leftLabel}" y="${height - 16}" font-size="11" fill="#718096">0</text>
+        <text x="${leftLabel + plotWidth}" y="${height - 16}" text-anchor="end" font-size="11" fill="#718096">${axisMax.toFixed(2)}</text>
+      </svg>
+    `.trim(),
+  }
 }
 
 function RankingHeatmap({ title, results, onDownloadPng }) {
@@ -2788,7 +2995,7 @@ function RankingHeatmap({ title, results, onDownloadPng }) {
 // ============================================================================
 // WEIGHT SPACE PLOT COMPONENT
 // ============================================================================
-function WeightSpacePlot({ data, orderedCriteria = [], isNonLinearModel = false, isHierarchicalStudy = false, solutionCount = 0 }) {
+function WeightSpacePlot({ data, orderedCriteria = [], isNonLinearModel = false, isHierarchicalStudy = false, solutionCount = 0, onDownloadPng }) {
   const reorderCriteria = (detectedCriteria) => {
     const canon = (value) => String(value || '').trim().toLowerCase()
     const detectedByCanon = new Map(detectedCriteria.map((name) => [canon(name), name]))
@@ -2839,7 +3046,22 @@ function WeightSpacePlot({ data, orderedCriteria = [], isNonLinearModel = false,
     return (
       <VStack spacing={3} align="stretch">
         {header}
-        <Box bg="white" border="1px" borderColor="gray.200" borderRadius="md" p={4}>
+        <Box bg="white" border="1px" borderColor="gray.200" borderRadius="md" p={4} position="relative">
+          {onDownloadPng && (
+            <Tooltip label="Download image as PNG" hasArrow>
+              <IconButton
+                aria-label="Download weight space plot image"
+                icon={<DownloadIcon />}
+                size="sm"
+                variant="ghost"
+                position="absolute"
+                top={2}
+                right={2}
+                zIndex={2}
+                onClick={onDownloadPng}
+              />
+            </Tooltip>
+          )}
           <VStack spacing={2} align="stretch">
             {criteria.map((criterion) => {
               const weights = data[criterion]
@@ -2919,7 +3141,22 @@ function WeightSpacePlot({ data, orderedCriteria = [], isNonLinearModel = false,
   return (
     <VStack spacing={3} align="stretch">
       {header}
-      <Box bg="white" border="1px" borderColor="gray.200" borderRadius="md" p={4}>
+      <Box bg="white" border="1px" borderColor="gray.200" borderRadius="md" p={4} position="relative">
+        {onDownloadPng && (
+          <Tooltip label="Download image as PNG" hasArrow>
+            <IconButton
+              aria-label="Download weight space plot image"
+              icon={<DownloadIcon />}
+              size="sm"
+              variant="ghost"
+              position="absolute"
+              top={2}
+              right={2}
+              zIndex={2}
+              onClick={onDownloadPng}
+            />
+          </Tooltip>
+        )}
         <VStack spacing={2} align="stretch">
           {criteria.map((criterion) => {
             const weights = criterionToValues[criterion]
@@ -3078,10 +3315,12 @@ function StepSection({
 
 export {
   buildRankProbabilityMatrix,
+  buildRankProbabilityCsv,
   buildRankingHeatmapSvg,
   getRankingHeatmapDimensions,
   buildPipelineChartExportTargets,
   buildPipelineHeatmapExports,
+  buildWeightSpacePlotSvg,
 }
 
 export default RunUpMavtPage
