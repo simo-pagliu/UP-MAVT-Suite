@@ -6,6 +6,7 @@ import {
   HStack,
   SimpleGrid,
   Button,
+  IconButton,
   Select,
   Checkbox,
   Alert,
@@ -30,6 +31,13 @@ import {
   NumberInputStepper,
   NumberIncrementStepper,
   NumberDecrementStepper,
+  Modal,
+  ModalOverlay,
+  ModalContent,
+  ModalHeader,
+  ModalCloseButton,
+  ModalBody,
+  ModalFooter,
 } from '@chakra-ui/react'
 import { DownloadIcon, ExternalLinkIcon } from '@chakra-ui/icons'
 import axios from 'axios'
@@ -118,9 +126,14 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [step4Results, setStep4Results] = useState(null)
   const [step6Results, setStep6Results] = useState(null)
   const [exportingDataZip, setExportingDataZip] = useState(false)
+  const [exportingResults, setExportingResults] = useState(false)
+  const [exportIncludeData, setExportIncludeData] = useState(true)
+  const [exportIncludePng, setExportIncludePng] = useState(true)
+  const [exportIncludeSvg, setExportIncludeSvg] = useState(false)
   // PDF Modal states
   const { isOpen: isUncertaintiesOpen, onOpen: onUncertaintiesOpen, onClose: onUncertaintiesClose } = useDisclosure()
   const { isOpen: isMcModesOpen, onOpen: onMcModesOpen, onClose: onMcModesClose } = useDisclosure()
+  const { isOpen: isExportResultsOpen, onOpen: onExportResultsOpen, onClose: onExportResultsClose } = useDisclosure()
 
   // Derived state
   const weightsComputed = workflowStatus?.weights?.computed === true
@@ -893,7 +906,113 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     window.URL.revokeObjectURL(objectUrl)
   }
 
-  const handleExportWorkflowDataZip = async () => {
+  const makeFileSafeSlug = (value) => String(value || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'export'
+
+  const buildSvgMarkupFromElement = (svgElement) => {
+    if (!svgElement) return null
+    const clonedSvg = svgElement.cloneNode(true)
+    clonedSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+    clonedSvg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
+    return new XMLSerializer().serializeToString(clonedSvg)
+  }
+
+  const renderSvgMarkupToPngBlob = (svgMarkup, width = 1200, height = 700) => new Promise((resolve, reject) => {
+    const svgBlob = new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' })
+    const svgUrl = window.URL.createObjectURL(svgBlob)
+    const image = new Image()
+
+    image.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = width
+      canvas.height = height
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        window.URL.revokeObjectURL(svgUrl)
+        reject(new Error('Unable to initialize image export canvas'))
+        return
+      }
+      ctx.fillStyle = '#ffffff'
+      ctx.fillRect(0, 0, width, height)
+      ctx.drawImage(image, 0, 0, width, height)
+      canvas.toBlob((blob) => {
+        window.URL.revokeObjectURL(svgUrl)
+        if (!blob) {
+          reject(new Error('Unable to encode chart PNG'))
+          return
+        }
+        resolve(blob)
+      }, 'image/png')
+    }
+
+    image.onerror = () => {
+      window.URL.revokeObjectURL(svgUrl)
+      reject(new Error('Unable to render chart for PNG export'))
+    }
+
+    image.src = svgUrl
+  })
+
+  const handleDownloadChartPng = async (exportId, filenameBase) => {
+    const container = document.querySelector(`[data-export-id="${exportId}"]`)
+    const svgElement = container?.querySelector('svg')
+    const svgMarkup = buildSvgMarkupFromElement(svgElement)
+    if (!svgMarkup) {
+      toast({
+        title: 'Image not available',
+        description: 'The plot is not ready for download yet.',
+        status: 'warning',
+        duration: 3500,
+      })
+      return
+    }
+
+    try {
+      const bounds = svgElement.getBoundingClientRect()
+      const width = Math.max(1, Math.round(bounds.width || 1200))
+      const height = Math.max(1, Math.round(bounds.height || 700))
+      const pngBlob = await renderSvgMarkupToPngBlob(svgMarkup, width * 2, height * 2)
+      triggerDownloadFromBlob(pngBlob, `${makeFileSafeSlug(filenameBase)}.png`)
+    } catch (error) {
+      toast({
+        title: 'Unable to export image',
+        description: error.message,
+        status: 'error',
+        duration: 5000,
+      })
+    }
+  }
+
+  const handleDownloadHeatmapPng = async (results, title, filenameBase) => {
+    const svgMarkup = buildRankingHeatmapSvg({ title, results })
+    if (!svgMarkup) {
+      toast({
+        title: 'Image not available',
+        description: 'No ranking heatmap is available yet.',
+        status: 'warning',
+        duration: 3500,
+      })
+      return
+    }
+
+    try {
+      const { width, height } = getRankingHeatmapDimensions(results)
+      const pngBlob = await renderSvgMarkupToPngBlob(svgMarkup, width * 2, height * 2)
+      triggerDownloadFromBlob(pngBlob, `${makeFileSafeSlug(filenameBase)}.png`)
+    } catch (error) {
+      toast({
+        title: 'Unable to export image',
+        description: error.message,
+        status: 'error',
+        duration: 5000,
+      })
+    }
+  }
+
+  const handleExportWorkflowDataZip = async ({ showSuccessToast = true } = {}) => {
     if (!studySessionId) return
 
     setExportingDataZip(true)
@@ -908,12 +1027,15 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       const filename = filenameMatch?.[1] || 'upmavt_data.zip'
       triggerDownloadFromBlob(response.data, filename)
 
-      toast({
-        title: 'Data ZIP exported',
-        description: 'The Run UP-MAVT data bundle was downloaded.',
-        status: 'success',
-        duration: 3500,
-      })
+      if (showSuccessToast) {
+        toast({
+          title: 'Data ZIP exported',
+          description: 'The Run UP-MAVT data bundle was downloaded.',
+          status: 'success',
+          duration: 3500,
+        })
+      }
+      return true
     } catch (error) {
       toast({
         title: 'Unable to export data ZIP',
@@ -921,8 +1043,73 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         status: 'error',
         duration: 5000,
       })
+      return false
     } finally {
       setExportingDataZip(false)
+    }
+  }
+
+  const handleExportFinalResults = async () => {
+    if (!exportIncludeData && !exportIncludePng && !exportIncludeSvg) {
+      toast({
+        title: 'Choose at least one export item',
+        status: 'warning',
+        duration: 3500,
+      })
+      return
+    }
+
+    setExportingResults(true)
+    try {
+      let exportedFiles = 0
+
+      if (exportIncludeData) {
+        const dataZipExported = await handleExportWorkflowDataZip({ showSuccessToast: false })
+        if (dataZipExported) exportedFiles += 1
+      }
+
+      if (exportIncludePng || exportIncludeSvg) {
+        const svgMarkup = buildRankingHeatmapSvg({ title: 'Results Heatmap', results: step6Results })
+        if (!svgMarkup) {
+          throw new Error('Run Step 6 first to export the final results image.')
+        }
+
+        if (exportIncludeSvg) {
+          triggerDownloadFromBlob(
+            new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' }),
+            `${makeFileSafeSlug('results_heatmap')}.svg`
+          )
+          exportedFiles += 1
+        }
+
+        if (exportIncludePng) {
+          const { width, height } = getRankingHeatmapDimensions(step6Results)
+          const pngBlob = await renderSvgMarkupToPngBlob(svgMarkup, width * 2, height * 2)
+          triggerDownloadFromBlob(pngBlob, `${makeFileSafeSlug('results_heatmap')}.png`)
+          exportedFiles += 1
+        }
+      }
+
+      if (exportedFiles === 0) {
+        throw new Error('No files were exported. Please verify your selections and try again.')
+      }
+
+      toast({
+        title: 'Results exported',
+        description: 'Selected files were downloaded successfully.',
+        status: 'success',
+        duration: 3500,
+      })
+      onExportResultsClose()
+    } catch (error) {
+      toast({
+        title: 'Unable to export results',
+        description: error.message,
+        status: 'error',
+        duration: 5000,
+      })
+    } finally {
+      setExportingResults(false)
     }
   }
 
@@ -1527,7 +1714,20 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
                       <Text mt={4}>Declared vs Computed Ratios</Text>
                       {step1ConsistencyData.length > 0 ? (
-                        <Box borderWidth={1} borderRadius="md" p={3} bg="white">
+                        <Box borderWidth={1} borderRadius="md" p={3} bg="white" position="relative" data-export-id="step1_declared_computed_ratios">
+                          <Tooltip label="Download image as PNG" hasArrow>
+                            <IconButton
+                              aria-label="Download declared vs computed ratios image"
+                              icon={<DownloadIcon />}
+                              size="sm"
+                              variant="ghost"
+                              position="absolute"
+                              top={2}
+                              left={2}
+                              zIndex={2}
+                              onClick={() => handleDownloadChartPng('step1_declared_computed_ratios', 'declared_computed_ratios')}
+                            />
+                          </Tooltip>
                           <ResponsiveContainer width="100%" height={Math.max(300, step1ConsistencyComparisons.length * 28 + 100)}>
                             <ScatterChart
                               margin={{ top: 35, right: 20, left: 10, bottom: 5 }}
@@ -1706,7 +1906,20 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                             legendItems.map((item) => [item.expertName, item.label])
                           )
                           return (
-                            <Box key={`${altName}-${altIndex}`} borderWidth={1} borderRadius="md" p={3} bg="gray.50">
+                            <Box key={`${altName}-${altIndex}`} borderWidth={1} borderRadius="md" p={3} bg="gray.50" position="relative" data-export-id={`step2_distribution_${altIndex}`}>
+                              <Tooltip label="Download image as PNG" hasArrow>
+                                <IconButton
+                                  aria-label={`Download distribution image for ${altName}`}
+                                  icon={<DownloadIcon />}
+                                  size="sm"
+                                  variant="ghost"
+                                  position="absolute"
+                                  top={2}
+                                  left={2}
+                                  zIndex={2}
+                                  onClick={() => handleDownloadChartPng(`step2_distribution_${altIndex}`, `step2_distribution_${altName}`)}
+                                />
+                              </Tooltip>
                               <Text fontWeight="semibold" fontSize="sm" mb={2}>{`Distribution of Values for ${altName}`}</Text>
                               <ResponsiveContainer width="100%" height={250}>
                                 <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 0, bottom: 24 }}>
@@ -1818,6 +2031,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     <RankingHeatmap
                       title="Dominance Heatmap"
                       results={step3Results}
+                      onDownloadPng={() => handleDownloadHeatmapPng(step3Results, 'Dominance Heatmap', 'dominance_heatmap')}
                     />
                   ) : (
                     <Box bg="gray.100" h={220} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
@@ -1874,14 +2088,17 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                       <RankingHeatmap
                         title="SUM Aggregation Heatmap"
                         results={step4Results.results_by_aggregation.weighted_sum}
+                        onDownloadPng={() => handleDownloadHeatmapPng(step4Results.results_by_aggregation.weighted_sum, 'SUM Aggregation Heatmap', 'sum_aggregation_heatmap')}
                       />
                       <RankingHeatmap
                         title="GEO Aggregation Heatmap"
                         results={step4Results.results_by_aggregation.geometric_mean}
+                        onDownloadPng={() => handleDownloadHeatmapPng(step4Results.results_by_aggregation.geometric_mean, 'GEO Aggregation Heatmap', 'geo_aggregation_heatmap')}
                       />
                       <RankingHeatmap
                         title="HAR Aggregation Heatmap"
                         results={step4Results.results_by_aggregation.harmonic_mean}
+                        onDownloadPng={() => handleDownloadHeatmapPng(step4Results.results_by_aggregation.harmonic_mean, 'HAR Aggregation Heatmap', 'har_aggregation_heatmap')}
                       />
                     </VStack>
                   ) : (
@@ -1987,7 +2204,20 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                             legendItems.map((item) => [item.expertName, item.label])
                           )
                           return (
-                            <Box key={`${altName}-${altIndex}`} borderWidth={1} borderRadius="md" p={3} bg="gray.50">
+                            <Box key={`${altName}-${altIndex}`} borderWidth={1} borderRadius="md" p={3} bg="gray.50" position="relative" data-export-id={`step5_distribution_${altIndex}`}>
+                              <Tooltip label="Download image as PNG" hasArrow>
+                                <IconButton
+                                  aria-label={`Download uncertainty distribution image for ${altName}`}
+                                  icon={<DownloadIcon />}
+                                  size="sm"
+                                  variant="ghost"
+                                  position="absolute"
+                                  top={2}
+                                  left={2}
+                                  zIndex={2}
+                                  onClick={() => handleDownloadChartPng(`step5_distribution_${altIndex}`, `step5_distribution_${altName}`)}
+                                />
+                              </Tooltip>
                               <Text fontWeight="semibold" fontSize="sm" mb={2}>{`Distribution of Values for ${altName}`}</Text>
                               <ResponsiveContainer width="100%" height={250}>
                                 <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 0, bottom: 24 }}>
@@ -2101,6 +2331,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     <RankingHeatmap
                       title="Results Heatmap"
                       results={step6Results}
+                      onDownloadPng={() => handleDownloadHeatmapPng(step6Results, 'Results Heatmap', 'results_heatmap')}
                     />
                   ) : (
                     <Box bg="gray.100" h={220} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
@@ -2113,18 +2344,28 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     <Text color="gray.600" fontSize="sm">
                       Download the complete workflow data ZIP after Step 6 is completed.
                     </Text>
-                    <Button
-                      leftIcon={<DownloadIcon />}
-                      colorScheme="blue"
-                      variant="solid"
-                      onClick={handleExportWorkflowDataZip}
-                      isLoading={exportingDataZip}
-                      loadingText="Preparing Data ZIP"
-                      isDisabled={!getStepStatus(6)?.completed}
-                      alignSelf="flex-start"
-                    >
-                      Download Data ZIP
-                    </Button>
+                    <HStack spacing={3} flexWrap="wrap">
+                      <Button
+                        leftIcon={<DownloadIcon />}
+                        colorScheme="blue"
+                        variant="solid"
+                        onClick={handleExportWorkflowDataZip}
+                        isLoading={exportingDataZip}
+                        loadingText="Preparing Data ZIP"
+                        isDisabled={!getStepStatus(6)?.completed}
+                        alignSelf="flex-start"
+                      >
+                        Download Data ZIP
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={onExportResultsOpen}
+                        isDisabled={!getStepStatus(6)?.completed}
+                        alignSelf="flex-start"
+                      >
+                        Export Results
+                      </Button>
+                    </HStack>
                   </VStack>
                 </StepSection>
               </TabPanel>
@@ -2145,6 +2386,53 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           pdfUrl="/mc_modes.pdf"
           title="Monte Carlo Modes: Strict vs Non-Strict"
         />
+        <Modal isOpen={isExportResultsOpen} onClose={onExportResultsClose} isCentered>
+          <ModalOverlay />
+          <ModalContent>
+            <ModalHeader>Export Results</ModalHeader>
+            <ModalCloseButton />
+            <ModalBody>
+              <VStack spacing={3} align="stretch">
+                <Text fontSize="sm" color="gray.600">
+                  Select which outputs to export from the final results.
+                </Text>
+                <Checkbox
+                  isChecked={exportIncludeData}
+                  onChange={(e) => setExportIncludeData(e.target.checked)}
+                >
+                  Include CSV data (Data ZIP)
+                </Checkbox>
+                <Checkbox
+                  isChecked={exportIncludePng}
+                  onChange={(e) => setExportIncludePng(e.target.checked)}
+                >
+                  Include final results image (PNG)
+                </Checkbox>
+                <Checkbox
+                  isChecked={exportIncludeSvg}
+                  onChange={(e) => setExportIncludeSvg(e.target.checked)}
+                >
+                  Include final results image (SVG)
+                </Checkbox>
+              </VStack>
+            </ModalBody>
+            <ModalFooter>
+              <HStack spacing={3}>
+                <Button variant="ghost" onClick={onExportResultsClose} isDisabled={exportingResults}>
+                  Cancel
+                </Button>
+                <Button
+                  colorScheme="blue"
+                  onClick={handleExportFinalResults}
+                  isLoading={exportingResults}
+                  loadingText="Exporting"
+                >
+                  Export
+                </Button>
+              </HStack>
+            </ModalFooter>
+          </ModalContent>
+        </Modal>
       </VStack>
     </Box>
   )
@@ -2201,7 +2489,98 @@ function getHeatColor(probability) {
   return 'blue.50'
 }
 
-function RankingHeatmap({ title, results }) {
+function getHeatColorHex(probability) {
+  if (probability >= 0.9) return '#1A365D'
+  if (probability >= 0.8) return '#2A4365'
+  if (probability >= 0.7) return '#2C5282'
+  if (probability >= 0.6) return '#2B6CB0'
+  if (probability >= 0.5) return '#3182CE'
+  if (probability >= 0.4) return '#4299E1'
+  if (probability >= 0.3) return '#63B3ED'
+  if (probability >= 0.2) return '#90CDF4'
+  if (probability >= 0.1) return '#BEE3F8'
+  return '#EBF8FF'
+}
+
+function escapeSvgText(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function getRankingHeatmapDimensions(results) {
+  const matrix = buildRankProbabilityMatrix(results)
+  if (!matrix) {
+    return { width: 920, height: 300 }
+  }
+
+  const { alternatives } = matrix
+  const cellSize = 70
+  const cellGap = 4
+  const rowLabelWidth = 90
+  const minGridWidth = rowLabelWidth + alternatives.length * (cellSize + cellGap)
+  const width = Math.max(920, minGridWidth + 24)
+  const height = 90 + alternatives.length * (cellSize + cellGap) + 24
+
+  return { width, height }
+}
+
+function buildRankingHeatmapSvg({ title, results }) {
+  const matrix = buildRankProbabilityMatrix(results)
+  if (!matrix) return null
+
+  const { alternatives, probabilities } = matrix
+  const cellSize = 70
+  const cellGap = 4
+  const rowLabelWidth = 90
+  const leftPad = 12
+  const topPad = 44
+  const textY = 24
+  const width = Math.max(920, rowLabelWidth + alternatives.length * (cellSize + cellGap) + 24)
+  const height = topPad + (alternatives.length + 1) * (cellSize + cellGap) + 18
+  const gridX = leftPad + rowLabelWidth
+  const gridY = topPad
+
+  const headerCells = alternatives.map((altName, colIndex) => {
+    const x = gridX + colIndex * (cellSize + cellGap) + (cellSize / 2)
+    return `<text x="${x}" y="${gridY - 10}" font-size="12" text-anchor="middle" font-weight="600" fill="#1A202C">${escapeSvgText(altName)}</text>`
+  }).join('')
+
+  const rowLabels = probabilities.map((_, rankIndex) => {
+    const y = gridY + rankIndex * (cellSize + cellGap) + (cellSize / 2) + 5
+    return `<text x="${leftPad + rowLabelWidth - 8}" y="${y}" font-size="12" text-anchor="end" font-weight="600" fill="#2D3748">Rank ${rankIndex + 1}</text>`
+  }).join('')
+
+  const cells = probabilities.map((rankRow, rankIndex) => (
+    rankRow.map((probability, colIndex) => {
+      const x = gridX + colIndex * (cellSize + cellGap)
+      const y = gridY + rankIndex * (cellSize + cellGap)
+      const color = getHeatColorHex(probability)
+      const textColor = probability >= 0.6 ? '#FFFFFF' : '#1A202C'
+      return `
+        <rect x="${x}" y="${y}" width="${cellSize}" height="${cellSize}" rx="4" ry="4" fill="${color}" />
+        <text x="${x + (cellSize / 2)}" y="${y + (cellSize / 2) + 4}" font-size="12" text-anchor="middle" font-weight="600" fill="${textColor}">
+          ${(probability * 100).toFixed(1)}%
+        </text>
+      `
+    }).join('')
+  )).join('')
+
+  return `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+      <rect x="0" y="0" width="${width}" height="${height}" fill="#FFFFFF" />
+      <text x="${leftPad}" y="${textY}" font-size="16" font-weight="700" fill="#1A202C">${escapeSvgText(title)}</text>
+      ${headerCells}
+      ${rowLabels}
+      ${cells}
+    </svg>
+  `.trim()
+}
+
+function RankingHeatmap({ title, results, onDownloadPng }) {
   const matrix = buildRankProbabilityMatrix(results)
 
   if (!matrix) {
@@ -2220,7 +2599,20 @@ function RankingHeatmap({ title, results }) {
 
   return (
     <VStack spacing={2} align="stretch">
-      <Text fontWeight="bold">{title}</Text>
+      <HStack justify="space-between" align="center">
+        <Text fontWeight="bold">{title}</Text>
+        {onDownloadPng && (
+          <Tooltip label="Download image as PNG" hasArrow>
+            <IconButton
+              aria-label={`Download ${title} image`}
+              icon={<DownloadIcon />}
+              size="sm"
+              variant="ghost"
+              onClick={onDownloadPng}
+            />
+          </Tooltip>
+        )}
+      </HStack>
 
       <Box overflowX="auto" overflowY="hidden" pb={1}>
         <VStack spacing={cellGap / 4} align="stretch" minW={`${minGridWidth}px`}>
@@ -2556,6 +2948,12 @@ function StepSection({
       </VStack>
     </VStack>
   )
+}
+
+export {
+  buildRankProbabilityMatrix,
+  buildRankingHeatmapSvg,
+  getRankingHeatmapDimensions,
 }
 
 export default RunUpMavtPage
