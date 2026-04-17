@@ -18,8 +18,9 @@ import axios from 'axios'
 import { useEffect, useRef, useState } from 'react'
 import { API_URL } from '../config'
 
+const PSI_TERMS_OF_USE_URL = 'https://www.psi.ch/en/nutzungsbedingungen'
+
 function LoginPage({ onLogin, onDocumentation }) {
-  const PRIVACY_TERMS_URL = 'https://www.psi.ch/en/nutzungsbedingungen'
   const [code, setCode] = useState('')
   const [selectedFlow, setSelectedFlow] = useState('')
   const [emailConsent, setEmailConsent] = useState(null)
@@ -257,9 +258,9 @@ function LoginPage({ onLogin, onDocumentation }) {
   }
 
   const handleFlowSelection = (nextFlow) => {
+    setCode('')
     setSelectedFlow(nextFlow)
     setEmailConsent(null)
-    setCode('')
     setEmail('')
     resetEmailVerificationState()
   }
@@ -526,8 +527,8 @@ function LoginPage({ onLogin, onDocumentation }) {
                   <Text color="gray.600" fontSize="sm">
                     Your email helps with session recovery, updates, and support. By providing your email, you
                     agree to the{' '}
-                    <Link href={PRIVACY_TERMS_URL} isExternal color="blue.700">
-                      privacy terms
+                    <Link href={PSI_TERMS_OF_USE_URL} isExternal color="blue.700">
+                      PSI terms of use
                     </Link>
                     .
                   </Text>
@@ -590,6 +591,11 @@ function LoginPage({ onLogin, onDocumentation }) {
                           {verificationError}
                         </Text>
                       )}
+                      {!emailEnabled && emailConsent === true && (
+                        <Text color="gray.600" fontSize="sm">
+                          Email verification is currently unavailable, so you can continue without email.
+                        </Text>
+                      )}
                       <HStack spacing={3}>
                         {requiresEmailVerification && verificationCodeSent && !isEmailVerified && (
                           <Button
@@ -600,11 +606,6 @@ function LoginPage({ onLogin, onDocumentation }) {
                           >
                             Back
                           </Button>
-                        )}
-                        {!emailEnabled && emailConsent === true && (
-                          <Text color="gray.600" fontSize="sm">
-                            Email verification is currently unavailable, so you can continue without email.
-                          </Text>
                         )}
                         <Button
                           colorScheme="blue"

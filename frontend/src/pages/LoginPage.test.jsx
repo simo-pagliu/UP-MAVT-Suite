@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ChakraProvider } from '@chakra-ui/react'
@@ -14,13 +14,13 @@ const renderLoginPage = (onLogin = vi.fn()) =>
     </ChakraProvider>,
   )
 
-const mockEmailStatus = (emailEnabled = true) => {
+const mockEmailEnabled = (emailEnabled = true) => {
   axios.get.mockResolvedValueOnce({ data: { email_enabled: emailEnabled } })
 }
 
 describe('LoginPage – rendering', () => {
   it('renders the title and initial access/create/upload choices', () => {
-    mockEmailStatus()
+    mockEmailEnabled()
     renderLoginPage()
     expect(screen.getByText('UP-MAVT Suite')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /access an existing session/i })).toBeInTheDocument()
@@ -36,7 +36,7 @@ describe('LoginPage – access existing session', () => {
   })
 
   it('shows access controls after choosing the access flow', async () => {
-    mockEmailStatus()
+    mockEmailEnabled()
     renderLoginPage()
     await userEvent.click(screen.getByRole('button', { name: /access an existing session/i }))
     expect(screen.getByPlaceholderText(/enter session code/i)).toBeInTheDocument()
@@ -44,7 +44,7 @@ describe('LoginPage – access existing session', () => {
   })
 
   it('shows an error toast when trying to access with an empty code', async () => {
-    mockEmailStatus()
+    mockEmailEnabled()
     renderLoginPage()
     await userEvent.click(screen.getByRole('button', { name: /access an existing session/i }))
     await userEvent.click(screen.getByRole('button', { name: /access session/i }))
@@ -53,7 +53,7 @@ describe('LoginPage – access existing session', () => {
 
   it('calls onLogin with admin role when code is admin', async () => {
     const onLogin = vi.fn()
-    mockEmailStatus()
+    mockEmailEnabled()
     renderLoginPage(onLogin)
 
     await userEvent.click(screen.getByRole('button', { name: /access an existing session/i }))
@@ -63,9 +63,21 @@ describe('LoginPage – access existing session', () => {
     expect(onLogin).toHaveBeenCalledWith(null, 'admin', 'admin')
   })
 
+  it('keeps admin access case-insensitive', async () => {
+    const onLogin = vi.fn()
+    mockEmailEnabled()
+    renderLoginPage(onLogin)
+
+    await userEvent.click(screen.getByRole('button', { name: /access an existing session/i }))
+    await userEvent.type(screen.getByPlaceholderText(/enter session code/i), 'ADMIN')
+    await userEvent.click(screen.getByRole('button', { name: /access session/i }))
+
+    expect(onLogin).toHaveBeenCalledWith(null, 'admin', 'admin')
+  })
+
   it('calls onLogin with detected session on API success', async () => {
     const onLogin = vi.fn()
-    mockEmailStatus()
+    mockEmailEnabled()
     axios.get.mockResolvedValueOnce({
       data: { exists: true, _id: 'sess-1', code: 'CODE1', type: 'stakeholder' },
     })
@@ -86,7 +98,7 @@ describe('LoginPage – create/upload without mandatory email', () => {
 
   it('creates a new empty session when user declines email sharing', async () => {
     const onLogin = vi.fn()
-    mockEmailStatus()
+    mockEmailEnabled()
     axios.post.mockResolvedValueOnce({ data: { study_session_id: 'study-1' } })
     renderLoginPage(onLogin)
 
@@ -104,7 +116,7 @@ describe('LoginPage – create/upload without mandatory email', () => {
 
   it('runs email verification when user consents, then creates a session with verified email', async () => {
     const onLogin = vi.fn()
-    mockEmailStatus()
+    mockEmailEnabled()
     axios.post
       .mockResolvedValueOnce({})
       .mockResolvedValueOnce({ data: { verification_token: 'token-123' } })
@@ -131,5 +143,22 @@ describe('LoginPage – create/upload without mandatory email', () => {
       ),
     )
     expect(onLogin).toHaveBeenCalledWith('study-2', 'study-2', 'practitioner')
+  })
+
+  it('uploads a case study without contact email when user declines email sharing', async () => {
+    const onLogin = vi.fn()
+    mockEmailEnabled()
+    axios.post.mockResolvedValueOnce({ data: { study_session_id: 'study-upload' } })
+    renderLoginPage(onLogin)
+
+    const fileInput = document.querySelector('input[type="file"]')
+    const zipFile = new File(['zip-content'], 'case-study.zip', { type: 'application/zip' })
+
+    await userEvent.click(screen.getByRole('button', { name: /upload a case study/i }))
+    await userEvent.click(screen.getByRole('button', { name: /no, continue without email/i }))
+    await userEvent.upload(fileInput, zipFile)
+
+    await waitFor(() => expect(axios.post).toHaveBeenCalled())
+    expect(onLogin).toHaveBeenCalledWith('study-upload', 'study-upload', 'practitioner')
   })
 })
