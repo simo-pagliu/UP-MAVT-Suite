@@ -2639,6 +2639,15 @@ function buildPipelineChartExportTargets({
   step5AlternativeNames = [],
 }) {
   const targets = []
+  const safeArray = (value) => (Array.isArray(value) ? value : [])
+  const addDistributionTargets = (stepPrefix, alternativeNames) => {
+    safeArray(alternativeNames).forEach((altName, index) => {
+      targets.push({
+        exportId: `${stepPrefix}_distribution_${index}`,
+        filenameBase: `${stepPrefix}_distribution_${altName || index + 1}`,
+      })
+    })
+  }
 
   if (hasStep1Consistency) {
     targets.push({
@@ -2647,19 +2656,8 @@ function buildPipelineChartExportTargets({
     })
   }
 
-  ;(Array.isArray(step2AlternativeNames) ? step2AlternativeNames : []).forEach((altName, index) => {
-    targets.push({
-      exportId: `step2_distribution_${index}`,
-      filenameBase: `step2_distribution_${altName || index + 1}`,
-    })
-  })
-
-  ;(Array.isArray(step5AlternativeNames) ? step5AlternativeNames : []).forEach((altName, index) => {
-    targets.push({
-      exportId: `step5_distribution_${index}`,
-      filenameBase: `step5_distribution_${altName || index + 1}`,
-    })
-  })
+  addDistributionTargets('step2', step2AlternativeNames)
+  addDistributionTargets('step5', step5AlternativeNames)
 
   return targets
 }
