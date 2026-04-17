@@ -1077,34 +1077,78 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       }
 
       if (exportIncludePng || exportIncludeSvg) {
-        const svgMarkup = buildRankingHeatmapSvg({ title: 'Results Heatmap', results: step6Results })
-        if (!svgMarkup) {
-          throw new Error('Unable to generate heatmap SVG from results.')
+        const consistencyData = getConsistencyPlotData()
+        const chartTargets = buildPipelineChartExportTargets({
+          hasStep1Consistency: consistencyData.data.length > 0,
+          step2AlternativeNames: step2Results?.alternative_names,
+          step5AlternativeNames: step5Results?.alternative_names,
+        })
+        const heatmapTargets = buildPipelineHeatmapExports({
+          step3Results,
+          step4Results,
+          step6Results,
+        })
+
+        for (const target of chartTargets) {
+          const container = document.querySelector(`[data-export-id="${target.exportId}"]`)
+          const svgElement = container?.querySelector('svg')
+          if (!svgElement) continue
+
+          const svgMarkup = buildSvgMarkupFromElement(svgElement)
+          if (!svgMarkup) continue
+
+          if (exportIncludeSvg) {
+            triggerDownloadFromBlob(
+              new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' }),
+              `${sanitizeFilename(target.filenameBase)}.svg`
+            )
+            exportedFiles += 1
+          }
+
+          if (exportIncludePng) {
+            try {
+              const bounds = svgElement.getBoundingClientRect()
+              const width = Math.max(1, Math.round(bounds.width || DEFAULT_PNG_WIDTH))
+              const height = Math.max(1, Math.round(bounds.height || DEFAULT_PNG_HEIGHT))
+              const pngBlob = await renderSvgMarkupToPngBlob(svgMarkup, width * PNG_SCALE_FACTOR, height * PNG_SCALE_FACTOR)
+              triggerDownloadFromBlob(pngBlob, `${sanitizeFilename(target.filenameBase)}.png`)
+              exportedFiles += 1
+            } catch (error) {
+              console.error(`Unable to export chart ${target.exportId} as PNG`, error)
+            }
+          }
         }
 
-        if (exportIncludeSvg) {
-          triggerDownloadFromBlob(
-            new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' }),
-            `${sanitizeFilename('results_heatmap')}.svg`
-          )
-          exportedFiles += 1
-        }
+        for (const target of heatmapTargets) {
+          const svgMarkup = buildRankingHeatmapSvg({ title: target.title, results: target.results })
+          if (!svgMarkup) continue
 
-        if (exportIncludePng) {
-          const { width, height } = getRankingHeatmapDimensions(step6Results)
-          const pngBlob = await renderSvgMarkupToPngBlob(svgMarkup, width * PNG_SCALE_FACTOR, height * PNG_SCALE_FACTOR)
-          triggerDownloadFromBlob(pngBlob, `${sanitizeFilename('results_heatmap')}.png`)
-          exportedFiles += 1
-        }
-      }
+          if (exportIncludeSvg) {
+            triggerDownloadFromBlob(
+              new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' }),
+              `${sanitizeFilename(target.filenameBase)}.svg`
+            )
+            exportedFiles += 1
+          }
 
-      if (exportedFiles === 0) {
-        throw new Error('No files were exported despite your selections. Please try again.')
+          if (exportIncludePng) {
+            try {
+              const { width, height } = getRankingHeatmapDimensions(target.results)
+              const pngBlob = await renderSvgMarkupToPngBlob(svgMarkup, width * PNG_SCALE_FACTOR, height * PNG_SCALE_FACTOR)
+              triggerDownloadFromBlob(pngBlob, `${sanitizeFilename(target.filenameBase)}.png`)
+              exportedFiles += 1
+            } catch (error) {
+              console.error(`Unable to export heatmap ${target.filenameBase} as PNG`, error)
+            }
+          }
+        }
       }
 
       toast({
         title: 'Results exported',
-        description: 'Selected files were downloaded successfully.',
+        description: exportedFiles > 0
+          ? `Downloaded ${exportedFiles} selected file${exportedFiles === 1 ? '' : 's'}.`
+          : 'Export completed.',
         status: 'success',
         duration: 3500,
       })
@@ -2414,13 +2458,13 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   isChecked={exportIncludePng}
                   onChange={(e) => setExportIncludePng(e.target.checked)}
                 >
-                  Include final results image (PNG)
+                  Include available pipeline images (PNG)
                 </Checkbox>
                 <Checkbox
                   isChecked={exportIncludeSvg}
                   onChange={(e) => setExportIncludeSvg(e.target.checked)}
                 >
-                  Include final results image (SVG)
+                  Include available pipeline images (SVG)
                 </Checkbox>
               </VStack>
             </ModalBody>
@@ -2587,6 +2631,81 @@ function buildRankingHeatmapSvg({ title, results }) {
       ${cells}
     </svg>
   `.trim()
+}
+
+function buildPipelineChartExportTargets({
+  hasStep1Consistency = false,
+  step2AlternativeNames = [],
+  step5AlternativeNames = [],
+}) {
+  const targets = []
+
+  if (hasStep1Consistency) {
+    targets.push({
+      exportId: 'step1_declared_computed_ratios',
+      filenameBase: 'step1_declared_computed_ratios',
+    })
+  }
+
+  ;(Array.isArray(step2AlternativeNames) ? step2AlternativeNames : []).forEach((altName, index) => {
+    targets.push({
+      exportId: `step2_distribution_${index}`,
+      filenameBase: `step2_distribution_${altName || index + 1}`,
+    })
+  })
+
+  ;(Array.isArray(step5AlternativeNames) ? step5AlternativeNames : []).forEach((altName, index) => {
+    targets.push({
+      exportId: `step5_distribution_${index}`,
+      filenameBase: `step5_distribution_${altName || index + 1}`,
+    })
+  })
+
+  return targets
+}
+
+function buildPipelineHeatmapExports({ step3Results, step4Results, step6Results }) {
+  const targets = []
+
+  if (step3Results) {
+    targets.push({
+      title: 'Dominance Heatmap',
+      filenameBase: 'step3_dominance_heatmap',
+      results: step3Results,
+    })
+  }
+
+  if (step4Results?.results_by_aggregation?.weighted_sum) {
+    targets.push({
+      title: 'SUM Aggregation Heatmap',
+      filenameBase: 'step4_sum_aggregation_heatmap',
+      results: step4Results.results_by_aggregation.weighted_sum,
+    })
+  }
+  if (step4Results?.results_by_aggregation?.geometric_mean) {
+    targets.push({
+      title: 'GEO Aggregation Heatmap',
+      filenameBase: 'step4_geo_aggregation_heatmap',
+      results: step4Results.results_by_aggregation.geometric_mean,
+    })
+  }
+  if (step4Results?.results_by_aggregation?.harmonic_mean) {
+    targets.push({
+      title: 'HAR Aggregation Heatmap',
+      filenameBase: 'step4_har_aggregation_heatmap',
+      results: step4Results.results_by_aggregation.harmonic_mean,
+    })
+  }
+
+  if (step6Results) {
+    targets.push({
+      title: 'Results Heatmap',
+      filenameBase: 'step6_results_heatmap',
+      results: step6Results,
+    })
+  }
+
+  return targets
 }
 
 function RankingHeatmap({ title, results, onDownloadPng }) {
@@ -2963,6 +3082,8 @@ export {
   buildRankProbabilityMatrix,
   buildRankingHeatmapSvg,
   getRankingHeatmapDimensions,
+  buildPipelineChartExportTargets,
+  buildPipelineHeatmapExports,
 }
 
 export default RunUpMavtPage
