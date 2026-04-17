@@ -6,8 +6,8 @@ If your user is already in the `docker` group, you can omit `sudo` from all comm
 
 ### Backend
 ```bash
-cd ./UP-MAVT-Suite/backend
-sudo docker build -t up-mavt-suite-backend .
+cd ./UP-MAVT-Suite
+sudo docker build -f backend/Dockerfile -t up-mavt-suite-backend .
 ```
 
 ### Frontend (production build)
