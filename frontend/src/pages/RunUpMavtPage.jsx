@@ -137,9 +137,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [exportingDataZip, setExportingDataZip] = useState(false)
   const [exportingResults, setExportingResults] = useState(false)
   const [exportIncludeResultsCsv, setExportIncludeResultsCsv] = useState(true)
-  const [exportIncludeFullData, setExportIncludeFullData] = useState(true)
-  const [exportIncludePng, setExportIncludePng] = useState(true)
-  const [exportIncludeSvg, setExportIncludeSvg] = useState(false)
+  const [exportIncludePlotImages, setExportIncludePlotImages] = useState(true)
+  const [exportIncludeFullData, setExportIncludeFullData] = useState(false)
   // PDF Modal states
   const { isOpen: isUncertaintiesOpen, onOpen: onUncertaintiesOpen, onClose: onUncertaintiesClose } = useDisclosure()
   const { isOpen: isMcModesOpen, onOpen: onMcModesOpen, onClose: onMcModesClose } = useDisclosure()
@@ -1112,7 +1111,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   }
 
   const handleExportFinalResults = async () => {
-    if (!exportIncludeResultsCsv && !exportIncludeFullData && !exportIncludePng && !exportIncludeSvg) {
+    if (!exportIncludeResultsCsv && !exportIncludePlotImages && !exportIncludeFullData) {
       toast({
         title: 'Choose at least one export item',
         status: 'warning',
@@ -1132,6 +1131,25 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           exportZip.file('results/final_results_rank_probabilities.csv', resultsCsv)
           exportedArtifacts += 1
         }
+
+        const finalHeatmapSvg = buildRankingHeatmapSvg({
+          title: 'Results Heatmap',
+          results: step6Results,
+        })
+        if (finalHeatmapSvg) {
+          const { width, height } = getRankingHeatmapDimensions(step6Results)
+          exportZip.file('results/final_ranking_heatmap.svg', finalHeatmapSvg)
+          try {
+            const finalHeatmapPng = await renderSvgMarkupToPngBlob(
+              finalHeatmapSvg,
+              width * PNG_SCALE_FACTOR,
+              height * PNG_SCALE_FACTOR
+            )
+            exportZip.file('results/final_ranking_heatmap.png', finalHeatmapPng)
+          } catch (error) {
+            console.error('Unable to export final ranking heatmap as PNG', error)
+          }
+        }
       }
 
       if (exportIncludeFullData) {
@@ -1148,7 +1166,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         }
       }
 
-      if (exportIncludePng || exportIncludeSvg) {
+      if (exportIncludePlotImages) {
         const consistencyData = getConsistencyPlotData()
         const chartTargets = buildPipelineChartExportTargets({
           hasWeightSpacePlot: Boolean(weightSpaceData),
@@ -1159,7 +1177,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         const heatmapTargets = buildPipelineHeatmapExports({
           step3Results,
           step4Results,
-          step6Results,
+          step6Results: exportIncludeResultsCsv ? null : step6Results,
         })
 
         const imageTargets = []
@@ -1208,21 +1226,17 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         }
 
         for (const image of imageTargets) {
-          if (exportIncludeSvg) {
-            exportZip.file(`images/${sanitizeFilename(image.filenameBase)}.svg`, image.svgMarkup)
-          }
+          exportZip.file(`images/${sanitizeFilename(image.filenameBase)}.svg`, image.svgMarkup)
 
-          if (exportIncludePng) {
-            try {
-              const pngBlob = await renderSvgMarkupToPngBlob(
-                image.svgMarkup,
-                image.width * PNG_SCALE_FACTOR,
-                image.height * PNG_SCALE_FACTOR
-              )
-              exportZip.file(`images/${sanitizeFilename(image.filenameBase)}.png`, pngBlob)
-            } catch (error) {
-              console.error(`Unable to export ${image.filenameBase} as PNG`, error)
-            }
+          try {
+            const pngBlob = await renderSvgMarkupToPngBlob(
+              image.svgMarkup,
+              image.width * PNG_SCALE_FACTOR,
+              image.height * PNG_SCALE_FACTOR
+            )
+            exportZip.file(`images/${sanitizeFilename(image.filenameBase)}.png`, pngBlob)
+          } catch (error) {
+            console.error(`Unable to export ${image.filenameBase} as PNG`, error)
           }
         }
       }
@@ -2532,25 +2546,19 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   isChecked={exportIncludeResultsCsv}
                   onChange={(e) => setExportIncludeResultsCsv(e.target.checked)}
                 >
-                  Include results CSV (final rank probabilities)
+                  Final ranking heatmap (CSV and IMAGE)
+                </Checkbox>
+                <Checkbox
+                  isChecked={exportIncludePlotImages}
+                  onChange={(e) => setExportIncludePlotImages(e.target.checked)}
+                >
+                  Plot Images (PNG and SVG)
                 </Checkbox>
                 <Checkbox
                   isChecked={exportIncludeFullData}
                   onChange={(e) => setExportIncludeFullData(e.target.checked)}
                 >
-                  Include full data (input + all Monte Carlo CSV outputs)
-                </Checkbox>
-                <Checkbox
-                  isChecked={exportIncludePng}
-                  onChange={(e) => setExportIncludePng(e.target.checked)}
-                >
-                  Include available pipeline images (PNG)
-                </Checkbox>
-                <Checkbox
-                  isChecked={exportIncludeSvg}
-                  onChange={(e) => setExportIncludeSvg(e.target.checked)}
-                >
-                  Include available pipeline images (SVG)
+                  All data for local replication
                 </Checkbox>
               </VStack>
             </ModalBody>
