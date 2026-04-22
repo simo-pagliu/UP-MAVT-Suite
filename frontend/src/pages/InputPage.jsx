@@ -906,7 +906,7 @@ function InputPage({ studySessionId }, ref) {
             <VStack align="stretch" spacing={3}>
               <Heading as="h2" size="sm">Workflow Features</Heading>
               <Text fontSize="sm" color="gray.600">
-                Choose which stakeholder workflow steps are required for this case study.
+                Choose which decision-maker workflow steps are required for this case study.
               </Text>
 
               <HStack spacing={6} wrap="wrap">

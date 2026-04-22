@@ -113,7 +113,7 @@ function LoginPage({ onLogin, onDocumentation }) {
       onLogin(data._id, data._id, data.type)
       toast({
         title: 'Session loaded',
-        description: `${data.type === 'stakeholder' ? 'Stakeholder' : 'Practitioner'} session ready`,
+        description: `${data.type === 'stakeholder' ? 'Decision-maker' : 'Practitioner'} session ready`,
         status: 'success',
         duration: 2000,
         isClosable: true,
