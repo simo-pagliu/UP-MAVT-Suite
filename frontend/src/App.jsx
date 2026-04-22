@@ -195,6 +195,15 @@ function App() {
     setShowDocumentation(!showDocumentation)
   }
 
+  /** Handles clicking the UP-MAVT Suite logo to return to homepage */
+  const handleLogoClick = () => {
+    if (isLoggedIn) {
+      handleLogout()
+    } else {
+      setShowDocumentation(false)
+    }
+  }
+
   /**
    * Stores the accessed stakeholder session and immediately fetches its
    * feature flags so the navigation reflects the correct enabled steps.
@@ -288,6 +297,7 @@ function App() {
   return (
     <Box minH="100vh" bg="gray.50">
       <Navigation
+        onLogoClick={handleLogoClick}
         isLoggedIn={isLoggedIn}
         currentRole={currentRole}
         currentPage={currentPage}

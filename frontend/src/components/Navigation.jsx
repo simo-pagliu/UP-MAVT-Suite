@@ -11,6 +11,7 @@ function Navigation({
   features = { qi: false, vf: false, bwt: false },
   onLogout,
   onDocumentation,
+  onLogoClick,
 }) {
   const baseStakeholderPages = [
     { id: 'recap', label: 'Overview', requiresSession: true },
@@ -44,15 +45,24 @@ function Navigation({
       py={4}
       boxShadow="sm"
     >
-      <HStack spacing={6} align="center" wrap="wrap">
-        <HStack spacing={3} align="center">
+      <HSButton
+          as="button"
+          variant="unstyled"
+          onClick={onLogoClick}
+          display="flex"
+          alignItems="center"
+          gap={3}
+          _hover={{ opacity: 0.8 }}
+          cursor="pointer"
+        >
           <Image
             src="/psi_01_sn.svg"
             alt="PSI logo"
             boxSize={{ base: '34px', md: '40px' }}
             objectFit="contain"
           />
-          <Heading size="md" letterSpacing="wide">UP-MAVT Suite</Heading>
+          <Heading size="md" letterSpacing="wide" color="white">UP-MAVT Suite</Heading>
+        </Buttonng size="md" letterSpacing="wide">UP-MAVT Suite</Heading>
         </HStack>
         
         {isLoggedIn && currentRole !== 'admin' && (
