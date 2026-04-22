@@ -2247,7 +2247,10 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                     isFront
                     ifOverflow="extendDomain"
                   />
-                  <RechartsTooltip />
+                  <RechartsTooltip
+                    wrapperStyle={{ pointerEvents: 'auto' }}
+                    isAnimationActive={false}
+                  />
                 </LineChart>
               </ResponsiveContainer>
             ) : (

@@ -1556,6 +1556,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                               />
                               <RechartsTooltip
                                 cursor={{ strokeDasharray: '3 3' }}
+                                wrapperStyle={{ pointerEvents: 'auto' }}
+                                isAnimationActive={false}
                                 content={({ active, payload }) => {
                                   if (!active || !payload || payload.length === 0) return null
                                   const data = payload[0].payload
@@ -1726,6 +1728,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                     label={{ value: 'Probability', angle: -90, position: 'insideLeft' }}
                                   />
                                   <RechartsTooltip
+                                    wrapperStyle={{ pointerEvents: 'auto' }}
+                                    isAnimationActive={false}
                                     formatter={(value, name) => [`${(Number(value) * 100).toFixed(2)}%`, String(name)]}
                                     labelFormatter={(v) => `Value ${Number(v).toFixed(3)}`}
                                   />
@@ -2007,6 +2011,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                     label={{ value: 'Probability', angle: -90, position: 'insideLeft' }}
                                   />
                                   <RechartsTooltip
+                                    wrapperStyle={{ pointerEvents: 'auto' }}
+                                    isAnimationActive={false}
                                     formatter={(value, name) => [`${(Number(value) * 100).toFixed(2)}%`, String(name)]}
                                     labelFormatter={(v) => `Value ${Number(v).toFixed(3)}`}
                                   />
