@@ -32,7 +32,7 @@ import {
   useDisclosure,
   useToast,
 } from '@chakra-ui/react'
-import { DeleteIcon, HamburgerIcon, RepeatIcon, CopyIcon } from '@chakra-ui/icons'
+import { DeleteIcon, HamburgerIcon, RepeatIcon, CopyIcon, LockIcon, UnlockIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { API_URL } from '../config'
@@ -175,6 +175,7 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
   const [criteria, setCriteria] = useState([])
   const [loading, setLoading] = useState(false)
   const [savingFriendlyNameById, setSavingFriendlyNameById] = useState({})
+  const [togglingLockById, setTogglingLockById] = useState({})
   const [pendingDeleteId, setPendingDeleteId] = useState(null)
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onClose: onDeleteClose } = useDisclosure()
   const deleteCancelRef = useRef()
@@ -354,7 +355,7 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
   }
 
   const handleToggleLock = async (sessionId, isLocked) => {
-    setLoading(true)
+    setTogglingLockById((prev) => ({ ...prev, [sessionId]: true }))
     try {
       await axios.put(`${API_URL}/session/${sessionId}/lock-session`)
       toast({
@@ -373,7 +374,7 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
         isClosable: true,
       })
     } finally {
-      setLoading(false)
+      setTogglingLockById((prev) => ({ ...prev, [sessionId]: false }))
     }
   }
 
@@ -690,19 +691,23 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
                     </VStack>
                   </Td>
                   <Td>
-                    <Badge
-                      colorScheme={session.session_locked ? 'red' : 'green'}
-                      cursor="pointer"
-                      display="inline-flex"
-                      alignItems="center"
-                      px={2}
-                      py={1}
-                      fontSize="xs"
-                      onClick={() => handleToggleLock(session._id, session.session_locked)}
-                      _hover={{ opacity: 0.8 }}
+                    <Tooltip
+                      label={`Current status: ${session.session_locked ? 'Locked' : 'Unlocked'}. Click to ${session.session_locked ? 'unlock' : 'lock'} this session.`}
+                      hasArrow
                     >
-                      {session.session_locked ? 'Locked' : 'Unlocked'}
-                    </Badge>
+                      <Button
+                        size="xs"
+                        leftIcon={session.session_locked ? <LockIcon /> : <UnlockIcon />}
+                        colorScheme={session.session_locked ? 'red' : 'green'}
+                        variant="solid"
+                        aria-label={session.session_locked ? 'Unlock session' : 'Lock session'}
+                        onClick={() => handleToggleLock(session._id, session.session_locked)}
+                        isLoading={Boolean(togglingLockById[session._id])}
+                        isDisabled={Boolean(togglingLockById[session._id])}
+                      >
+                        {session.session_locked ? 'Click to unlock' : 'Click to lock'}
+                      </Button>
+                    </Tooltip>
                   </Td>
                   <Td>
                     <Menu>
