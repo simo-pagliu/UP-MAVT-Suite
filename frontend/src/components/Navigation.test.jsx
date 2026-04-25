@@ -80,7 +80,7 @@ describe('Navigation – admin role', () => {
 // Navigation items – stakeholder role
 // ---------------------------------------------------------------------------
 describe('Navigation – stakeholder role', () => {
-  it('shows only enabled feature pages (+ Overview)', () => {
+  it('shows all stakeholder pages regardless of feature flags', () => {
     renderNavigation({
       isLoggedIn: true,
       currentRole: 'stakeholder',
@@ -88,8 +88,21 @@ describe('Navigation – stakeholder role', () => {
       features: { qi: true, vf: false, bwt: false },
     })
     expect(screen.getByRole('button', { name: /qualitative indicators/i })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /quantitative indicators/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /weight elicitation/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /quantitative indicators/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /weight elicitation/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /overview/i })).toBeInTheDocument()
+  })
+
+  it('still shows all stakeholder pages when every feature flag is false', () => {
+    renderNavigation({
+      isLoggedIn: true,
+      currentRole: 'stakeholder',
+      sessionId: 'sess-1',
+      features: { qi: false, vf: false, bwt: false },
+    })
+    expect(screen.getByRole('button', { name: /qualitative indicators/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /quantitative indicators/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /weight elicitation/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /overview/i })).toBeInTheDocument()
   })
 

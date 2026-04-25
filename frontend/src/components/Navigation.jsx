@@ -45,12 +45,13 @@ function Navigation({
       py={4}
       boxShadow="sm"
     >
-      <HSButton
-          as="button"
+      <HStack spacing={6} align="center" wrap="wrap">
+        <Button
           variant="unstyled"
           onClick={onLogoClick}
           display="flex"
           alignItems="center"
+          justifyContent="flex-start"
           gap={3}
           _hover={{ opacity: 0.8 }}
           cursor="pointer"
@@ -58,12 +59,20 @@ function Navigation({
           <Image
             src="/psi_01_sn.svg"
             alt="PSI logo"
-            boxSize={{ base: '34px', md: '40px' }}
+            boxSize={{ base: '68px', md: '80px' }}
             objectFit="contain"
           />
-          <Heading size="md" letterSpacing="wide" color="white">UP-MAVT Suite</Heading>
-        </Buttonng size="md" letterSpacing="wide">UP-MAVT Suite</Heading>
-        </HStack>
+          <Heading
+            size="md"
+            letterSpacing="wide"
+            color="white"
+            fontFamily='"Helvetica Neue", Helvetica, Arial, sans-serif'
+            lineHeight="1"
+            mt="3px"
+          >
+            UP-MAVT Suite
+          </Heading>
+        </Button>
         
         {isLoggedIn && currentRole !== 'admin' && (
           <>
