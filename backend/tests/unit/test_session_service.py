@@ -87,17 +87,17 @@ class TestValidateCriteria:
 # ---------------------------------------------------------------------------
 
 class TestValidateInputForFeatures:
-    def test_qi_active_requires_alternatives(self, svc):
+    def test_missing_alternatives_raises(self, svc):
         criteria = [{'criterion_name': 'X', 'unit': '', 'alternatives': []}]
-        with pytest.raises(ValidationError, match='QI requires'):
+        with pytest.raises(ValidationError, match='require at least one alternative'):
             svc.validate_input_for_features(criteria, {'qi': True, 'vf': False, 'bwt': False})
 
-    def test_vf_active_requires_names(self, svc):
-        criteria = [{'criterion_name': '', 'unit': '', 'alternatives': []}]
+    def test_missing_name_raises(self, svc):
+        criteria = [{'criterion_name': '', 'unit': '', 'alternatives': [{'name': 'A', 'value': '1'}]}]
         with pytest.raises(ValidationError, match='must have a name'):
             svc.validate_input_for_features(criteria, {'qi': False, 'vf': True, 'bwt': False})
 
-    def test_no_active_features_always_passes(self, svc):
+    def test_valid_criteria_passes_even_if_features_false(self, svc):
         svc.validate_input_for_features(VALID_CRITERIA, {'qi': False, 'vf': False, 'bwt': False})
 
 

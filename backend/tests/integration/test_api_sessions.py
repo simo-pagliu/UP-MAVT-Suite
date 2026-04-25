@@ -276,6 +276,7 @@ class TestExportSummary:
         resp = client.get(f'/api/session/{sid}/export')
         assert resp.status_code == 200
         assert 'text/csv' in resp.content_type
+        assert 'charset=utf-8' in resp.content_type
         assert b'Completed Sections' in resp.data
 
     def test_export_not_found(self, client):

@@ -224,7 +224,7 @@ class StudySessionService:
         doc = {
             'code': code,
             'input_id': None,
-            'features': {'qi': False, 'vf': False, 'bwt': False},
+            'features': {'qi': True, 'vf': True, 'bwt': True},
             'vf_method': 'mid-splitting',
             'title': str(title or '').strip(),
             'description': str(description or '').strip(),
@@ -329,11 +329,11 @@ class StudySessionService:
         if not study:
             raise NotFoundError('Study session not found')
         update_doc = {}
-        if isinstance(features, dict):
+        if features is not None:
             update_doc['features'] = {
-                'qi': bool(features.get('qi', False)),
-                'vf': bool(features.get('vf', False)),
-                'bwt': bool(features.get('bwt', False)),
+                'qi': True,
+                'vf': True,
+                'bwt': True,
             }
         normalized_method = self._normalize_vf_method(vf_method)
         if normalized_method:
@@ -501,8 +501,7 @@ class StudySessionService:
         if not input_doc:
             raise ValidationError('Study input not found')
         criteria = input_doc.get('criteria', [])
-        features = study.get('features', {'qi': False, 'vf': False, 'bwt': False})
-        self._session_svc.validate_input_for_features(criteria, features)
+        self._session_svc.validate_input_for_features(criteria, {'qi': True, 'vf': True, 'bwt': True})
         doc = {
             'name': name,
             'friendly_name': '',
