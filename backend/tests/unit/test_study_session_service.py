@@ -67,6 +67,11 @@ class TestCreate:
         assert study['title'] == ''
         assert study['description'] == ''
 
+    def test_create_sets_all_features_enabled(self, svc):
+        sid = svc.create('FEATURES-DEFAULT')
+        study = svc.get_by_id(sid)
+        assert study['features'] == {'qi': True, 'vf': True, 'bwt': True}
+
     def test_create_accepts_metadata(self, svc):
         sid = svc.create('META-SET', title='My Title', description='My Description')
         study = svc.get_by_id(sid)
@@ -111,7 +116,7 @@ class TestUpdateFeatures:
     def test_update_features_sets_booleans(self, svc, study_id):
         result = svc.update_features(study_id, {'qi': True, 'vf': False, 'bwt': True})
         assert result['features']['qi'] is True
-        assert result['features']['vf'] is False
+        assert result['features']['vf'] is True
         assert result['features']['bwt'] is True
 
     def test_update_features_not_found_raises(self, svc):

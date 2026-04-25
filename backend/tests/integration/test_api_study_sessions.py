@@ -129,7 +129,16 @@ class TestUpdateStudySession:
         })
         assert resp.status_code == 200
         assert resp.json['features']['qi'] is True
+        assert resp.json['features']['vf'] is True
         assert resp.json['features']['bwt'] is True
+
+    def test_update_features_always_returns_all_true(self, client):
+        sid = create_study(client)
+        resp = client.patch(f'/api/study-session/{sid}', json={
+            'features': {'qi': False, 'vf': False, 'bwt': False}
+        })
+        assert resp.status_code == 200
+        assert resp.json['features'] == {'qi': True, 'vf': True, 'bwt': True}
 
     def test_patch_without_features_returns_study(self, client):
         sid = create_study(client)

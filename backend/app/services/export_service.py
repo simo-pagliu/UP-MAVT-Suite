@@ -593,6 +593,11 @@ class ExportService:
     # Public export methods
     # ------------------------------------------------------------------ #
 
+    @staticmethod
+    def _csv_bytes(csv_text):
+        """Encode CSV text as UTF-8 with BOM for Excel compatibility."""
+        return csv_text.encode('utf-8-sig')
+
     def _get_session_or_raise(self, session_id):
         """Fetch a session document or raise :class:`NotFoundError`.
 
@@ -634,7 +639,7 @@ class ExportService:
             criteria_map = {}
         content = self.build_value_functions_csv(criteria, criteria_map, qi)
         filename = f'value_functions_{session.get("name", session_id)}.csv'
-        return content.encode(), filename, 'text/csv'
+        return self._csv_bytes(content), filename, 'text/csv'
 
     def export_value_functions_json(self, session_id):
         """Export a session's value functions as a JSON file.
@@ -710,7 +715,7 @@ class ExportService:
                     comp.get('type', '')
                 ])
         filename = f'bwt_{session.get("name", session_id)}.csv'
-        return output.getvalue().encode(), filename, 'text/csv'
+        return self._csv_bytes(output.getvalue()), filename, 'text/csv'
 
     def export_input_csv(self, session_id):
         """Export a session's normalised input data as a CSV file.
@@ -736,7 +741,7 @@ class ExportService:
         if not self._session_svc.is_qualitative_complete(criteria, qi) or not self._session_svc.is_value_functions_complete(criteria, vf):
             raise ValidationError('Complete qualitative indicators and value functions before export')
         content = self.build_alternatives_csv(criteria, qi)
-        return content.encode(), f'input_{session.get("name", session_id)}.csv', 'text/csv'
+        return self._csv_bytes(content), f'input_{session.get("name", session_id)}.csv', 'text/csv'
 
     def export_input_json(self, session_id):
         """Export a session's normalised input data as a JSON file.
@@ -797,7 +802,7 @@ class ExportService:
         if not isinstance(criteria, list) or not criteria:
             raise NotFoundError('No input data to export')
         content = self.build_input_raw_csv(criteria)
-        return content.encode(), f'input_raw_{session.get("name", session_id)}.csv', 'text/csv'
+        return self._csv_bytes(content), f'input_raw_{session.get("name", session_id)}.csv', 'text/csv'
 
     def export_input_data_csv(self, session_id):
         """Export a session's elicited input data as a CSV file.
@@ -825,7 +830,7 @@ class ExportService:
         if not self._session_svc.is_qualitative_complete(criteria, qi):
             raise ValidationError('Complete qualitative indicators before export')
         content = self.build_input_data_csv(criteria, qi)
-        return content.encode(), f'input_data_{session.get("name", session_id)}.csv', 'text/csv'
+        return self._csv_bytes(content), f'input_data_{session.get("name", session_id)}.csv', 'text/csv'
 
     def export_qualitative_csv(self, session_id):
         """Export a session's qualitative indicators as a CSV file.
@@ -846,7 +851,7 @@ class ExportService:
         if not self._session_svc.is_qualitative_complete(criteria, qi):
             raise ValidationError('Complete qualitative indicators before export')
         content = self.build_qualitative_csv(criteria, qi)
-        return content.encode(), f'qualitative_indicators_{session.get("name", session_id)}.csv', 'text/csv'
+        return self._csv_bytes(content), f'qualitative_indicators_{session.get("name", session_id)}.csv', 'text/csv'
 
     def export_pile_csv(self, session_id):
         """Export a session's PILE-BWT data as a CSV file.
@@ -865,7 +870,7 @@ class ExportService:
         if bwt_data is None:
             raise NotFoundError('No PILE-BWT data to export')
         content = self.build_pile_bwt_csv(bwt_data)
-        return content.encode(), f'pile_bwt_{session.get("name", session_id)}.csv', 'text/csv'
+        return self._csv_bytes(content), f'pile_bwt_{session.get("name", session_id)}.csv', 'text/csv'
 
     def export_pile_json(self, session_id):
         """Export a session's PILE-BWT data as a JSON file.
@@ -915,7 +920,7 @@ class ExportService:
             raise ValidationError('Complete value functions before exporting debug data')
         
         content = self.build_pile_bwt_debug_csv(bwt_data, vf, criteria)
-        return content.encode(), f'pile_bwt_debug_a_values_{session.get("name", session_id)}.csv', 'text/csv'
+        return self._csv_bytes(content), f'pile_bwt_debug_a_values_{session.get("name", session_id)}.csv', 'text/csv'
 
     def export_all_outputs_zip(self, session_id):
         """Package all session exports into a single ZIP archive.
@@ -952,9 +957,9 @@ class ExportService:
         pile_csv = self.build_pile_bwt_csv(bwt_data)
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-            zf.writestr(f'alternatives_{session_name}.csv', alt_csv)
-            zf.writestr(f'value_functions_{session_name}.csv', vf_csv)
-            zf.writestr(f'pile_bwt_{session_name}.csv', pile_csv)
+            zf.writestr(f'alternatives_{session_name}.csv', self._csv_bytes(alt_csv))
+            zf.writestr(f'value_functions_{session_name}.csv', self._csv_bytes(vf_csv))
+            zf.writestr(f'pile_bwt_{session_name}.csv', self._csv_bytes(pile_csv))
         buf.seek(0)
         return buf, f'outputs_{session_name}.zip', 'application/zip'
 
@@ -987,4 +992,4 @@ class ExportService:
         writer.writerow(['Value Functions Filled', has_vf])
         writer.writerow(['PILE-BWT Filled', has_bwt])
         writer.writerow(['Completed Sections', f'{completed}/3'])
-        return output.getvalue().encode(), f'output_{session.get("name", session_id)}.csv', 'text/csv'
+        return self._csv_bytes(output.getvalue()), f'output_{session.get("name", session_id)}.csv', 'text/csv'

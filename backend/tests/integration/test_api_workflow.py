@@ -263,6 +263,7 @@ class TestExportWeightSolutions:
         resp = client.get(f'/api/study-session/{study_id}/weight-solutions/export')
         assert resp.status_code == 200
         assert 'text/csv' in resp.content_type
+        assert 'charset=utf-8' in resp.content_type
         assert b'SESSION_ID' in resp.data
         assert b'ERROR' in resp.data
 
@@ -279,7 +280,7 @@ class TestExportWeightSolutionsSingle:
             f'/api/study-session/{study_id}/weight-solutions/{session_id}/export'
         )
         assert resp.status_code == 200
-        rows = list(csv.reader(io.StringIO(resp.data.decode())))
+        rows = list(csv.reader(io.StringIO(resp.data.decode('utf-8-sig'))))
         assert rows[0] == ['SOLUTION_INDEX', 'Cost', 'ERROR']
         assert rows[1] == ['0', '0.333', '0.123457']
 

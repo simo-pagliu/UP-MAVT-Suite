@@ -103,7 +103,7 @@ function OverviewPanel() {
       <SectionHeading>What is the UP-MAVT Suite?</SectionHeading>
       <Para>
         The <strong>UP-MAVT Suite</strong> (Uncertainty-Propagated Multi-Attribute Value Theory) is a
-        web-based elicitation platform that collects structured expert judgments from stakeholders and
+        web-based elicitation platform that collects structured expert judgments from decision-makers and
         uses them to drive a multi-criteria decision analysis (MCDA). The results are expressed as
         probability distributions over alternative rankings, making the inherent uncertainty in expert
         opinions explicit rather than suppressing it.
@@ -124,8 +124,8 @@ function OverviewPanel() {
       <BulletList
         items={[
           '1. A practitioner creates a study session, defines criteria and alternatives, and enables the desired elicitation instruments.',
-          '2. The practitioner generates one elicitation session code per stakeholder and shares the codes.',
-          '3. Each stakeholder logs in with their code and completes the enabled elicitation steps.',
+          '2. The practitioner generates one elicitation session code per decision-maker and shares the codes.',
+          '3. Each decision-maker logs in with their code and completes the enabled elicitation steps.',
           '4. The practitioner runs the UP-MAVT analysis: Step 1 derives criterion weights from Weight Elicitation data; Steps 2–6 run a Monte Carlo simulation that propagates uncertainty through Qualitative Indicators, Quantitative Indicators, and weight distributions to produce ranked alternative scores.',
           '5. Results (distributions, rankings, sensitivity) are available for export as CSV / JSON / ZIP.',
         ]}
@@ -204,13 +204,13 @@ function RolesPanel() {
         which MongoDB collection contains a document whose code/name matches the submitted value.
       </Para>
 
-      <SubHeading>Stakeholder</SubHeading>
+      <SubHeading>Decision-maker</SubHeading>
       <BulletList
         items={[
           'Receives a short alphanumeric code that maps to an elicitation session document in the sessions collection.',
           'Can complete Qualitative Indicators, Quantitative Indicators, and/or Weight Elicitation depending on which features the practitioner enabled.',
           'Session may be individually locked (criteria lock) or fully locked (session lock) by the practitioner.',
-          'Has no visibility of other stakeholders or of the overall study configuration.',
+          'Has no visibility of other decision-makers or of the overall study configuration.',
         ]}
       />
 
@@ -220,7 +220,7 @@ function RolesPanel() {
           'Receives a code that maps to a study session document in the study_sessions collection.',
           'Defines the decision problem: criteria, alternatives, groups, distributions.',
           'Configures enabled features (Qualitative Indicators, Quantitative Indicators, Weight Elicitation) and value-function method (mid-splitting or free-edit).',
-          'Creates and manages individual elicitation sessions for stakeholders.',
+          'Creates and manages individual elicitation sessions for decision-makers.',
           'Runs the UP-MAVT analysis and exports results.',
         ]}
       />
@@ -238,7 +238,7 @@ function RolesPanel() {
       <SectionHeading>Locking mechanisms</SectionHeading>
       <BulletList
         items={[
-          'Criteria lock (PUT /api/session/<id>/lock) — marks individual criteria as read-only for the stakeholder.',
+          'Criteria lock (PUT /api/session/<id>/lock) — marks individual criteria as read-only for the decision-maker.',
           'Session lock (PUT /api/session/<id>/lock-session) — prevents all further edits to the session.',
           'Both flags are stored as booleans on the session document and enforced on the frontend by disabling form controls.',
         ]}
@@ -267,7 +267,7 @@ function ConceptsPanel() {
 
       <SectionHeading>Qualitative Indicators</SectionHeading>
       <Para>
-        Used when a criterion has no quantitative measurement. The stakeholder:
+        Used when a criterion has no quantitative measurement. The decision-maker:
       </Para>
       <BulletList
         items={[
@@ -294,14 +294,14 @@ function ConceptsPanel() {
       <Para>Two definition methods are available (configured per study session):</Para>
       <BulletList
         items={[
-          'Mid-splitting — the stakeholder answers three indifference questions; the system derives breakpoints automatically.',
-          'Free-edit — the stakeholder adjusts up to 10 breakpoints directly on an interactive chart.',
+          'Mid-splitting — the decision-maker answers three indifference questions; the system derives breakpoints automatically.',
+          'Free-edit — the decision-maker adjusts up to 10 breakpoints directly on an interactive chart.',
         ]}
       />
 
       <SectionHeading>Weight Elicitation (Best-Worst Tradeoff)</SectionHeading>
       <Para>
-        The stakeholder identifies the most important (best) and least important (worst) criterion,
+        The decision-maker identifies the most important (best) and least important (worst) criterion,
         then rates every other criterion relative to these anchors on a 1–9 scale. The rating data is
         stored as comparison rows and later converted into weight constraints during Step 1 of the
         UP-MAVT analysis.
@@ -319,7 +319,7 @@ function ConceptsPanel() {
         ]}
       />
       <Para>
-        Each stakeholder session produces one weight vector. All weight vectors are stored in the
+        Each decision-maker session produces one weight vector. All weight vectors are stored in the
         study session document under computed_weights.weight_solutions and used as inputs to the Monte
         Carlo simulation.
       </Para>
@@ -327,7 +327,7 @@ function ConceptsPanel() {
       <SectionHeading>UP-MAVT analysis steps</SectionHeading>
       <BulletList
         items={[
-          'Step 1 — Compute weights from Weight Elicitation data for all selected stakeholder sessions.',
+          'Step 1 — Compute weights from Weight Elicitation data for all selected decision-maker sessions.',
           'Step 2 — Sample Qualitative Indicators scores and weight vectors; compute weighted-sum scores per alternative.',
           'Step 3 — Incorporate value functions; resample with distributional criterion values.',
           'Step 4 — Sensitivity analysis: vary one criterion at a time.',
@@ -352,7 +352,7 @@ function DatabasePanel() {
       <VStack align="start" spacing={0} divider={<Divider />} w="full" mb={4}>
         <SchemaField name="_id" type="ObjectId" description="Primary key." />
         <SchemaField name="study_session_id" type="ObjectId" description="Reference to parent study_sessions document." />
-        <SchemaField name="name" type="string" description="Short alphanumeric code shared with the stakeholder." />
+        <SchemaField name="name" type="string" description="Short alphanumeric code shared with the decision-maker." />
         <SchemaField name="criteria" type="array" description="Copy of input criteria/alternatives from the study session at session-creation time." />
         <SchemaField name="qualitative_indicators" type="object" description="Keyed by criterion name. Each entry: { ranking, values, confidences }." />
         <SchemaField name="value_functions" type="object" description="Keyed by criterion name. Each entry: array of { x, y } breakpoints." />
@@ -400,10 +400,10 @@ function ApiPanel() {
 
       <SectionHeading>Session Detection</SectionHeading>
       <VStack align="start" spacing={0} w="full" divider={<Divider />}>
-        <ApiRow method="GET"  path="/api/session/detect/<session_code>" description="Detect session type (stakeholder / practitioner) and return its ID." />
+        <ApiRow method="GET"  path="/api/session/detect/<session_code>" description="Detect session type (decision-maker / practitioner) and return its ID." />
       </VStack>
 
-      <SectionHeading>Elicitation Sessions (Stakeholder)</SectionHeading>
+      <SectionHeading>Elicitation Sessions (Decision-maker)</SectionHeading>
       <VStack align="start" spacing={0} w="full" divider={<Divider />}>
         <ApiRow method="POST"   path="/api/session"                           description="Create a new elicitation session." />
         <ApiRow method="GET"    path="/api/sessions"                          description="List all elicitation sessions." />
@@ -428,8 +428,8 @@ function ApiPanel() {
         <ApiRow method="DELETE" path="/api/study-session/<id>"                          description="Delete a study session." />
         <ApiRow method="PUT"    path="/api/study-session/<id>/input"                   description="Save the input criteria / alternatives." />
         <ApiRow method="GET"    path="/api/study-session/<id>/input"                   description="Retrieve the saved input." />
-        <ApiRow method="POST"   path="/api/study-session/<id>/elicitation-session"     description="Create a linked stakeholder session." />
-        <ApiRow method="GET"    path="/api/study-session/<id>/elicitation-sessions"    description="List all stakeholder sessions for a study." />
+        <ApiRow method="POST"   path="/api/study-session/<id>/elicitation-session"     description="Create a linked decision-maker session." />
+        <ApiRow method="GET"    path="/api/study-session/<id>/elicitation-sessions"    description="List all decision-maker sessions for a study." />
         <ApiRow method="POST"   path="/api/study-session/<id>/reset-sessions"          description="Delete all linked elicitation sessions." />
         <ApiRow method="POST"   path="/api/study-session/<id>/selective-reset"         description="Delete sessions for specific criteria or groups." />
         <ApiRow method="GET"    path="/api/study-session/backup/<id>"                  description="Export a study as a ZIP archive." />
@@ -485,10 +485,10 @@ function FileStructurePanel() {
 │   │   ├── pages/
 │   │   │   ├── LoginPage.jsx               # Session code entry & role detection
 │   │   │   ├── DocumentationPage.jsx       # This page
-│   │   │   ├── QualitativeIndicatorsPage.jsx  # Stakeholder: Qualitative Indicators tier-list
-│   │   │   ├── ValueFunctionsPage.jsx      # Stakeholder: Quantitative Indicators definition
-│   │   │   ├── PileBwtPage.jsx             # Stakeholder: Weight Elicitation pairwise
-│   │   │   ├── RecapPage.jsx               # Stakeholder: completion summary
+│   │   │   ├── QualitativeIndicatorsPage.jsx  # Decision-maker: Qualitative Indicators tier-list
+│   │   │   ├── ValueFunctionsPage.jsx      # Decision-maker: Quantitative Indicators definition
+│   │   │   ├── PileBwtPage.jsx             # Decision-maker: Weight Elicitation pairwise
+│   │   │   ├── RecapPage.jsx               # Decision-maker: completion summary
 │   │   │   ├── InputPage.jsx               # Practitioner: criteria & alternatives
 │   │   │   ├── CaseStudyPage.jsx           # Practitioner: session management
 │   │   │   ├── RunUpMavtPage.jsx           # Practitioner: run analysis

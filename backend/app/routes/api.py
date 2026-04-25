@@ -77,6 +77,8 @@ def require_admin_token(f):
 
 def _send(content, filename, mimetype):
     """Helper to send bytes or BytesIO as a file attachment."""
+    if mimetype == 'text/csv':
+        mimetype = 'text/csv; charset=utf-8'
     buf = content if isinstance(content, io.BytesIO) else io.BytesIO(content)
     return send_file(buf, mimetype=mimetype, as_attachment=True, download_name=filename)
 
@@ -604,7 +606,7 @@ def update_study_session(study_session_id):
     if 'features' in data or 'vf_method' in data:
         result = svc.update_features(
             study_session_id,
-            data.get('features', {}),
+            data.get('features') if 'features' in data else None,
             data.get('vf_method'),
         )
     if 'title' in data or 'description' in data:
