@@ -5,6 +5,7 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+/examples/
 WICEMMMC_old.csv
 WICEMMMC.csv
 weight_sapce_problem.md

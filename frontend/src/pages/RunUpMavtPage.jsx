@@ -1044,7 +1044,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     if (!Array.isArray(comparisons) || comparisons.length === 0 || !Array.isArray(data) || data.length === 0) return null
 
     const width = 980
-    const top = 50
+    const top = 82
     const right = 30
     const bottom = 55
     const left = 250
@@ -1101,11 +1101,11 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" stroke="#9ca3af" stroke-width="1.2" />
         <text x="${left + plotWidth / 2}" y="${height - 16}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#4b5563">Ratio value</text>
 
-        <rect x="${left + plotWidth - 280}" y="${top - 30}" width="260" height="22" rx="4" fill="#ffffff" stroke="#e5e7eb" />
-        <circle cx="${left + plotWidth - 262}" cy="${top - 19}" r="4" fill="#48BB78" fill-opacity="0.72" />
-        <text x="${left + plotWidth - 250}" y="${top - 15}" font-family="Arial, sans-serif" font-size="11" fill="#374151">Computed</text>
-        <polygon points="${left + plotWidth - 198},${top - 24} ${left + plotWidth - 188},${top - 19} ${left + plotWidth - 198},${top - 14} ${left + plotWidth - 208},${top - 19}" fill="#DD6B20" stroke="#DD6B20" />
-        <text x="${left + plotWidth - 176}" y="${top - 15}" font-family="Arial, sans-serif" font-size="11" fill="#374151">Declared</text>
+        <rect x="${left + plotWidth - 280}" y="${top - 24}" width="260" height="22" rx="4" fill="#ffffff" stroke="#e5e7eb" />
+        <circle cx="${left + plotWidth - 262}" cy="${top - 13}" r="4" fill="#48BB78" fill-opacity="0.72" />
+        <text x="${left + plotWidth - 250}" y="${top - 9}" font-family="Arial, sans-serif" font-size="11" fill="#374151">Computed</text>
+        <polygon points="${left + plotWidth - 198},${top - 18} ${left + plotWidth - 188},${top - 13} ${left + plotWidth - 198},${top - 8} ${left + plotWidth - 208},${top - 13}" fill="#DD6B20" stroke="#DD6B20" />
+        <text x="${left + plotWidth - 176}" y="${top - 9}" font-family="Arial, sans-serif" font-size="11" fill="#374151">Declared</text>
       </svg>
     `.replace(/\n\s+/g, '\n').trim()
   }
@@ -1114,7 +1114,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     if (!Array.isArray(densityData) || densityData.length === 0 || !Array.isArray(expertNames) || expertNames.length === 0) return null
 
     const width = 980
-    const top = 50
+    const top = 82
     const right = 30
     const bottom = 55
     const left = 70
@@ -1164,8 +1164,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
         ${fillPolygons.map((entry, idx) => `
           <polygon points="${entry.polygonPoints}" fill="${entry.color}" fill-opacity="0.22" stroke="none" />
-          <text x="${left + idx * 140}" y="${top - 14}" font-family="Arial, sans-serif" font-size="11" fill="${entry.color}">${escapeSvgText(entry.expertName)}</text>
-          <rect x="${left + idx * 140 - 14}" y="${top - 22}" width="10" height="10" fill="${entry.color}" fill-opacity="0.22" stroke="${entry.color}" />
+          <text x="${left + idx * 140}" y="${top - 20}" font-family="Arial, sans-serif" font-size="11" fill="${entry.color}">${escapeSvgText(entry.expertName)}</text>
+          <rect x="${left + idx * 140 - 14}" y="${top - 28}" width="10" height="10" fill="${entry.color}" fill-opacity="0.22" stroke="${entry.color}" />
         `).join('')}
 
         ${series.map((entry) => `
@@ -1378,7 +1378,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         })
         if (consistencySvg) {
           const width = 980
-          const height = Math.max(220, 50 + Math.max(220, consistencyData.comparisons.length * 30) + 55)
+          const height = Math.max(220, 82 + Math.max(220, consistencyData.comparisons.length * 30) + 55)
           imageTargets.push({
             filenameBase: 'step1_declared_computed_ratios',
             svgMarkup: consistencySvg,
@@ -1424,7 +1424,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
               filenameBase: `${stepPrefix}_distribution_${altIndex}`,
               svgMarkup,
               width: 980,
-              height: 355,
+              height: 387,
             })
           })
         }
