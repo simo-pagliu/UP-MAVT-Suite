@@ -20,12 +20,14 @@ import {
   NumberIncrementStepper,
   NumberDecrementStepper,
   Select,
+  Radio,
+  RadioGroup,
   Tooltip,
   Flex,
   FormControl,
   FormLabel,
 } from '@chakra-ui/react'
-import { ArrowBackIcon, ArrowForwardIcon, CheckCircleIcon, QuestionIcon, LockIcon, AddIcon } from '@chakra-ui/icons'
+import { ArrowBackIcon, ArrowForwardIcon, ArrowUpIcon, ArrowDownIcon, CheckCircleIcon, QuestionIcon, LockIcon, AddIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { API_URL } from '../config'
@@ -685,6 +687,13 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
     setIsIncreasing(!isIncreasing)
   }
 
+  const handleDirectionChange = (nextDirection) => {
+    const nextIsIncreasing = nextDirection === 'linear_increasing'
+    if (nextIsIncreasing !== isIncreasing) {
+      handleToggleDirection()
+    }
+  }
+
   const handleComplete = () => {
     onComplete({
       ranking,
@@ -698,13 +707,26 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
     <VStack spacing={6} align="stretch">
       <Box>
         <Heading size="md">Step 2: Adjust Value Function</Heading>
-        <QuestionPrompt mb={0}>Use sliders to adjust utility values for each rank. Use the toggle to switch between increasing and decreasing functions.</QuestionPrompt>
+        <QuestionPrompt mb={0}>Use sliders to adjust utility values for each rank. Use the radio buttons to switch between increasing and decreasing functions.</QuestionPrompt>
       </Box>
 
       <HStack spacing={4} wrap="wrap">
-        <Button size="sm" variant={isIncreasing ? 'solid' : 'outline'} onClick={handleToggleDirection}>
-          {isIncreasing ? '↗ Increasing' : '↘ Decreasing'}
-        </Button>
+        <RadioGroup value={isIncreasing ? 'linear_increasing' : 'linear_decreasing'} onChange={handleDirectionChange}>
+          <HStack spacing={4} wrap="wrap">
+            <Radio value="linear_increasing" size="sm">
+              <HStack spacing={1}>
+                <ArrowUpIcon color="blue.500" />
+                <Text>Increasing</Text>
+              </HStack>
+            </Radio>
+            <Radio value="linear_decreasing" size="sm">
+              <HStack spacing={1}>
+                <ArrowDownIcon color="blue.500" />
+                <Text>Decreasing</Text>
+              </HStack>
+            </Radio>
+          </HStack>
+        </RadioGroup>
       </HStack>
 
       <HStack spacing={6} align="flex-start">

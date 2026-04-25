@@ -33,7 +33,7 @@ import {
   VStack,
   useToast,
 } from '@chakra-ui/react'
-import { CheckCircleIcon, WarningIcon, CloseIcon, QuestionIcon, LockIcon } from '@chakra-ui/icons'
+import { CheckCircleIcon, WarningIcon, CloseIcon, QuestionIcon, LockIcon, ArrowUpIcon, ArrowDownIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { parseDistribution, computeDistributionBounds } from '../utils/distributionUtils'
@@ -110,6 +110,32 @@ const deriveRange = (criterion) => {
 const defaultPointsForShape = (shape, range, gaussian) => {
   if (shape === 'linear_decreasing') return sortByX([{ x: range.min, y: 1 }, { x: range.max, y: 0 }])
   return sortByX([{ x: range.min, y: 0 }, { x: range.max, y: 1 }])
+}
+
+const getThresholdHelpText = (thresholdKey, shape) => {
+  const isIncreasing = shape === 'linear_increasing'
+  const isLowThreshold = thresholdKey === 'low'
+
+  if (isIncreasing) {
+    return isLowThreshold
+      ? 'For an increasing criterion, this is the lower cutoff: values at or below it are already at the worst end of the scale, so lower values do not change the value any further. Above it, the criterion starts to improve.'
+      : 'For an increasing criterion, this is the upper cutoff: values at or above it are already at the best end of the scale, so higher values do not change the value any further. Below it, the criterion is still improving.'
+  }
+
+  return isLowThreshold
+    ? 'For a decreasing criterion, this is the lower cutoff: values at or below it are already at the best end of the scale, so lower values do not change the value any further. Above it, the criterion starts to get worse.'
+    : 'For a decreasing criterion, this is the upper cutoff: values at or above it are already at the worst end of the scale, so higher values do not change the value any further. Below it, the criterion is still improving.'
+}
+
+function ThresholdLabel({ label, thresholdKey, shape }) {
+  return (
+    <HStack spacing={1} mb={2}>
+      <FormLabel fontSize="sm" m={0} fontWeight="medium">{label}</FormLabel>
+      <Tooltip label={getThresholdHelpText(thresholdKey, shape)} placement="top" hasArrow>
+        <QuestionIcon color="gray.500" boxSize={3} cursor="help" />
+      </Tooltip>
+    </HStack>
+  )
 }
 
 const buildGaussianPoints = (range, mean, sigma, count, inverted) => {
@@ -1020,9 +1046,12 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
     }))
   }
 
+  const nonQualCriteria = useMemo(
+    () => criteria.filter((criterion) => !criterion.is_qualitative),
+    [criteria],
+  )
+
   const progress = useMemo(() => {
-    // Only count non-qualitative criteria
-    const nonQualCriteria = criteria.filter(c => !c.is_qualitative)
     if (!nonQualCriteria.length) return 0
     const filled = nonQualCriteria.filter((c) => {
       const name = c.criterion_name || `Criterion ${criteria.indexOf(c) + 1}`
@@ -1037,12 +1066,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
         return entry.midSplit?.step1 !== null && otherDone
     }).length
     return Math.round((filled / nonQualCriteria.length) * 100)
-  }, [criteria, valueFunctions])
-
-  const nonQualCriteria = useMemo(
-    () => criteria.filter((criterion) => !criterion.is_qualitative),
-    [criteria],
-  )
+  }, [criteria, nonQualCriteria, valueFunctions])
 
   const activeCriterionIndex = useMemo(() => {
     if (!active) return -1
@@ -1096,6 +1120,19 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
       <Box bg="white" p={8} borderRadius="lg" boxShadow="sm">
         <Heading size="md">No criteria found</Heading>
         <Text mt={2} color="gray.600">Please create a session with criteria first.</Text>
+      </Box>
+    )
+  }
+
+  if (nonQualCriteria.length === 0) {
+    return (
+      <Box bg="white" p={8} borderRadius="lg" boxShadow="sm">
+        <VStack spacing={4} align="stretch">
+          <Heading size="lg">Quantitative Indicators</Heading>
+          <Text color="gray.600">
+            No quantitative indicators have been marked in the input.
+          </Text>
+        </VStack>
       </Box>
     )
   }
@@ -1224,27 +1261,30 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                     {currentMidStep === 0 && (
                       <VStack align="stretch" spacing={3}>
                         <QuestionPrompt>
-                          <HStack spacing={3} wrap="wrap" justify="space-between">
+                          <VStack align="stretch" spacing={3}>
                             <Text>
                               Step 1: Is the value function of <strong>{active}</strong> increasing or decreasing?
                             </Text>
-                            <HStack spacing={2}>
-                              <Button
-                                size="sm"
-                                variant={activeData.midSplit?.directionAnswered && activeData.shape === 'linear_increasing' ? 'outline' : 'ghost'}
-                                onClick={() => handleDirectionChange('linear_increasing')}
-                              >
-                                ↗ Increasing
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant={activeData.midSplit?.directionAnswered && activeData.shape === 'linear_decreasing' ? 'outline' : 'ghost'}
-                                onClick={() => handleDirectionChange('linear_decreasing')}
-                              >
-                                ↘ Decreasing
-                              </Button>
-                            </HStack>
-                          </HStack>
+                            <RadioGroup
+                              value={activeData.midSplit?.directionAnswered ? activeData.shape : ''}
+                              onChange={handleDirectionChange}
+                            >
+                              <HStack spacing={4} wrap="wrap">
+                                <Radio value="linear_increasing" size="sm">
+                                  <HStack spacing={1}>
+                                    <ArrowUpIcon color="blue.500" />
+                                    <Text>Increasing</Text>
+                                  </HStack>
+                                </Radio>
+                                <Radio value="linear_decreasing" size="sm">
+                                  <HStack spacing={1}>
+                                    <ArrowDownIcon color="blue.500" />
+                                    <Text>Decreasing</Text>
+                                  </HStack>
+                                </Radio>
+                              </HStack>
+                            </RadioGroup>
+                          </VStack>
                         </QuestionPrompt>
                         <HStack>
                           <Button
@@ -1298,7 +1338,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                             </Select>
                           </Box>
                           <FormControl maxW="150px">
-                            <FormLabel fontSize="sm" m={0} fontWeight="medium">Low threshold</FormLabel>
+                            <ThresholdLabel label="Low threshold" thresholdKey="low" shape={activeData.shape} />
                             <Input
                               key={`low-${activeData.thresholds.low}`}
                               type="number"
@@ -1311,7 +1351,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                             />
                           </FormControl>
                           <FormControl maxW="150px">
-                            <FormLabel fontSize="sm" m={0} fontWeight="medium">High threshold</FormLabel>
+                            <ThresholdLabel label="High threshold" thresholdKey="high" shape={activeData.shape} />
                             <Input
                               key={`high-${activeData.thresholds.high}`}
                               type="number"
@@ -1566,7 +1606,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                       </Select>
                     </FormControl>
                     <FormControl maxW="140px">
-                      <FormLabel fontSize="sm" m={0} fontWeight="medium">Low threshold</FormLabel>
+                      <ThresholdLabel label="Low threshold" thresholdKey="low" shape={activeData.shape} />
                       <Input
                         key={`low-${activeData.thresholds.low}`}
                         type="number"
@@ -1579,7 +1619,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                       />
                     </FormControl>
                     <FormControl maxW="140px">
-                      <FormLabel fontSize="sm" m={0} fontWeight="medium">High threshold</FormLabel>
+                      <ThresholdLabel label="High threshold" thresholdKey="high" shape={activeData.shape} />
                       <Input
                         key={`high-${activeData.thresholds.high}`}
                         type="number"
