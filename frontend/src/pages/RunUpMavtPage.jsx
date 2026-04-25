@@ -2346,18 +2346,25 @@ function WeightSpacePlot({ data, orderedCriteria = [], isNonLinearModel = false,
                   </Text>
                   <Box flex={1} h="20px" position="relative" bg="gray.50" borderRadius="sm">
                     {weights.map((w, i) => (
-                      <Box
+                      <Tooltip
                         key={i}
-                        position="absolute"
-                        left={`${(w / (maxWeight * 1.1)) * 100}%`}
-                        top="2px"
-                        width="6px"
-                        height="16px"
-                        bg="blue.500"
-                        borderRadius="sm"
-                        opacity={0.7}
-                        title={`${w.toFixed(3)}`}
-                      />
+                        label={w.toFixed(3)}
+                        placement="top"
+                        openDelay={0}
+                        closeDelay={0}
+                        hasArrow
+                      >
+                        <Box
+                          position="absolute"
+                          left={`${(w / (maxWeight * 1.1)) * 100}%`}
+                          top="2px"
+                          width="6px"
+                          height="16px"
+                          bg="blue.500"
+                          borderRadius="sm"
+                          opacity={0.7}
+                        />
+                      </Tooltip>
                     ))}
                   </Box>
                 </HStack>
@@ -2426,18 +2433,25 @@ function WeightSpacePlot({ data, orderedCriteria = [], isNonLinearModel = false,
                 </Text>
                 <Box flex={1} h="20px" position="relative" bg="gray.50" borderRadius="sm">
                   {weights.map((w, i) => (
-                    <Box
+                    <Tooltip
                       key={i}
-                      position="absolute"
-                      left={`${(w / (maxWeight * 1.1)) * 100}%`}
-                      top="2px"
-                      width="6px"
-                      height="16px"
-                      bg="blue.500"
-                      borderRadius="sm"
-                      opacity={0.7}
-                      title={`${w.toFixed(3)}`}
-                    />
+                      label={w.toFixed(3)}
+                      placement="top"
+                      openDelay={0}
+                      closeDelay={0}
+                      hasArrow
+                    >
+                      <Box
+                        position="absolute"
+                        left={`${(w / (maxWeight * 1.1)) * 100}%`}
+                        top="2px"
+                        width="6px"
+                        height="16px"
+                        bg="blue.500"
+                        borderRadius="sm"
+                        opacity={0.7}
+                      />
+                    </Tooltip>
                   ))}
                 </Box>
               </HStack>
