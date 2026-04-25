@@ -599,7 +599,7 @@ class WorkflowService:
                 row.append(self._format_export_number(solution_row.get('error', ''), 6))
                 writer.writerow(row)
         filename = f'weight_solutions_{study.get("code", study_session_id)}.csv'
-        return output.getvalue().encode(), filename, 'text/csv'
+        return ExportService._csv_bytes(output.getvalue()), filename, 'text/csv'
 
     def export_weight_solutions_single_csv(self, study_session_id, session_id):
         """Export weight solutions for a single elicitation session as a CSV file.
@@ -648,7 +648,7 @@ class WorkflowService:
             writer.writerow(row)
         session_doc = self._sessions.find_by_id(session_id)
         session_name = session_doc.get('name') if isinstance(session_doc, dict) else session_id
-        return output.getvalue().encode(), f'weight_solutions_{session_name}.csv', 'text/csv'
+        return ExportService._csv_bytes(output.getvalue()), f'weight_solutions_{session_name}.csv', 'text/csv'
 
     @staticmethod
     def _safe_filename(value):
@@ -666,7 +666,7 @@ class WorkflowService:
         writer.writerow(headers)
         for row in rows:
             writer.writerow(row)
-        return output.getvalue()
+        return ExportService._csv_bytes(output.getvalue())
 
     @staticmethod
     def _build_rank_probability_matrix(results):

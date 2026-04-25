@@ -332,7 +332,7 @@ class TestExportWeightSolutionCsv:
         content, _, mime = wf_svc.export_weight_solutions_single_csv(study_id, session_id)
 
         assert mime == 'text/csv'
-        rows = list(csv.reader(io.StringIO(content.decode())))
+        rows = list(csv.reader(io.StringIO(content.decode('utf-8-sig'))))
         assert rows[0] == ['SOLUTION_INDEX', 'Cost', 'ERROR']
         assert rows[1] == ['0', '0.333', '0.123457']
         assert rows[2] == ['1', '0.667', '0.765432']
@@ -352,7 +352,7 @@ class TestExportWeightSolutionCsv:
 
         content, _, _ = wf_svc.export_weight_solutions_csv(study_id)
 
-        rows = list(csv.reader(io.StringIO(content.decode())))
+        rows = list(csv.reader(io.StringIO(content.decode('utf-8-sig'))))
         assert rows[0] == ['SESSION_ID', 'SOLUTION_INDEX', 'Cost', 'ERROR']
         assert rows[1][-1] == '0.25'
         assert rows[2][-1] == '0.5'
