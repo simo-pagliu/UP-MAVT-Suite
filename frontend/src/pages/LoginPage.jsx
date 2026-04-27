@@ -660,7 +660,7 @@ function LoginPage({ onLogin, onDocumentation }) {
 
           <VStack align="start" spacing={1}>
             <Text fontWeight="semibold">Legal and policy links</Text>
-            <Link href="https://www.psi.ch/en/nutzungsbedingungen" isExternal color="blue.700">Privacy Policy</Link>
+            <Link href={PSI_TERMS_OF_USE_URL} isExternal color="blue.700">PSI terms of use</Link>
           </VStack>
         </SimpleGrid>
       </Box>
