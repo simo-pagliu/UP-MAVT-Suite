@@ -24,7 +24,7 @@ services:
       APP_BASE_URL: http://localhost:3000
       MONGO_URI: mongodb://mongo:27017/elicitation
       FLASK_ENV: development
-      ADMIN_PASSWORD: admin123 #${MCDA_UP_ADMIN_PASSWORD}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       DISABLE_EMAIL: true
       # OAUTH2_CLIENT_SECRET: ${MCDA_UP_OAUTH2_SECRET}
       # File-based secret fallback (uncomment to use mounted secret files):
