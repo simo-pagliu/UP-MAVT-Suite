@@ -5,17 +5,5 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
-/examples/
-WICEMMMC_old.csv
-WICEMMMC.csv
-weight_sapce_problem.md
-val1.csv
-plot_w_sol_errors.py
-plot_error_histograms.py
-worker/scripts/weight_space_definition copy.py
-worker/scripts/weight_space_definition copy 3.py
-worker/scripts/weight_space_definition copy 2.py
-worker/scripts/weight_space_definition_old.py
-paper/
 .env
 secrets/

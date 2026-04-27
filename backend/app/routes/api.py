@@ -834,12 +834,13 @@ def compute_weights_endpoint(study_session_id):
 @bp.route('/study-session/<study_session_id>/run-step', methods=['POST'])
 def run_step_endpoint(study_session_id):
     data = request.json or {}
+    step_number = data.get('step_number')
     svc = WorkflowService(current_app.db)
     task_id = svc.create_run_step_task(
         study_session_id,
-        step_number=data.get('step_number'),
+        step_number=step_number,
         selected_session_ids=data.get('selected_session_ids', []),
-        mc_iterations=data.get('mc_iterations', 1000),
+        mc_iterations=data.get('mc_iterations', 10000 if step_number == 6 else 1000),
         aggregation_method=data.get('aggregation_method', 'weighted_sum'),
         mc_mode=data.get('mc_mode', 'non_strict'),
         use_random_weights=data.get('use_random_weights', False),

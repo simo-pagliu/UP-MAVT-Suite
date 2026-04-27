@@ -48,3 +48,6 @@ sudo docker push gitea.psi.ch/images/up-mavt-suite-backend:VERSION_TAG
 sudo docker push gitea.psi.ch/images/up-mavt-suite-frontend:VERSION_TAG
 sudo docker push gitea.psi.ch/images/up-mavt-suite-worker:VERSION_TAG
 ```
+
+## 5. Update docker compose on gitea
+Remember to update the versioning tag on the docker compose of linux-hosting in gitea

@@ -116,7 +116,7 @@ Navigate to [http://localhost:3000](http://localhost:3000) in your browser.
 
 ### Admin panel
 
-Access the admin panel by logging in with the **Admin** option and the `ADMIN_PASSWORD` set in your `.env` file. From there you can:
+Access the admin panel by logging in with the **Admin** option and the password stored in `secrets/admin_password.txt`. From there you can:
 
 - View all study sessions and their stakeholder sessions
 - Download session data
