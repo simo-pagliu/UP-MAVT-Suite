@@ -122,17 +122,8 @@ class TestGetStudyByCode:
 # ---------------------------------------------------------------------------
 
 class TestUpdateStudySession:
-    def test_update_features_ok(self, client):
-        sid = create_study(client)
-        resp = client.patch(f'/api/study-session/{sid}', json={
-            'features': {'qi': True, 'vf': False, 'bwt': True}
-        })
-        assert resp.status_code == 200
-        assert resp.json['features']['qi'] is True
-        assert resp.json['features']['vf'] is True
-        assert resp.json['features']['bwt'] is True
-
-    def test_update_features_always_returns_all_true(self, client):
+    def test_update_features_payload_ignored_all_true(self, client):
+        """Sending a features dict in the body is silently ignored; flags are always all-true."""
         sid = create_study(client)
         resp = client.patch(f'/api/study-session/{sid}', json={
             'features': {'qi': False, 'vf': False, 'bwt': False}

@@ -307,16 +307,14 @@ class StudySessionService:
         studies = self._studies.find_all()
         return [self._serialize_study(s, include_sessions=True) for s in studies]
 
-    def update_features(self, study_session_id, features, vf_method=None):
-        """Update the feature flags of a study session.
+    def update_features(self, study_session_id, vf_method=None):
+        """Update the value-function method of a study session.
 
-        Only the ``qi``, ``vf``, and ``bwt`` flags are accepted; all values
-        are coerced to booleans.
+        Feature flags (``qi``, ``vf``, ``bwt``) are deprecated and are always
+        stored as ``True``.  Only ``vf_method`` is meaningful here.
 
         Args:
             study_session_id: The study session's ``_id``.
-            features (dict | None): A dict with any combination of ``'qi'``,
-                ``'vf'``, ``'bwt'`` keys and boolean-coercible values.
             vf_method (str | None): Optional value-function method.
 
         Returns:
@@ -328,13 +326,13 @@ class StudySessionService:
         study = self._studies.find_by_id(study_session_id)
         if not study:
             raise NotFoundError('Study session not found')
-        update_doc = {}
-        if features is not None:
-            update_doc['features'] = {
+        update_doc = {
+            'features': {
                 'qi': True,
                 'vf': True,
                 'bwt': True,
             }
+        }
         normalized_method = self._normalize_vf_method(vf_method)
         if normalized_method:
             update_doc['vf_method'] = normalized_method
@@ -694,7 +692,6 @@ class StudySessionService:
 
         self.update_features(
             study_session_id,
-            study_meta.get('features') or {'qi': False, 'vf': False, 'bwt': False},
             study_meta.get('vf_method'),
         )
         imported_criteria = input_payload.get('criteria')

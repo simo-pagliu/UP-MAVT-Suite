@@ -113,23 +113,18 @@ class TestGet:
 # ---------------------------------------------------------------------------
 
 class TestUpdateFeatures:
-    def test_update_features_sets_booleans(self, svc, study_id):
-        result = svc.update_features(study_id, {'qi': True, 'vf': False, 'bwt': True})
+    def test_update_features_always_all_true(self, svc, study_id):
+        result = svc.update_features(study_id)
         assert result['features']['qi'] is True
         assert result['features']['vf'] is True
         assert result['features']['bwt'] is True
 
     def test_update_features_not_found_raises(self, svc):
         with pytest.raises(NotFoundError):
-            svc.update_features(str(ObjectId()), {'qi': True})
-
-    def test_update_features_invalid_dict_is_ignored(self, svc, study_id):
-        # Passing None for features should not crash; features dict stays unchanged.
-        result = svc.update_features(study_id, None)
-        assert 'features' in result
+            svc.update_features(str(ObjectId()))
 
     def test_update_features_updates_vf_method(self, svc, study_id):
-        result = svc.update_features(study_id, {'qi': True}, 'free-edit')
+        result = svc.update_features(study_id, 'free-edit')
         assert result['vf_method'] == 'free-edit'
 
 

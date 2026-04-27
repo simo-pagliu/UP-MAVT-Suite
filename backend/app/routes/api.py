@@ -606,7 +606,6 @@ def update_study_session(study_session_id):
     if 'features' in data or 'vf_method' in data:
         result = svc.update_features(
             study_session_id,
-            data.get('features') if 'features' in data else None,
             data.get('vf_method'),
         )
     if 'title' in data or 'description' in data:
