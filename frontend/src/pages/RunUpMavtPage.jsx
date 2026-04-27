@@ -1022,13 +1022,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     image.src = svgUrl
   })
 
-  const escapeSvgText = (value) => String(value ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;')
-
   const createPolylinePath = (points) => points.length > 0
     ? `M ${points.map((point) => `${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' L ')}`
     : ''
@@ -2880,7 +2873,7 @@ function getHeatColorHex(probability) {
 }
 
 function escapeSvgText(value) {
-  return String(value || '')
+  return String(value ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')

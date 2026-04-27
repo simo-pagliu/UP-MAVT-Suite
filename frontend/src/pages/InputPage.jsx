@@ -265,8 +265,6 @@ function InputPage({ studySessionId }, ref) {
     return alternatives.length > 0 && alternatives.every((alt) => alt?.name)
   })
 
-  const alternativesRequiredByEnabledFeatures = true
-
   const handleUnlock = () => {
     if (hasExistingSessions) {
       onUnlockOpen()
