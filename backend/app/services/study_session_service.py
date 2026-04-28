@@ -224,7 +224,7 @@ class StudySessionService:
         doc = {
             'code': code,
             'input_id': None,
-            'features': {'qi': False, 'vf': False, 'bwt': False},
+            'features': {'qi': True, 'vf': True, 'bwt': True},
             'vf_method': 'mid-splitting',
             'title': str(title or '').strip(),
             'description': str(description or '').strip(),
@@ -307,16 +307,14 @@ class StudySessionService:
         studies = self._studies.find_all()
         return [self._serialize_study(s, include_sessions=True) for s in studies]
 
-    def update_features(self, study_session_id, features, vf_method=None):
-        """Update the feature flags of a study session.
+    def update_features(self, study_session_id, vf_method=None):
+        """Update the value-function method of a study session.
 
-        Only the ``qi``, ``vf``, and ``bwt`` flags are accepted; all values
-        are coerced to booleans.
+        Feature flags (``qi``, ``vf``, ``bwt``) are deprecated and are always
+        stored as ``True``.  Only ``vf_method`` is meaningful here.
 
         Args:
             study_session_id: The study session's ``_id``.
-            features (dict | None): A dict with any combination of ``'qi'``,
-                ``'vf'``, ``'bwt'`` keys and boolean-coercible values.
             vf_method (str | None): Optional value-function method.
 
         Returns:
@@ -329,12 +327,6 @@ class StudySessionService:
         if not study:
             raise NotFoundError('Study session not found')
         update_doc = {}
-        if isinstance(features, dict):
-            update_doc['features'] = {
-                'qi': bool(features.get('qi', False)),
-                'vf': bool(features.get('vf', False)),
-                'bwt': bool(features.get('bwt', False)),
-            }
         normalized_method = self._normalize_vf_method(vf_method)
         if normalized_method:
             update_doc['vf_method'] = normalized_method
@@ -501,8 +493,7 @@ class StudySessionService:
         if not input_doc:
             raise ValidationError('Study input not found')
         criteria = input_doc.get('criteria', [])
-        features = study.get('features', {'qi': False, 'vf': False, 'bwt': False})
-        self._session_svc.validate_input_for_features(criteria, features)
+        self._session_svc.validate_input_for_features(criteria)
         doc = {
             'name': name,
             'friendly_name': '',
@@ -695,7 +686,6 @@ class StudySessionService:
 
         self.update_features(
             study_session_id,
-            study_meta.get('features') or {'qi': False, 'vf': False, 'bwt': False},
             study_meta.get('vf_method'),
         )
         imported_criteria = input_payload.get('criteria')

@@ -240,42 +240,27 @@ class SessionService:
         return normalized
 
     @staticmethod
-    def validate_input_for_features(criteria, features):
-        """Validate that the criteria list satisfies the enabled study features.
+    def validate_input_for_features(criteria):
+        """Validate that the criteria list satisfies the always-on workflow.
 
-        Checks:
-
-        * ``qi`` (Qualitative Indicators): every criterion must have at least
-          one alternative.
-        * ``vf`` / ``bwt`` (Value Functions / Best-Worst Technique): every
-          criterion must have a non-empty ``criterion_name``.
+        Every criterion must have a name and at least one alternative.
 
         Args:
             criteria (list[dict]): The criteria to validate.
-            features (dict | None): Feature flags, e.g.
-                ``{'qi': True, 'vf': False, 'bwt': False}``.
 
         Raises:
             ValidationError: When a feature constraint is violated.
         """
         if not isinstance(criteria, list) or len(criteria) == 0:
             raise ValidationError('At least one criterion is required')
-        features = features or {'qi': False, 'vf': False, 'bwt': False}
-        qi_active = features.get('qi', False)
-        vf_active = features.get('vf', False)
-        bwt_active = features.get('bwt', False)
-        if qi_active:
-            for idx, criterion in enumerate(criteria):
-                alternatives = criterion.get('alternatives', [])
-                if not isinstance(alternatives, list) or len(alternatives) == 0:
-                    raise ValidationError(
-                        f'QI requires alternatives for all criteria. '
-                        f'Criterion "{criterion.get("criterion_name")}" at position {idx + 1} is missing alternatives'
-                    )
-        if vf_active or bwt_active:
-            for idx, criterion in enumerate(criteria):
-                if not criterion.get('criterion_name'):
-                    raise ValidationError(f'Criterion {idx + 1} must have a name')
+        for idx, criterion in enumerate(criteria):
+            alternatives = criterion.get('alternatives', [])
+            if not isinstance(alternatives, list) or len(alternatives) == 0:
+                raise ValidationError(
+                    f'All criteria require at least one alternative. Criterion "{criterion.get("criterion_name")}" at position {idx + 1} is missing alternatives'
+                )
+            if not criterion.get('criterion_name'):
+                raise ValidationError(f'Criterion {idx + 1} must have a name')
 
     # ------------------------------------------------------------------ #
     # Criteria resolution

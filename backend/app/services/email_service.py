@@ -5,7 +5,12 @@ warnings, and elicitation session completion notifications.
 
 Configuration is read from the following environment variables:
 
+* ``DISABLE_EMAIL``   – Set to ``"true"`` to disable email system entirely
+                        (default: ``"false"``). When disabled, all SMTP/OAuth2
+                        configuration is skipped and all email sends are silently
+                        skipped. Useful for deployments where email is not needed.
 * ``SMTP_HOST``      – SMTP server hostname (default: ``localhost``).
+                       Required only if ``DISABLE_EMAIL`` is ``"false"``.
 * ``SMTP_PORT``      – SMTP server port (default: ``587``).
 * ``SMTP_USER``      – SMTP authentication username (optional).
 * ``SMTP_PASSWORD``  – SMTP authentication password (optional).
@@ -20,8 +25,13 @@ Configuration is read from the following environment variables:
 * ``APP_BASE_URL``   – Public base URL used to build links in emails
                        (default: ``http://localhost:3000``).
 
-When ``SMTP_HOST`` is not set the service silently skips sending and logs a
-warning, so the application can run without email support in development.
+When ``DISABLE_EMAIL`` is ``"true"``, the service silently skips sending all
+emails and does not require any SMTP or OAuth2 configuration. This is useful
+for development or deployments where email is not needed.
+
+When ``SMTP_HOST`` is not set and ``DISABLE_EMAIL`` is ``"false"``, the service
+silently skips sending and logs a warning, so the application can run without
+email support in development.
 """
 
 import logging
@@ -121,22 +131,42 @@ class EmailService:
     """
 
     def __init__(self):
-        self._host = os.getenv('SMTP_HOST', '').strip()
-        self._port = int(os.getenv('SMTP_PORT', '587'))
-        self._user = os.getenv('SMTP_USER', '').strip()
-        self._password = _get_secret_env('SMTP_PASSWORD')
-        self._auth_mode = os.getenv('EMAIL_AUTH_MODE', 'basic').strip().lower()
-        self._oauth2_tenant_id = os.getenv('OAUTH2_TENANT_ID', '').strip()
-        self._oauth2_client_id = os.getenv('OAUTH2_CLIENT_ID', '').strip()
-        self._oauth2_client_secret = _get_secret_env('OAUTH2_CLIENT_SECRET')
-        self._oauth2_scope = os.getenv(
-            'OAUTH2_SCOPE', 'https://outlook.office365.com/.default'
-        ).strip()
-        self._oauth2_token_url = os.getenv('OAUTH2_TOKEN_URL', '').strip()
-        self._oauth2_username = os.getenv('OAUTH2_USERNAME', '').strip() or self._user
-        self._use_tls = os.getenv('SMTP_USE_TLS', 'true').lower() == 'true'
-        self._from = os.getenv('EMAIL_FROM', 'noreply@elicitation-tools.local').strip()
-        self._base_url = os.getenv('APP_BASE_URL', 'http://localhost:3000').rstrip('/')
+        self._disabled = os.getenv('DISABLE_EMAIL', 'false').lower() == 'true'
+        
+        if self._disabled:
+            logger.info('EmailService: email disabled via DISABLE_EMAIL=true')
+            # When email is disabled, skip loading SMTP/OAuth2 config entirely
+            self._host = ''
+            self._port = 587
+            self._user = ''
+            self._password = ''
+            self._auth_mode = 'basic'
+            self._oauth2_tenant_id = ''
+            self._oauth2_client_id = ''
+            self._oauth2_client_secret = ''
+            self._oauth2_scope = 'https://outlook.office365.com/.default'
+            self._oauth2_token_url = ''
+            self._oauth2_username = ''
+            self._use_tls = True
+            self._from = 'noreply@elicitation-tools.local'
+            self._base_url = 'http://localhost:3000'
+        else:
+            self._host = os.getenv('SMTP_HOST', '').strip()
+            self._port = int(os.getenv('SMTP_PORT', '587'))
+            self._user = os.getenv('SMTP_USER', '').strip()
+            self._password = _get_secret_env('SMTP_PASSWORD')
+            self._auth_mode = os.getenv('EMAIL_AUTH_MODE', 'basic').strip().lower()
+            self._oauth2_tenant_id = os.getenv('OAUTH2_TENANT_ID', '').strip()
+            self._oauth2_client_id = os.getenv('OAUTH2_CLIENT_ID', '').strip()
+            self._oauth2_client_secret = _get_secret_env('OAUTH2_CLIENT_SECRET')
+            self._oauth2_scope = os.getenv(
+                'OAUTH2_SCOPE', 'https://outlook.office365.com/.default'
+            ).strip()
+            self._oauth2_token_url = os.getenv('OAUTH2_TOKEN_URL', '').strip()
+            self._oauth2_username = os.getenv('OAUTH2_USERNAME', '').strip() or self._user
+            self._use_tls = os.getenv('SMTP_USE_TLS', 'true').lower() == 'true'
+            self._from = os.getenv('EMAIL_FROM', 'noreply@elicitation-tools.local').strip()
+            self._base_url = os.getenv('APP_BASE_URL', 'http://localhost:3000').rstrip('/')
 
     @property
     def _configured(self):
@@ -146,6 +176,11 @@ class EmailService:
     @property
     def _oauth2_enabled(self):
         return self._auth_mode == 'oauth2'
+
+    @property
+    def is_disabled(self):
+        """Return ``True`` when email system is disabled via DISABLE_EMAIL env var."""
+        return self._disabled
 
     def _oauth2_missing_settings(self):
         missing = []
@@ -226,6 +261,11 @@ class EmailService:
                 'smtp_auth_ok': None,
             },
         }
+
+        if self._disabled:
+            result['status'] = 'skipped'
+            result['error'] = 'Email system is disabled via DISABLE_EMAIL=true'
+            return result
 
         if not self._configured:
             result['status'] = 'skipped'

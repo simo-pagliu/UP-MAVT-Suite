@@ -30,7 +30,7 @@ import {
   Tooltip,
   Progress,
 } from '@chakra-ui/react'
-import { LockIcon, UnlockIcon, DeleteIcon, DownloadIcon, ArrowUpIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon } from '@chakra-ui/icons'
+import { DeleteIcon, DownloadIcon, ArrowUpIcon, ChevronDownIcon, ChevronRightIcon, CopyIcon, LockIcon, UnlockIcon } from '@chakra-ui/icons'
 import { useRef, Fragment } from 'react'
 import axios from 'axios'
 import { API_URL } from '../config'
@@ -51,6 +51,8 @@ function AdminPage(props, ref) {
   const [password, setPassword] = useState('')
   const [isAuthenticating, setIsAuthenticating] = useState(false)
   const [expandedStudies, setExpandedStudies] = useState(new Set())
+  const [togglingStudyById, setTogglingStudyById] = useState({})
+  const [togglingSessionById, setTogglingSessionById] = useState({})
   const { isOpen, onOpen, onClose } = useDisclosure()
   const cancelRef = useRef()
   const toast = useToast()
@@ -309,6 +311,7 @@ function AdminPage(props, ref) {
   }
 
   const handleToggleSessionStatus = async (sessionId) => {
+    setTogglingSessionById((prev) => ({ ...prev, [sessionId]: true }))
     try {
       const response = await axios.put(`${API_URL}/session/${sessionId}/lock-session`)
 
@@ -320,7 +323,7 @@ function AdminPage(props, ref) {
         isClosable: true,
       })
 
-      fetchSessions()
+      await fetchSessions()
     } catch (error) {
       toast({
         title: 'Request failed',
@@ -329,6 +332,8 @@ function AdminPage(props, ref) {
         duration: 3000,
         isClosable: true,
       })
+    } finally {
+      setTogglingSessionById((prev) => ({ ...prev, [sessionId]: false }))
     }
   }
 
@@ -344,6 +349,7 @@ function AdminPage(props, ref) {
     if (!study || !study.sessions || study.sessions.length === 0) return
 
     const firstSession = study.sessions[0]
+    setTogglingStudyById((prev) => ({ ...prev, [studyId]: true }))
     
     try {
       const response = await axios.put(`${API_URL}/session/${firstSession._id}/lock-session`)
@@ -356,7 +362,7 @@ function AdminPage(props, ref) {
         isClosable: true,
       })
 
-      fetchSessions()
+      await fetchSessions()
     } catch (error) {
       toast({
         title: 'Request failed',
@@ -365,6 +371,8 @@ function AdminPage(props, ref) {
         duration: 3000,
         isClosable: true,
       })
+    } finally {
+      setTogglingStudyById((prev) => ({ ...prev, [studyId]: false }))
     }
   }
 
@@ -583,20 +591,23 @@ function AdminPage(props, ref) {
                       </Td>
                       <Td>{formatDate(study.created_at)}</Td>
                       <Td>
-                        <Badge
-                          colorScheme={isLocked ? 'red' : 'green'}
-                          cursor="pointer"
-                          display="inline-flex"
-                          alignItems="center"
-                          gap={1}
-                          px={3}
-                          py={1}
-                          onClick={() => handleToggleStatus(study._id)}
-                          _hover={{ opacity: 0.8 }}
+                        <Tooltip
+                          label={`Current status: ${isLocked ? 'Locked' : 'Unlocked'}. Click to ${isLocked ? 'unlock' : 'lock'} this case study.`}
+                          hasArrow
                         >
-                          {isLocked ? <LockIcon boxSize={3} /> : <UnlockIcon boxSize={3} />}
-                          {isLocked ? 'Locked' : 'Unlocked'}
-                        </Badge>
+                          <Button
+                            size="xs"
+                            leftIcon={isLocked ? <LockIcon /> : <UnlockIcon />}
+                            colorScheme={isLocked ? 'red' : 'green'}
+                            variant="solid"
+                            aria-label={isLocked ? 'Unlock case study' : 'Lock case study'}
+                            onClick={() => handleToggleStatus(study._id)}
+                            isLoading={Boolean(togglingStudyById[study._id])}
+                            isDisabled={Boolean(togglingStudyById[study._id])}
+                          >
+                            {isLocked ? 'Click to unlock' : 'Click to lock'}
+                          </Button>
+                        </Tooltip>
                       </Td>
                       <Td>
                         <Tooltip 
@@ -681,21 +692,23 @@ function AdminPage(props, ref) {
                           </Td>
                           <Td fontSize="sm">{formatDate(session.created_at)}</Td>
                           <Td>
-                            <Badge
-                              colorScheme={sessionLocked ? 'red' : 'green'}
-                              cursor="pointer"
-                              display="inline-flex"
-                              alignItems="center"
-                              gap={1}
-                              px={2}
-                              py={1}
-                              fontSize="xs"
-                              onClick={() => handleToggleSessionStatus(session._id)}
-                              _hover={{ opacity: 0.8 }}
+                            <Tooltip
+                              label={`Current status: ${sessionLocked ? 'Locked' : 'Unlocked'}. Click to ${sessionLocked ? 'unlock' : 'lock'} this session.`}
+                              hasArrow
                             >
-                              {sessionLocked ? <LockIcon boxSize={2} /> : <UnlockIcon boxSize={2} />}
-                              {session.session_locked ? 'Locked' : session.locked ? 'Input' : 'Unlocked'}
-                            </Badge>
+                              <Button
+                                size="xs"
+                                leftIcon={sessionLocked ? <LockIcon /> : <UnlockIcon />}
+                                colorScheme={sessionLocked ? 'red' : 'green'}
+                                variant="solid"
+                                aria-label={sessionLocked ? 'Unlock session' : 'Lock session'}
+                                onClick={() => handleToggleSessionStatus(session._id)}
+                                isLoading={Boolean(togglingSessionById[session._id])}
+                                isDisabled={Boolean(togglingSessionById[session._id])}
+                              >
+                                {sessionLocked ? 'Click to unlock' : 'Click to lock'}
+                              </Button>
+                            </Tooltip>
                           </Td>
                           <Td>
                             <Tooltip 

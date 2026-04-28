@@ -402,7 +402,7 @@ class TestExportServiceWithDb:
         content, filename, mime = es.export_input_raw_csv(session_id)
         assert mime == 'text/csv'
         assert 'input_raw_' in filename
-        rows = read_csv(content.decode())
+        rows = read_csv(content.decode('utf-8-sig'))
         assert rows[0]['Criterion'] == 'Cost'
 
     def test_export_input_raw_csv_empty_criteria_raises(self, es, mock_db):
@@ -424,7 +424,7 @@ class TestExportServiceWithDb:
 
     def test_export_summary_csv_ok(self, es, session_id):
         content, filename, mime = es.export_summary_csv(session_id)
-        text = content.decode()
+        text = content.decode('utf-8-sig')
         assert 'Completed Sections' in text
         assert '0/3' in text
 
@@ -460,7 +460,7 @@ class TestExportServiceWithDb:
         }
         oid = mock_db.sessions.insert_one(doc).inserted_id
         content, filename, mime = es.export_bwt_csv(str(oid))
-        rows = read_csv(content.decode())
+        rows = read_csv(content.decode('utf-8-sig'))
         assert rows[0]['REFERENCE_CRITERION'] == 'Cost'
 
     def test_export_pile_json_ok(self, es, mock_db):

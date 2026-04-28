@@ -15,11 +15,15 @@ import {
   useToast,
 } from '@chakra-ui/react'
 import axios from 'axios'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { API_URL } from '../config'
+
+const PSI_TERMS_OF_USE_URL = 'https://www.psi.ch/en/nutzungsbedingungen'
 
 function LoginPage({ onLogin, onDocumentation }) {
   const [code, setCode] = useState('')
+  const [selectedFlow, setSelectedFlow] = useState('')
+  const [emailConsent, setEmailConsent] = useState(null)
   const [email, setEmail] = useState('')
   const [entryValue, setEntryValue] = useState('')
   const [verificationCodeSent, setVerificationCodeSent] = useState(false)
@@ -28,8 +32,26 @@ function LoginPage({ onLogin, onDocumentation }) {
   const [verificationError, setVerificationError] = useState('')
   const [loading, setLoading] = useState(false)
   const [verificationLoading, setVerificationLoading] = useState(false)
+  const [emailEnabled, setEmailEnabled] = useState(true)
   const uploadFileRef = useRef(null)
   const toast = useToast()
+  const requiresEmailVerification = emailEnabled && emailConsent === true
+  const isCreateFlow = selectedFlow === 'create'
+  const isUploadFlow = selectedFlow === 'upload'
+
+  // Fetch email status on component mount
+  useEffect(() => {
+    const fetchEmailStatus = async () => {
+      try {
+        const response = await axios.get(`${API_URL}/config/email-status`)
+        setEmailEnabled(response.data.email_enabled)
+      } catch (error) {
+        // If error, assume email is enabled (graceful fallback)
+        setEmailEnabled(true)
+      }
+    }
+    fetchEmailStatus()
+  }, [])
 
   const validateEmailInput = (value) => {
     if (!String(value || '').trim()) {
@@ -91,7 +113,7 @@ function LoginPage({ onLogin, onDocumentation }) {
       onLogin(data._id, data._id, data.type)
       toast({
         title: 'Session loaded',
-        description: `${data.type === 'stakeholder' ? 'Stakeholder' : 'Practitioner'} session ready`,
+        description: `${data.type === 'stakeholder' ? 'Decision-maker' : 'Practitioner'} session ready`,
         status: 'success',
         duration: 2000,
         isClosable: true,
@@ -109,6 +131,35 @@ function LoginPage({ onLogin, onDocumentation }) {
   }
 
   const handleCreatePractitionerSession = async () => {
+    if (!requiresEmailVerification) {
+      setLoading(true)
+      try {
+        const response = await axios.post(`${API_URL}/study-session`, {
+          auto_generate: true,
+        })
+        const createdStudyId = response.data?.study_session_id || ''
+        onLogin(createdStudyId, createdStudyId, 'practitioner')
+        toast({
+          title: 'Study session created',
+          description: `Study code: ${createdStudyId}`,
+          status: 'success',
+          duration: 3000,
+          isClosable: true,
+        })
+      } catch (error) {
+        toast({
+          title: 'Request failed',
+          description: error.response?.data?.error || 'Failed to create study session',
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        })
+      } finally {
+        setLoading(false)
+      }
+      return
+    }
+
     if (!email.trim()) {
       setVerificationError('Enter and verify your email before creating the case study.')
       return
@@ -147,7 +198,7 @@ function LoginPage({ onLogin, onDocumentation }) {
   }
 
   const handleUploadCaseStudy = async () => {
-    if (!email.trim() || !isEmailVerified) {
+    if (requiresEmailVerification && (!email.trim() || !isEmailVerified)) {
       setVerificationError('Verify your email before uploading a case study backup.')
       return
     }
@@ -158,7 +209,9 @@ function LoginPage({ onLogin, onDocumentation }) {
     setLoading(true)
     const formData = new FormData()
     formData.append('file', file)
-    formData.append('contact_email', email.trim())
+    if (requiresEmailVerification) {
+      formData.append('contact_email', email.trim())
+    }
 
     try {
       const response = await axios.post(
@@ -200,6 +253,14 @@ function LoginPage({ onLogin, onDocumentation }) {
   }
 
   const handleBack = () => {
+    setEmail('')
+    resetEmailVerificationState()
+  }
+
+  const handleFlowSelection = (nextFlow) => {
+    setCode('')
+    setSelectedFlow(nextFlow)
+    setEmailConsent(null)
     setEmail('')
     resetEmailVerificationState()
   }
@@ -257,22 +318,40 @@ function LoginPage({ onLogin, onDocumentation }) {
   }
 
   const getPrimaryActionLabel = () => {
+    if (!requiresEmailVerification) {
+      return isCreateFlow ? 'Create new empty session' : 'Upload case study (.zip)'
+    }
     if (!verificationCodeSent) return 'Send code'
     if (!isEmailVerified) return 'Verify code'
-    return 'Create case study'
+    return isCreateFlow ? 'Create new empty session' : 'Upload case study (.zip)'
   }
 
   const getPrimaryInstruction = () => {
+    if (!requiresEmailVerification) {
+      return isCreateFlow
+        ? 'Create a new empty session directly without email verification.'
+        : 'Upload a ZIP backup directly without email verification.'
+    }
     if (!verificationCodeSent) {
       return 'Enter your email, then click the button to send a verification code.'
     }
     if (!isEmailVerified) {
       return 'Enter the verification code you received, then click the button to verify.'
     }
-    return 'Choose whether to create a new case study or upload an existing ZIP backup.'
+    return isCreateFlow
+      ? 'Email verified. Click to create a new empty session.'
+      : 'Email verified. Upload your ZIP backup file.'
   }
 
   const handlePrimaryAction = async () => {
+    if (!requiresEmailVerification) {
+      if (isCreateFlow) {
+        await handleCreatePractitionerSession()
+      } else if (isUploadFlow) {
+        uploadFileRef.current?.click()
+      }
+      return
+    }
     if (!verificationCodeSent) {
       await handleSendVerificationCode()
       return
@@ -281,7 +360,11 @@ function LoginPage({ onLogin, onDocumentation }) {
       await handleConfirmVerificationCode()
       return
     }
-    await handleCreatePractitionerSession()
+    if (isCreateFlow) {
+      await handleCreatePractitionerSession()
+      return
+    }
+    uploadFileRef.current?.click()
   }
 
   return (
@@ -365,122 +448,192 @@ function LoginPage({ onLogin, onDocumentation }) {
 
         <GridItem p={{ base: 6, md: 10 }} bg="white">
           <VStack spacing={6} align="stretch">
-            <Box>
-              <Heading size="md" mb={2}>Access Existing Session</Heading>
-              <Text color="gray.600" fontSize="sm">
-                Enter the session code provided by your practitioner to continue.
-                <br />
-                If you are a practitioner, enter the session code you received by email when you
-                created the case study, or create a new one.
-              </Text>
-            </Box>
-
-            <Box>
-              <FormLabel fontWeight="medium" mb={2}>
-                Session code
-              </FormLabel>
-              <HStack spacing={3}>
-                <Input
-                  placeholder="Enter session code"
-                  value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleDetectAndLogin()}
-                  isDisabled={loading}
-                  bg="white"
-                  w="50%"
-                />
-                <Button colorScheme="blue" isLoading={loading} onClick={handleDetectAndLogin} w="50%">
-                  Access session
-                </Button>
-              </HStack>
-            </Box>
-
-            <Divider />
-
-            <VStack spacing={3} align="stretch">
-              <Heading size="sm">Create New Case Study</Heading>
-              <Text color="gray.600" fontSize="sm">
-                {getPrimaryInstruction()}
-              </Text>
-              {!isEmailVerified && (
-                <Input
-                  placeholder={!verificationCodeSent ? 'Email address' : 'Verification code'}
-                  value={entryValue}
-                  onChange={(e) => {
-                    const nextValue = e.target.value
-                    setEntryValue(nextValue)
-                    setVerificationError('')
-
-                    if (!verificationCodeSent) {
-                      setEmail(nextValue)
-                      resetEmailVerificationState()
-                      setEntryValue(nextValue)
-                    }
-                  }}
-                  onKeyDown={(e) => e.key === 'Enter' && handlePrimaryAction()}
-                  isDisabled={loading || verificationLoading}
-                  bg="white"
-                />
-              )}
-              {isEmailVerified && (
-                <Text color="green.700" fontSize="sm">
-                  Verified email: {email}
-                </Text>
-              )}
-              {verificationError && (
-                <Text color="red.600" fontSize="sm">
-                  {verificationError}
-                </Text>
-              )}
-              <HStack spacing={3}>
-                {verificationCodeSent && !isEmailVerified && (
-                  <Button
-                    variant="ghost"
-                    onClick={handleBack}
-                    isDisabled={loading || verificationLoading}
-                    w="50%"
-                  >
-                    Back
-                  </Button>
-                )}
-                {isEmailVerified && (
-                  <Button
-                    variant="outline"
-                    colorScheme="blue"
-                    onClick={() => uploadFileRef.current?.click()}
-                    isDisabled={loading || verificationLoading}
-                    w="50%"
-                  >
-                    Upload case study (.zip)
-                  </Button>
-                )}
+            <VStack spacing={4} align="stretch">
+              <Box>
+                <Heading size="md" mb={2}>
+                  Start here
+                </Heading>
+              </Box>
+              <VStack spacing={3} align="stretch">
                 <Button
+                  variant={selectedFlow === 'access' ? 'solid' : 'outline'}
                   colorScheme="blue"
-                  variant={isEmailVerified ? 'solid' : 'outline'}
-                  isLoading={loading || verificationLoading}
-                  onClick={handlePrimaryAction}
-                  w={verificationCodeSent ? '50%' : '100%'}
+                  size="lg"
+                  w="full"
+                  onClick={() => handleFlowSelection('access')}
                 >
-                  {getPrimaryActionLabel()}
+                  Access an existing session
                 </Button>
-              </HStack>
-              <Text color="gray.600" fontSize="sm">
-                No account is created in this process. Your email is used only for essential case-study
-                notifications (session confirmation, elicitation progress, completion alerts, and inactivity
-                warnings) and to send you a backup copy of your data before it is deleted. Your email address
-                is stored on servers operated by the Paul Scherrer Institute (PSI) in Switzerland and is
-                automatically and permanently deleted together with all case-study data after{' '}
-                <strong>12 months of inactivity</strong>. You may request erasure at any time by contacting
-                mcda-up@psi.ch.
-              </Text>
-              <Input
-                ref={uploadFileRef}
-                type="file"
-                accept=".zip"
-                display="none"
-                onChange={handleUploadCaseStudy}
-              />
+                <Button
+                  variant={isCreateFlow ? 'solid' : 'outline'}
+                  colorScheme="blue"
+                  size="lg"
+                  w="full"
+                  onClick={() => handleFlowSelection('create')}
+                >
+                  Create a new empty case study
+                </Button>
+                <Button
+                  variant={isUploadFlow ? 'solid' : 'outline'}
+                  colorScheme="blue"
+                  size="lg"
+                  w="full"
+                  onClick={() => handleFlowSelection('upload')}
+                >
+                  Upload a case study (.zip file)
+                </Button>
+              </VStack>
             </VStack>
+
+            {selectedFlow === 'access' && (
+              <>
+                <Divider />
+                <Box>
+                  <Heading size="sm" mb={2}>Access Existing Session</Heading>
+                  <Text color="gray.600" fontSize="sm">
+                    Enter the session code provided by your practitioner to continue.
+                    <br />
+                    If you are a practitioner, enter the session code you received by email when you
+                    created the case study, or create a new one.
+                  </Text>
+                </Box>
+                <Box>
+                  <FormLabel fontWeight="medium" mb={2}>
+                    Session code
+                  </FormLabel>
+                  <HStack spacing={3}>
+                    <Input
+                      placeholder="Enter session code"
+                      value={code}
+                      onChange={(e) => setCode(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleDetectAndLogin()}
+                      isDisabled={loading}
+                      bg="white"
+                      w="50%"
+                    />
+                    <Button colorScheme="blue" isLoading={loading} onClick={handleDetectAndLogin} w="50%">
+                      Access session
+                    </Button>
+                  </HStack>
+                </Box>
+              </>
+            )}
+
+            {(isCreateFlow || isUploadFlow) && (
+              <>
+                <Divider />
+                <VStack spacing={3} align="stretch">
+                  <Heading size="sm">{isCreateFlow ? 'Create New Session' : 'Upload Case Study'}</Heading>
+                  <Text color="gray.600" fontSize="sm">
+                    Do you agree to share your email?
+                  </Text>
+                  <Text color="gray.600" fontSize="sm">
+                    Without your email, you may permanently lose access to this case study if you do not save your
+                    code. Your email also helps with session recovery, updates, and support. By providing your email,
+                    you agree to the{' '}
+                    <Link href={PSI_TERMS_OF_USE_URL} isExternal color="blue.700">
+                      PSI terms of use
+                    </Link>
+                    .
+                  </Text>
+                  <HStack spacing={3}>
+                    <Button
+                      variant={emailConsent === true ? 'solid' : 'outline'}
+                      colorScheme="blue"
+                      onClick={() => {
+                        setEmailConsent(true)
+                        setEmail('')
+                        resetEmailVerificationState()
+                      }}
+                    >
+                      Yes, share email
+                    </Button>
+                    <Button
+                      variant={emailConsent === false ? 'solid' : 'outline'}
+                      onClick={() => {
+                        setEmailConsent(false)
+                        setEmail('')
+                        resetEmailVerificationState()
+                      }}
+                    >
+                      No, continue without email
+                    </Button>
+                  </HStack>
+
+                  {emailConsent !== null && (
+                    <>
+                      <Text color="gray.600" fontSize="sm">
+                        {getPrimaryInstruction()}
+                      </Text>
+                      {requiresEmailVerification && !isEmailVerified && (
+                        <Input
+                          placeholder={!verificationCodeSent ? 'Email address' : 'Verification code'}
+                          value={entryValue}
+                          onChange={(e) => {
+                            const nextValue = e.target.value
+                            setEntryValue(nextValue)
+                            setVerificationError('')
+
+                            if (!verificationCodeSent) {
+                              setEmail(nextValue)
+                              resetEmailVerificationState()
+                              setEntryValue(nextValue)
+                            }
+                          }}
+                          onKeyDown={(e) => e.key === 'Enter' && handlePrimaryAction()}
+                          isDisabled={loading || verificationLoading}
+                          bg="white"
+                        />
+                      )}
+                      {requiresEmailVerification && isEmailVerified && (
+                        <Text color="green.700" fontSize="sm">
+                          Verified email: {email}
+                        </Text>
+                      )}
+                      {requiresEmailVerification && verificationError && (
+                        <Text color="red.600" fontSize="sm">
+                          {verificationError}
+                        </Text>
+                      )}
+                      {!emailEnabled && emailConsent === true && (
+                        <Text color="gray.600" fontSize="sm">
+                          Email verification is currently unavailable, so you can continue without email.
+                        </Text>
+                      )}
+                      <HStack spacing={3}>
+                        {requiresEmailVerification && verificationCodeSent && !isEmailVerified && (
+                          <Button
+                            variant="ghost"
+                            onClick={handleBack}
+                            isDisabled={loading || verificationLoading}
+                            w="50%"
+                          >
+                            Back
+                          </Button>
+                        )}
+                        <Button
+                          colorScheme="blue"
+                          variant="solid"
+                          isLoading={loading || verificationLoading}
+                          onClick={handlePrimaryAction}
+                          w={requiresEmailVerification && verificationCodeSent && !isEmailVerified ? '50%' : '100%'}
+                        >
+                          {getPrimaryActionLabel()}
+                        </Button>
+                      </HStack>
+                    </>
+                  )}
+                </VStack>
+              </>
+            )}
+
+            <Input
+              ref={uploadFileRef}
+              type="file"
+              accept=".zip"
+              display="none"
+              onChange={handleUploadCaseStudy}
+            />
           </VStack>
         </GridItem>
       </Grid>
@@ -496,17 +649,18 @@ function LoginPage({ onLogin, onDocumentation }) {
             <Text fontWeight="semibold">Disclaimers</Text>
             <Text fontSize="sm" color="gray.600">This software open-source, licensed under MIT license</Text>
             <Text fontSize="sm" color="gray.600">No warranty or guarantee of fitness for purpose.</Text>
-            <Text fontSize="sm" color="gray.600">
-              Practitioner email addresses are stored solely for operational notifications and are
-              automatically deleted after 12 months of inactivity in accordance with EU GDPR and the
-              Swiss nFADP.
-            </Text>
+            {emailEnabled && (
+              <Text fontSize="sm" color="gray.600">
+                Practitioner email addresses are stored solely for operational notifications and are
+                automatically deleted after 12 months of inactivity in accordance with EU GDPR and the
+                Swiss nFADP.
+              </Text>
+            )}
           </VStack>
 
           <VStack align="start" spacing={1}>
             <Text fontWeight="semibold">Legal and policy links</Text>
-            <Link href="https://www.psi.ch/en/disclaimer-and-privacy-policy" isExternal color="blue.700">Privacy notice</Link>
-            <Link href="https://www.psi.ch/en/disclaimer-and-privacy-policy" isExternal color="blue.700">Terms of use</Link>
+            <Link href={PSI_TERMS_OF_USE_URL} isExternal color="blue.700">PSI terms of use</Link>
           </VStack>
         </SimpleGrid>
       </Box>

@@ -166,6 +166,25 @@ class TestEmailServiceOAuth2:
         assert 'missing required settings' in result['error']
 
 
+class TestEmailServiceDisableFlag:
+    def test_disable_email_skips_even_when_oauth2_secret_missing(self, monkeypatch):
+        monkeypatch.setenv('DISABLE_EMAIL', 'true')
+        monkeypatch.setenv('SMTP_HOST', 'smtp.office365.com')
+        monkeypatch.setenv('EMAIL_AUTH_MODE', 'oauth2')
+        monkeypatch.setenv('SMTP_USER', 'sender@example.com')
+        monkeypatch.setenv('OAUTH2_TENANT_ID', 'tenant-id')
+        monkeypatch.setenv('OAUTH2_CLIENT_ID', 'client-id')
+        monkeypatch.delenv('OAUTH2_CLIENT_SECRET', raising=False)
+
+        from app.services.email_service import EmailService
+        svc = EmailService()
+
+        result = svc.send_session_confirmation('user@example.com', 'sid-disabled')
+
+        assert svc.is_disabled is True
+        assert result['status'] == 'skipped'
+
+
 class TestEmailServiceMessageContent:
     """Validate that messages contain expected content."""
 

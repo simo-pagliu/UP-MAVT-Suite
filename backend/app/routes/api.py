@@ -77,6 +77,8 @@ def require_admin_token(f):
 
 def _send(content, filename, mimetype):
     """Helper to send bytes or BytesIO as a file attachment."""
+    if mimetype == 'text/csv':
+        mimetype = 'text/csv; charset=utf-8'
     buf = content if isinstance(content, io.BytesIO) else io.BytesIO(content)
     return send_file(buf, mimetype=mimetype, as_attachment=True, download_name=filename)
 
@@ -103,10 +105,29 @@ def health_check():
 
 
 # --------------------------------------------------------------------------- #
+# Configuration
+# --------------------------------------------------------------------------- #
+@bp.route('/config/email-status', methods=['GET'])
+def get_email_status():
+    """Get the email system status (enabled or disabled)."""
+    email_svc = EmailService()
+    return jsonify({
+        'email_enabled': not email_svc.is_disabled,
+    }), 200
+
+
+# --------------------------------------------------------------------------- #
 # Email verification
 # --------------------------------------------------------------------------- #
 @bp.route('/email-verification/request', methods=['POST'])
 def request_email_verification_code():
+    email_svc = EmailService()
+    
+    if email_svc.is_disabled:
+        return jsonify({
+            'error': 'Email system is disabled. Cannot request verification code.',
+        }), 400
+    
     data = request.json or {}
     email = str(data.get('email') or '').strip()
     verification_svc = EmailVerificationService(current_app.db)
@@ -115,7 +136,6 @@ def request_email_verification_code():
     if not issued.get('ok'):
         return jsonify({'error': issued.get('error', 'Invalid request')}), 400
 
-    email_svc = EmailService()
     send_result = email_svc.send_email_verification_code(issued['email'], issued['code'])
     status = send_result.get('status')
 
@@ -137,6 +157,13 @@ def request_email_verification_code():
 
 @bp.route('/email-verification/confirm', methods=['POST'])
 def confirm_email_verification_code():
+    email_svc = EmailService()
+    
+    if email_svc.is_disabled:
+        return jsonify({
+            'error': 'Email system is disabled. Cannot confirm verification code.',
+        }), 400
+    
     data = request.json or {}
     email = str(data.get('email') or '').strip()
     code = str(data.get('code') or '').strip()
@@ -516,18 +543,30 @@ def complete_elicitation_session(session_id):
 def create_study_session():
     data = request.json or {}
     svc = StudySessionService(current_app.db)
+    email_svc = EmailService()
+    
     code = data.get('code')
     auto_generate = bool(data.get('auto_generate', False))
     if not code and auto_generate:
         code = svc.generate_unique_study_code()
+    
     creator_email = str(data.get('creator_email') or '').strip()
-    if creator_email:
+    
+    # Email verification is required only if email is enabled
+    if creator_email and not email_svc.is_disabled:
         verification_token = str(data.get('email_verification_token') or '').strip()
         verification_svc = EmailVerificationService(current_app.db)
         if not verification_svc.consume_verification_token(creator_email, verification_token):
             return jsonify({
                 'error': 'Email verification required. Request and confirm a verification code first.',
             }), 400
+    elif email_svc.is_disabled:
+        # Email is disabled: creator_email must not be provided
+        if creator_email:
+            return jsonify({
+                'error': 'Cannot provide creator_email when email system is disabled.',
+            }), 400
+    
     study_session_id = svc.create(
         code,
         title=data.get('title', ''),
@@ -535,8 +574,7 @@ def create_study_session():
         creator_email=creator_email,
     )
     email_status = None
-    if creator_email:
-        email_svc = EmailService()
+    if creator_email and not email_svc.is_disabled:
         result = email_svc.send_session_confirmation(creator_email, study_session_id)
         email_status = result.get('status')
     response = {'study_session_id': study_session_id, 'code': code}
@@ -568,7 +606,6 @@ def update_study_session(study_session_id):
     if 'features' in data or 'vf_method' in data:
         result = svc.update_features(
             study_session_id,
-            data.get('features', {}),
             data.get('vf_method'),
         )
     if 'title' in data or 'description' in data:

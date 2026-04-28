@@ -66,8 +66,7 @@ const detectHierarchicalInputFromCriteria = (items) => {
 
 function InputPage({ studySessionId }, ref) {
   const [name, setName] = useState('')
-  const [metadataDefaults, setMetadataDefaults] = useState({ title: '', description: '' })
-  const [metadataFormKey, setMetadataFormKey] = useState(0)
+  const [metadataValues, setMetadataValues] = useState({ title: '', description: '' })
   const [criteria, setCriteria] = useState([])
   const [originalCriteria, setOriginalCriteria] = useState([])
   const [loading, setLoading] = useState(false)
@@ -77,11 +76,12 @@ function InputPage({ studySessionId }, ref) {
   const [hasExistingSessions, setHasExistingSessions] = useState(false)
   const [hasModifiedInput, setHasModifiedInput] = useState(false)
   const [savingMetadata, setSavingMetadata] = useState(false)
-  const [features, setFeatures] = useState({ qi: false, vf: false, bwt: false })
-  const [savingFeatures, setSavingFeatures] = useState(false)
-  const [featureError, setFeatureError] = useState('')
   const [isHierarchicalInput, setIsHierarchicalInput] = useState(false)
   const [savedGroups, setSavedGroups] = useState(null) // stashed groups when hierarchy mode is turned off
+  const metadataLoadedRef = useRef(false)
+  const metadataPersistedRef = useRef({ title: '', description: '' })
+  const metadataLastAttemptRef = useRef({ title: '', description: '' })
+  const metadataSaveTimerRef = useRef(null)
   
   // Distribution modal state
   const { isOpen: isDistModalOpen, onOpen: onDistModalOpen, onClose: onDistModalClose } = useDisclosure()
@@ -94,8 +94,6 @@ function InputPage({ studySessionId }, ref) {
   
   const toast = useToast()
   const fileInputRef = useRef(null)
-  const studyTitleRef = useRef(null)
-  const studyDescriptionRef = useRef(null)
 
   const parseCsvLine = (line) => {
     const values = []
@@ -157,15 +155,14 @@ function InputPage({ studySessionId }, ref) {
   useEffect(() => {
     if (!studySessionId) {
       setName('')
-      setMetadataDefaults({ title: '', description: '' })
-      setMetadataFormKey((prev) => prev + 1)
+      setMetadataValues({ title: '', description: '' })
+      metadataPersistedRef.current = { title: '', description: '' }
+      metadataLastAttemptRef.current = { title: '', description: '' }
       setCriteria([])
       setOriginalCriteria([])
       setIsExistingStudySession(false)
       setIsLocked(true)
       setHasExistingSessions(false)
-      setFeatures({ qi: false, vf: false, bwt: false })
-      setFeatureError('')
       setIsHierarchicalInput(false)
       setSavedGroups(null)
       return
@@ -173,16 +170,22 @@ function InputPage({ studySessionId }, ref) {
 
     const fetchStudy = async () => {
       try {
+        metadataLoadedRef.current = false
         const studyResponse = await axios.get(`${API_URL}/study-session/${studySessionId}`)
         const study = studyResponse.data
         setName(studySessionId)
-        setMetadataDefaults({
+        setMetadataValues({
           title: study.title || '',
           description: study.description || '',
         })
-        setFeatures(study.features || { qi: false, vf: false, bwt: false })
-        setFeatureError('')
-        setMetadataFormKey((prev) => prev + 1)
+        metadataPersistedRef.current = {
+          title: study.title || '',
+          description: study.description || '',
+        }
+        metadataLastAttemptRef.current = {
+          title: study.title || '',
+          description: study.description || '',
+        }
         if (study.criteria && Array.isArray(study.criteria)) {
           const normalized = normalizeCriteria(study.criteria)
           setCriteria(normalized)
@@ -208,33 +211,59 @@ function InputPage({ studySessionId }, ref) {
     fetchStudy()
   }, [studySessionId])
 
-  const handleFeatureToggle = async (featureName, enabled) => {
+  const saveStudyMetadata = async (title, description) => {
     if (!studySessionId) return
-
-    const previous = features
-    const updated = { ...features, [featureName]: enabled }
-    setFeatures(updated)
-    setFeatureError('')
-    setSavingFeatures(true)
-
+    setSavingMetadata(true)
     try {
       await axios.patch(`${API_URL}/study-session/${studySessionId}`, {
-        features: updated,
+        title,
+        description,
       })
+
+      // Keep the last saved values in sync so autosave only fires on real edits.
+      metadataPersistedRef.current = { title, description }
+      metadataLastAttemptRef.current = { title, description }
+      setMetadataValues({ title, description })
     } catch (error) {
-      setFeatures(previous)
-      setFeatureError(error.response?.data?.error || 'Failed to update workflow features')
+      toast({
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to save case study details',
+        status: 'error',
+        duration: 4000,
+        isClosable: true,
+      })
     } finally {
-      setSavingFeatures(false)
+      setSavingMetadata(false)
     }
   }
+
+  useEffect(() => {
+    if (!studySessionId || !isExistingStudySession) return
+    if (!metadataLoadedRef.current) {
+      metadataLoadedRef.current = true
+      return
+    }
+
+    const title = metadataValues.title || ''
+    const description = metadataValues.description || ''
+    const lastSaved = metadataPersistedRef.current || { title: '', description: '' }
+    const lastAttempt = metadataLastAttemptRef.current || { title: '', description: '' }
+    if (title === lastSaved.title && description === lastSaved.description) return
+    if (title === lastAttempt.title && description === lastAttempt.description) return
+
+    window.clearTimeout(metadataSaveTimerRef.current)
+    metadataSaveTimerRef.current = window.setTimeout(() => {
+      metadataLastAttemptRef.current = { title, description }
+      saveStudyMetadata(title, description)
+    }, 600)
+
+    return () => window.clearTimeout(metadataSaveTimerRef.current)
+  }, [studySessionId, isExistingStudySession, metadataValues.title, metadataValues.description])
 
   const alternativesComplete = criteria.length > 0 && criteria.every((criterion) => {
     const alternatives = Array.isArray(criterion.alternatives) ? criterion.alternatives : []
     return alternatives.length > 0 && alternatives.every((alt) => alt?.name)
   })
-
-  const alternativesRequiredByEnabledFeatures = Boolean(features.qi || features.bwt)
 
   const handleUnlock = () => {
     if (hasExistingSessions) {
@@ -822,43 +851,13 @@ function InputPage({ studySessionId }, ref) {
     }
   }
 
-  const handleSaveStudyMetadata = async () => {
-    if (!studySessionId) return
-    setSavingMetadata(true)
-    try {
-      const title = studyTitleRef.current?.value ?? ''
-      const description = studyDescriptionRef.current?.value ?? ''
-      await axios.patch(`${API_URL}/study-session/${studySessionId}`, {
-        title,
-        description,
-      })
-
-      // Keep defaults in sync with saved values without introducing per-keystroke re-renders.
-      setMetadataDefaults({ title, description })
-      toast({
-        title: 'Completed',
-        description: 'Case study details saved',
-        status: 'success',
-        duration: 2500,
-        isClosable: true,
-      })
-    } catch (error) {
-      toast({
-        title: 'Request failed',
-        description: error.response?.data?.error || 'Failed to save case study details',
-        status: 'error',
-        duration: 4000,
-        isClosable: true,
-      })
-    } finally {
-      setSavingMetadata(false)
-    }
-  }
-
   return (
     <Box bg="white" p={6} borderRadius="lg" boxShadow="sm">
       <VStack spacing={6} align="stretch">
         <Heading as="h1" size="lg">Input Definition</Heading>
+        <Text fontSize="sm" color="gray.600">
+          Here you can add the basic information about the case study: a title and a description that will be shown to decision makers to better frame the context. Below, you can define the decision matrix.
+        </Text>
         {!studySessionId && (
           <Box borderWidth={1} borderRadius="md" p={4} bg="gray.50">
             <Text fontSize="sm" color="gray.600">
@@ -874,94 +873,32 @@ function InputPage({ studySessionId }, ref) {
               <FormControl>
                 <FormLabel mb={1}>Title</FormLabel>
                 <Input
-                  key={`title-${metadataFormKey}`}
-                  ref={studyTitleRef}
-                  defaultValue={metadataDefaults.title}
+                  value={metadataValues.title}
+                  onChange={(e) => setMetadataValues((prev) => ({ ...prev, title: e.target.value }))}
                   placeholder="Enter case study title"
                 />
               </FormControl>
               <FormControl>
                 <FormLabel mb={1}>Description</FormLabel>
                 <Textarea
-                  key={`description-${metadataFormKey}`}
-                  ref={studyDescriptionRef}
-                  defaultValue={metadataDefaults.description}
+                  value={metadataValues.description}
+                  onChange={(e) => setMetadataValues((prev) => ({ ...prev, description: e.target.value }))}
                   placeholder="Enter a short description of this case study"
                   rows={4}
                 />
               </FormControl>
-              <HStack justify="flex-end">
-                <Button
-                  colorScheme="blue"
-                  onClick={handleSaveStudyMetadata}
-                  isLoading={savingMetadata}
-                >
-                  Save Details
-                </Button>
-              </HStack>
             </VStack>
 
-            <Divider />
-
-            <VStack align="stretch" spacing={3}>
-              <Heading as="h2" size="sm">Workflow Features</Heading>
-              <Text fontSize="sm" color="gray.600">
-                Choose which stakeholder workflow steps are required for this case study.
-              </Text>
-
-              <HStack spacing={6} wrap="wrap">
-                <Checkbox
-                  isChecked={features.qi}
-                  onChange={(e) => handleFeatureToggle('qi', e.target.checked)}
-                  isDisabled={savingFeatures || !studySessionId}
-                >
-                  <VStack align="start" spacing={0}>
-                    <Text fontWeight="medium">Qualitative Indicators</Text>
-                    <Text fontSize="xs" color="gray.600">Enable QI and use the Qualitative checkbox per criterion below</Text>
-                  </VStack>
-                </Checkbox>
-
-                <Checkbox
-                  isChecked={features.vf}
-                  onChange={(e) => handleFeatureToggle('vf', e.target.checked)}
-                  isDisabled={savingFeatures || !studySessionId}
-                >
-                  <VStack align="start" spacing={0}>
-                    <Text fontWeight="medium">Quantitative Indicators</Text>
-                    <Text fontSize="xs" color="gray.600">Enable Value Functions (VF)</Text>
-                  </VStack>
-                </Checkbox>
-
-                <Checkbox
-                  isChecked={features.bwt}
-                  onChange={(e) => handleFeatureToggle('bwt', e.target.checked)}
-                  isDisabled={savingFeatures || !studySessionId}
-                >
-                  <VStack align="start" spacing={0}>
-                    <Text fontWeight="medium">Weight Elicitation</Text>
-                    <Text fontSize="xs" color="gray.600">Enable BWT weight elicitation</Text>
-                  </VStack>
-                </Checkbox>
-              </HStack>
-
-              {featureError && (
-                <Alert status="error" borderRadius="md">
-                  <AlertIcon />
-                  <Text fontSize="sm">{featureError}</Text>
-                </Alert>
-              )}
-
-              {alternativesRequiredByEnabledFeatures && !alternativesComplete && (
-                <Alert status="warning" borderRadius="md">
-                  <AlertIcon />
-                  <Text fontSize="sm">
-                    Enabled features require alternatives for all criteria. Complete the alternatives table before creating elicitation sessions.
-                  </Text>
-                </Alert>
-              )}
-            </VStack>
-
-            <Divider />
+              <VStack align="stretch" spacing={3}>
+                {!alternativesComplete && (
+                  <Alert status="warning" borderRadius="md">
+                    <AlertIcon />
+                    <Text fontSize="sm">
+                      All criteria must have alternatives before creating elicitation sessions.
+                    </Text>
+                  </Alert>
+                )}
+              </VStack>
 
             <VStack align="stretch" spacing={4}>
               <Checkbox
@@ -1116,7 +1053,7 @@ function InputPage({ studySessionId }, ref) {
                           <Checkbox
                             isChecked={criterion.is_qualitative}
                             onChange={(e) => handleCellChange(idx, 'is_qualitative', e.target.checked)}
-                            isDisabled={isLocked || !features.qi}
+                            isDisabled={isLocked}
                             size="sm"
                           >
                             <Text fontSize="xs">Qualitative (QI)</Text>

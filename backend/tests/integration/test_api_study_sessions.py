@@ -122,15 +122,6 @@ class TestGetStudyByCode:
 # ---------------------------------------------------------------------------
 
 class TestUpdateStudySession:
-    def test_update_features_ok(self, client):
-        sid = create_study(client)
-        resp = client.patch(f'/api/study-session/{sid}', json={
-            'features': {'qi': True, 'vf': False, 'bwt': True}
-        })
-        assert resp.status_code == 200
-        assert resp.json['features']['qi'] is True
-        assert resp.json['features']['bwt'] is True
-
     def test_patch_without_features_returns_study(self, client):
         sid = create_study(client)
         resp = client.patch(f'/api/study-session/{sid}', json={})
