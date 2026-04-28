@@ -354,12 +354,12 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
     }
   }
 
-  const handleToggleLock = async (sessionId, isLocked) => {
+  const handleToggleLock = async (sessionId) => {
     setTogglingLockById((prev) => ({ ...prev, [sessionId]: true }))
     try {
       await axios.put(`${API_URL}/session/${sessionId}/lock-session`)
       toast({
-        title: isLocked ? 'Session unlocked' : 'Session locked',
+        title: 'Lock state updated',
         status: 'success',
         duration: 2000,
         isClosable: true,
@@ -701,7 +701,7 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
                         colorScheme={session.session_locked ? 'red' : 'green'}
                         variant="solid"
                         aria-label={session.session_locked ? 'Unlock session' : 'Lock session'}
-                        onClick={() => handleToggleLock(session._id, session.session_locked)}
+                        onClick={() => handleToggleLock(session._id)}
                         isLoading={Boolean(togglingLockById[session._id])}
                         isDisabled={Boolean(togglingLockById[session._id])}
                       >
