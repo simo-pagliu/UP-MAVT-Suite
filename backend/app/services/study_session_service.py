@@ -326,13 +326,7 @@ class StudySessionService:
         study = self._studies.find_by_id(study_session_id)
         if not study:
             raise NotFoundError('Study session not found')
-        update_doc = {
-            'features': {
-                'qi': True,
-                'vf': True,
-                'bwt': True,
-            }
-        }
+        update_doc = {}
         normalized_method = self._normalize_vf_method(vf_method)
         if normalized_method:
             update_doc['vf_method'] = normalized_method
@@ -499,7 +493,7 @@ class StudySessionService:
         if not input_doc:
             raise ValidationError('Study input not found')
         criteria = input_doc.get('criteria', [])
-        self._session_svc.validate_input_for_features(criteria, {'qi': True, 'vf': True, 'bwt': True})
+        self._session_svc.validate_input_for_features(criteria)
         doc = {
             'name': name,
             'friendly_name': '',

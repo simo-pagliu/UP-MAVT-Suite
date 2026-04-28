@@ -90,15 +90,15 @@ class TestValidateInputForFeatures:
     def test_missing_alternatives_raises(self, svc):
         criteria = [{'criterion_name': 'X', 'unit': '', 'alternatives': []}]
         with pytest.raises(ValidationError, match='require at least one alternative'):
-            svc.validate_input_for_features(criteria, {'qi': True, 'vf': False, 'bwt': False})
+            svc.validate_input_for_features(criteria)
 
     def test_missing_name_raises(self, svc):
         criteria = [{'criterion_name': '', 'unit': '', 'alternatives': [{'name': 'A', 'value': '1'}]}]
         with pytest.raises(ValidationError, match='must have a name'):
-            svc.validate_input_for_features(criteria, {'qi': False, 'vf': True, 'bwt': False})
+            svc.validate_input_for_features(criteria)
 
-    def test_valid_criteria_passes_even_if_features_false(self, svc):
-        svc.validate_input_for_features(VALID_CRITERIA, {'qi': False, 'vf': False, 'bwt': False})
+    def test_valid_criteria_passes(self, svc):
+        svc.validate_input_for_features(VALID_CRITERIA)
 
 
 # ---------------------------------------------------------------------------

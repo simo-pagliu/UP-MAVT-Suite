@@ -240,15 +240,13 @@ class SessionService:
         return normalized
 
     @staticmethod
-    def validate_input_for_features(criteria, features):
+    def validate_input_for_features(criteria):
         """Validate that the criteria list satisfies the always-on workflow.
 
         Every criterion must have a name and at least one alternative.
 
         Args:
             criteria (list[dict]): The criteria to validate.
-            features (dict | None): Feature flags, e.g.
-                ``{'qi': True, 'vf': False, 'bwt': False}``.
 
         Raises:
             ValidationError: When a feature constraint is violated.
