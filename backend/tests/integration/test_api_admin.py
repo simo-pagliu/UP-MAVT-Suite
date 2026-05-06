@@ -61,7 +61,7 @@ class TestAdminLogout:
     def test_logout_clears_cookies(self, client):
         _set_access_cookie(client)
         _set_refresh_cookie(client)
-        resp = client.post('/api/admin/logout')
+        resp = client.get('/api/admin/logout')
         assert resp.status_code == 200
         assert resp.json['success'] is True
         # Both cookies should be expired (max_age=0 / expires in the past)
@@ -90,7 +90,7 @@ class TestAdminVerify:
 class TestAdminRefreshToken:
     def test_refresh_with_valid_refresh_cookie(self, client):
         _set_refresh_cookie(client)
-        resp = client.post('/api/admin/refresh')
+        resp = client.get('/api/admin/refresh')
         assert resp.status_code == 200
         assert resp.json['success'] is True
         # New access token must be delivered as a cookie, not in the response body.
@@ -102,16 +102,16 @@ class TestAdminRefreshToken:
         # Placing an access token in the refresh cookie slot must be rejected.
         access_token = AuthenticationService.generate_access_token('admin')
         client.set_cookie('adm_refresh_token', access_token, path='/api')
-        resp = client.post('/api/admin/refresh')
+        resp = client.get('/api/admin/refresh')
         assert resp.status_code == 401
 
     def test_refresh_without_cookie_is_rejected(self, client):
-        resp = client.post('/api/admin/refresh')
+        resp = client.get('/api/admin/refresh')
         assert resp.status_code == 401
 
     def test_refresh_with_invalid_cookie_is_rejected(self, client):
         client.set_cookie('adm_refresh_token', 'invalidtoken', path='/api')
-        resp = client.post('/api/admin/refresh')
+        resp = client.get('/api/admin/refresh')
         assert resp.status_code == 401
 
 

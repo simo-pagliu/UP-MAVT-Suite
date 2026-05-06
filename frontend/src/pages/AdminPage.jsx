@@ -76,7 +76,7 @@ function AdminPage(props, ref) {
         if (verifyError.response?.status === 401) {
           // Access token may have expired; try a silent refresh.
           try {
-            await adminApi.post(`${API_URL}/admin/refresh`)
+            await adminApi.get(`${API_URL}/admin/refresh`)
             setIsAuthenticated(true)
           } catch {
             // Refresh also failed — show the login form.
@@ -95,7 +95,7 @@ function AdminPage(props, ref) {
    */
   const refreshAccessToken = async () => {
     try {
-      await adminApi.post(`${API_URL}/admin/refresh`)
+      await adminApi.get(`${API_URL}/admin/refresh`)
       return true
     } catch {
       // Refresh token expired or invalid – force re-login.
@@ -159,7 +159,7 @@ function AdminPage(props, ref) {
 
   const handleLogout = async () => {
     try {
-      await adminApi.post(`${API_URL}/admin/logout`)
+      await adminApi.get(`${API_URL}/admin/logout`)
     } catch {
       // Proceed with local logout even if the request fails.
     }

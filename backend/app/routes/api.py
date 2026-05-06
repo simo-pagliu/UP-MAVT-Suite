@@ -205,7 +205,7 @@ def admin_login():
     return jsonify({'success': False, 'error': 'Invalid password'}), 401
 
 
-@bp.route('/admin/logout', methods=['POST'])
+@bp.route('/admin/logout', methods=['GET'])
 def admin_logout():
     """Clear admin auth cookies (invalidates the browser session)."""
     resp = make_response(jsonify({'success': True}), 200)
@@ -214,7 +214,7 @@ def admin_logout():
     return resp
 
 
-@bp.route('/admin/refresh', methods=['POST'])
+@bp.route('/admin/refresh', methods=['GET'])
 def admin_refresh_token():
     """Issue a new access token using a valid refresh token cookie."""
     token = request.cookies.get(_COOKIE_REFRESH_TOKEN)
