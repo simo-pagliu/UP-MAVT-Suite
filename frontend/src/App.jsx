@@ -98,7 +98,7 @@ function App() {
       // Clear the HTTPOnly admin JWT cookies on the server side so the
       // auto-restore effect on next page load does not re-authenticate.
       try {
-        await axios.post(`${API_URL}/admin/logout`, {}, { withCredentials: true })
+        await axios.get(`${API_URL}/admin/logout`, { withCredentials: true })
       } catch {
         // Proceed with local logout even if the request fails.
       }
@@ -128,7 +128,7 @@ function App() {
 
     const handleBeforeUnload = () => {
       fetch(`${API_URL}/admin/logout`, {
-        method: 'POST',
+        method: 'GET',
         credentials: 'include',
         keepalive: true,
       })
@@ -154,13 +154,13 @@ function App() {
 
     const restoreAdminSession = async () => {
       const adminAxios = axios.create({ withCredentials: true })
-      try {
+            try {
         await adminAxios.get(`${API_URL}/admin/verify`)
         handleLogin(null, 'admin', 'admin')
       } catch (verifyError) {
         if (verifyError.response?.status === 401) {
           try {
-            await adminAxios.post(`${API_URL}/admin/refresh`)
+            await adminAxios.get(`${API_URL}/admin/refresh`)
             handleLogin(null, 'admin', 'admin')
           } catch {
             // Refresh also failed — show login page
