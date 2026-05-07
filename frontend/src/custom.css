@@ -1,0 +1,60 @@
+:root {
+  --app-bg: #ffffff;
+  --surface: #ffffff;
+  --surface-muted: #f8fafc;
+  --surface-strong: #edf3f8;
+  --text: #1f2933;
+  --muted: #5f6f7a;
+  --border: #d7e0e6;
+  --border-strong: #b9c8d0;
+  --primary: #325D88;
+  --primary-dark: #244767;
+  --primary-soft: #e7eef5;
+  --accent: #b76b43;
+  --accent-soft: #f5e7df;
+  --shadow-sm: 0 2px 8px rgba(31, 41, 51, 0.07);
+  --shadow-md: 0 12px 32px rgba(31, 41, 51, 0.10);
+  --radius: 8px;
+}
+
+.Select-control {
+  min-height: 38px;
+  border-color: var(--border) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+}
+
+.is-focused:not(.is-open) > .Select-control {
+  border-color: var(--primary) !important;
+  box-shadow: 0 0 0 0.18rem rgba(50, 93, 136, 0.16) !important;
+}
+
+.Select-menu-outer {
+  display: block !important;
+  z-index: 1050 !important;
+  border-color: var(--border) !important;
+  border-radius: 0 0 6px 6px;
+  box-shadow: var(--shadow-md);
+}
+
+.Select-option,
+.VirtualizedSelectOption {
+  color: var(--text) !important;
+}
+
+.Select-option.is-focused,
+.VirtualizedSelectFocusedOption {
+  background-color: var(--primary-soft) !important;
+  color: var(--primary-dark) !important;
+}
+
+.Select-option.is-selected,
+.VirtualizedSelectSelectedOption {
+  background-color: #d8e8eb !important;
+  color: var(--primary-dark) !important;
+}
+
+.Select-value-label,
+.Select--single > .Select-control .Select-value {
+  color: var(--text) !important;
+}
