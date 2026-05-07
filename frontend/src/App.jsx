@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Box, Center, Spinner, useToast } from '@chakra-ui/react'
 import axios from 'axios'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { API_URL } from './config'
 import Navigation from './components/Navigation'
 import LoginPage from './pages/LoginPage'
@@ -14,18 +15,48 @@ import CaseStudyPage from './pages/CaseStudyPage'
 import RunUpMavtPage from './pages/RunUpMavtPage'
 import RecapPage from './pages/RecapPage'
 
+const STAKEHOLDER_ROUTE_BY_PAGE = {
+  recap: '/stakeholder/recap',
+  qualitative: '/stakeholder/qualitative',
+  value: '/stakeholder/quantitative',
+  pile: '/stakeholder/weights',
+}
+
+const PRACTITIONER_ROUTE_BY_PAGE = {
+  'input-definition': '/practitioner/input-definition',
+  'case-study': '/practitioner/case-study',
+  'run-up-mavt': '/practitioner/run-up-mavt',
+}
+
+const ROUTE_TO_PAGE = {
+  '/stakeholder/recap': 'recap',
+  '/stakeholder/qualitative': 'qualitative',
+  '/stakeholder/quantitative': 'value',
+  '/stakeholder/weights': 'pile',
+  '/practitioner/input-definition': 'input-definition',
+  '/practitioner/case-study': 'case-study',
+  '/practitioner/run-up-mavt': 'run-up-mavt',
+  '/admin': 'admin',
+}
+
+const DEFAULT_ROUTE_BY_ROLE = {
+  stakeholder: STAKEHOLDER_ROUTE_BY_PAGE.qualitative,
+  practitioner: PRACTITIONER_ROUTE_BY_PAGE['input-definition'],
+  admin: '/admin',
+}
+
+const routeForRole = (role) => DEFAULT_ROUTE_BY_ROLE[role] || '/login'
+
 function App() {
+  const location = useLocation()
+  const navigate = useNavigate()
+
   // Login state
   const [isLoggedIn, setIsLoggedIn] = useState(false)
   const [currentRole, setCurrentRole] = useState(null) // 'stakeholder' or 'practitioner'
   const [currentSessionId, setCurrentSessionId] = useState(null)
   const [currentCode, setCurrentCode] = useState('')
   const [isRestoringSession, setIsRestoringSession] = useState(true)
-  
-  // Page navigation
-  const [stakeholderPage, setStakeholderPage] = useState('qualitative')
-  const [practitionerPage, setPractitionerPage] = useState('input-definition')
-  const [showDocumentation, setShowDocumentation] = useState(false)
 
   // Stakeholder session credentials (for loading specific sessions)
   const [sessionId, setSessionId] = useState(null)
@@ -44,7 +75,7 @@ function App() {
    *
    * @param {string} sessionId - The stakeholder elicitation session ID.
    */
-  const fetchSessionFeatures = async (sessionId) => {
+  const fetchSessionFeatures = useCallback(async (sessionId) => {
     try {
       const { data } = await axios.get(`${API_URL}/session/${sessionId}`)
       // Get the study session ID and fetch features from there
@@ -57,7 +88,7 @@ function App() {
     } catch (error) {
       console.error('Failed to fetch features:', error)
     }
-  }
+  }, [])
 
   /**
    * Called by LoginPage on successful authentication.  Updates the shared
@@ -73,24 +104,20 @@ function App() {
     setCurrentRole(role)
     setCurrentSessionId(id)
     setCurrentCode(code)
-    setShowDocumentation(false)
     
     if (role === 'stakeholder') {
       // For stakeholder, the id is the session id
       setSessionId(id)
       setSessionCode(code)
-      setStakeholderPage('qualitative')
       // Fetch features for this session
       fetchSessionFeatures(id)
     } else if (role === 'practitioner') {
       // For practitioner, the id is the study session id
       setStudySessionId(id)
-      setPractitionerPage('input-definition')
     }
     // For admin role, no additional setup needed
-  // fetchSessionFeatures is stable (only calls setState setters internally)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+    navigate(routeForRole(role), { replace: true })
+  }, [fetchSessionFeatures, navigate])
 
   /** Resets all session state and returns to the login screen. */
   const handleLogout = async () => {
@@ -110,10 +137,8 @@ function App() {
     setSessionId(null)
     setSessionCode('')
     setStudySessionId(null)
-    setStakeholderPage('qualitative')
-    setPractitionerPage('input-definition')
-    setShowDocumentation(false)
     setFeatures({ qi: false, vf: false, bwt: false })
+    navigate('/login', { replace: true })
   }
 
   /**
@@ -183,16 +208,25 @@ function App() {
    */
   const handlePageChange = (page) => {
     if (currentRole === 'stakeholder') {
-      setStakeholderPage(page)
-    } else {
-      setPractitionerPage(page)
+      const route = STAKEHOLDER_ROUTE_BY_PAGE[page]
+      if (route) navigate(route)
+      return
     }
-    setShowDocumentation(false)
+
+    if (currentRole === 'practitioner') {
+      const route = PRACTITIONER_ROUTE_BY_PAGE[page]
+      if (route) navigate(route)
+    }
   }
 
-  /** Toggles the documentation overlay on/off. */
+  /** Toggles the documentation page. */
   const handleDocumentation = () => {
-    setShowDocumentation(!showDocumentation)
+    if (currentRole === 'admin') return
+    if (location.pathname === '/documentation') {
+      navigate(routeForRole(currentRole), { replace: true })
+      return
+    }
+    navigate('/documentation')
   }
 
   /** Handles clicking the UP-MAVT Suite logo to return to homepage */
@@ -200,7 +234,7 @@ function App() {
     if (isLoggedIn) {
       handleLogout()
     } else {
-      setShowDocumentation(false)
+      navigate('/login')
     }
   }
 
@@ -277,22 +311,55 @@ function App() {
       })
   }, [handleLogin, toast])
 
-  const currentPage = currentRole === 'stakeholder' ? stakeholderPage : practitionerPage
+  const currentPage = ROUTE_TO_PAGE[location.pathname] || null
 
   // Reset page if current page becomes disabled due to feature changes
   useEffect(() => {
     if (currentRole === 'stakeholder' && features) {
+      const stakeholderPage = ROUTE_TO_PAGE[location.pathname]
+      if (!stakeholderPage) return
+
       const isCurrentPageDisabled = 
         (stakeholderPage === 'qualitative' && !features.qi) ||
         (stakeholderPage === 'value' && !features.vf) ||
         (stakeholderPage === 'pile' && !features.bwt)
-      
+
       if (isCurrentPageDisabled) {
-        // Switch to recap or the first enabled feature page
-        setStakeholderPage('recap')
+        navigate(STAKEHOLDER_ROUTE_BY_PAGE.recap, { replace: true })
       }
     }
-  }, [features, stakeholderPage, currentRole])
+  }, [features, location.pathname, currentRole, navigate])
+
+  const renderStakeholderPage = (pageNode) => {
+    if (!isLoggedIn) return <Navigate to="/login" replace />
+    if (currentRole !== 'stakeholder') return <Navigate to={routeForRole(currentRole)} replace />
+    return <Box py={8} px={{ base: 4, md: 8 }}>{pageNode}</Box>
+  }
+
+  const renderPractitionerPage = (pageNode) => {
+    if (!isLoggedIn) return <Navigate to="/login" replace />
+    if (currentRole !== 'practitioner') return <Navigate to={routeForRole(currentRole)} replace />
+    return <Box py={8} px={{ base: 4, md: 8 }}>{pageNode}</Box>
+  }
+
+  const renderAdminPage = () => {
+    if (!isLoggedIn) return <Navigate to="/login" replace />
+    if (currentRole !== 'admin') return <Navigate to={routeForRole(currentRole)} replace />
+    return (
+      <Box py={8} px={{ base: 4, md: 8 }}>
+        <AdminPage />
+      </Box>
+    )
+  }
+
+  const renderDocumentationPage = () => {
+    if (currentRole === 'admin') return <Navigate to="/admin" replace />
+    return (
+      <Box py={8} px={{ base: 4, md: 8 }}>
+        <DocumentationPage />
+      </Box>
+    )
+  }
 
   return (
     <Box minH="100vh" bg="gray.50">
@@ -308,6 +375,7 @@ function App() {
         onLogout={handleLogout}
         onDocumentation={handleDocumentation}
       />
+
       {/* Checking for a persisted admin session on first load */}
       {isRestoringSession && (
         <Center h="calc(100vh - 72px)">
@@ -315,62 +383,81 @@ function App() {
         </Center>
       )}
 
-      {/* Login/Documentation for unauthenticated users */}
-      {!isRestoringSession && !isLoggedIn && !showDocumentation && (
-        <LoginPage onLogin={handleLogin} onDocumentation={handleDocumentation} />
-      )}
+      {!isRestoringSession && (
+        <Routes>
+          <Route
+            path="/"
+            element={<Navigate to={isLoggedIn ? routeForRole(currentRole) : '/login'} replace />}
+          />
+          <Route
+            path="/login"
+            element={isLoggedIn ? <Navigate to={routeForRole(currentRole)} replace /> : <LoginPage onLogin={handleLogin} onDocumentation={handleDocumentation} />}
+          />
+          <Route path="/documentation" element={renderDocumentationPage()} />
 
-      {!isRestoringSession && !isLoggedIn && showDocumentation && (
-        <Box py={8} px={{ base: 4, md: 8 }}>
-          <DocumentationPage />
-        </Box>
-      )}
+          <Route
+            path="/stakeholder/qualitative"
+            element={renderStakeholderPage(
+              sessionId && features.qi
+                ? <QualitativeIndicatorsPage sessionId={sessionId} onPageChange={handlePageChange} />
+                : <Navigate to={STAKEHOLDER_ROUTE_BY_PAGE.recap} replace />
+            )}
+          />
+          <Route
+            path="/stakeholder/quantitative"
+            element={renderStakeholderPage(
+              sessionId && features.vf
+                ? <ValueFunctionsPage sessionId={sessionId} onPageChange={handlePageChange} />
+                : <Navigate to={STAKEHOLDER_ROUTE_BY_PAGE.recap} replace />
+            )}
+          />
+          <Route
+            path="/stakeholder/weights"
+            element={renderStakeholderPage(
+              sessionId && features.bwt
+                ? <PileBwtPage sessionId={sessionId} onPageChange={handlePageChange} />
+                : <Navigate to={STAKEHOLDER_ROUTE_BY_PAGE.recap} replace />
+            )}
+          />
+          <Route
+            path="/stakeholder/recap"
+            element={renderStakeholderPage(
+              sessionId
+                ? <RecapPage sessionId={sessionId} onNavigate={handlePageChange} />
+                : <Navigate to={STAKEHOLDER_ROUTE_BY_PAGE.qualitative} replace />
+            )}
+          />
 
-      {!isRestoringSession && isLoggedIn && (
-        <Box py={8} px={{ base: 4, md: 8 }}>
-          {/* Admin Page */}
-          {currentRole === 'admin' && <AdminPage />}
+          <Route
+            path="/practitioner/input-definition"
+            element={renderPractitionerPage(<InputPage studySessionId={studySessionId} />)}
+          />
+          <Route
+            path="/practitioner/case-study"
+            element={renderPractitionerPage(
+              <CaseStudyPage
+                studySessionId={studySessionId}
+                onStudyAccessed={handleStudySessionAccessed}
+                onClearStudy={handleStudySessionCleared}
+              />
+            )}
+          />
+          <Route
+            path="/practitioner/run-up-mavt"
+            element={renderPractitionerPage(
+              studySessionId
+                ? <RunUpMavtPage studySessionId={studySessionId} onNavigate={handlePageChange} />
+                : <Navigate to={PRACTITIONER_ROUTE_BY_PAGE['input-definition']} replace />
+            )}
+          />
 
-          {/* Documentation Page */}
-          {currentRole !== 'admin' && showDocumentation && <DocumentationPage />}
+          <Route path="/admin" element={renderAdminPage()} />
 
-          {/* Stakeholder Pages */}
-          {currentRole === 'stakeholder' && !showDocumentation && (
-            <>
-              {currentPage === 'qualitative' && sessionId && features.qi && (
-                <QualitativeIndicatorsPage sessionId={sessionId} onPageChange={handlePageChange} />
-              )}
-              {currentPage === 'value' && sessionId && features.vf && (
-                <ValueFunctionsPage sessionId={sessionId} onPageChange={handlePageChange} />
-              )}
-              {currentPage === 'pile' && sessionId && features.bwt && (
-                <PileBwtPage sessionId={sessionId} onPageChange={handlePageChange} />
-              )}
-              {currentPage === 'recap' && sessionId && (
-                <RecapPage sessionId={sessionId} onNavigate={handlePageChange} />
-              )}
-            </>
-          )}
-
-          {/* Practitioner Pages */}
-          {currentRole === 'practitioner' && !showDocumentation && (
-            <>
-              {currentPage === 'case-study' && (
-                <CaseStudyPage
-                  studySessionId={studySessionId}
-                  onStudyAccessed={handleStudySessionAccessed}
-                  onClearStudy={handleStudySessionCleared}
-                />
-              )}
-              {currentPage === 'input-definition' && (
-                <InputPage studySessionId={studySessionId} />
-              )}
-              {currentPage === 'run-up-mavt' && studySessionId && (
-                <RunUpMavtPage studySessionId={studySessionId} onNavigate={handlePageChange} />
-              )}
-            </>
-          )}
-        </Box>
+          <Route
+            path="*"
+            element={<Navigate to={isLoggedIn ? routeForRole(currentRole) : '/login'} replace />}
+          />
+        </Routes>
       )}
     </Box>
   )
