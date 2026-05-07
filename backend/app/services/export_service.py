@@ -151,7 +151,7 @@ class ExportService:
             str: The CSV text (UTF-8).
         """
         output = io.StringIO()
-        writer = csv.writer(output)
+        writer = csv.writer(output, delimiter=';')
         writer.writerow(['Criterion', 'Unit', 'Alternative', 'Value'])
         for criterion in criteria:
             if not isinstance(criterion, dict):
@@ -180,7 +180,7 @@ class ExportService:
             str: The CSV text (UTF-8).
         """
         output = io.StringIO()
-        writer = csv.writer(output)
+        writer = csv.writer(output, delimiter=';')
         writer.writerow(['CRITERION_NAME', 'UNIT', 'ALTERNATIVE', 'VALUE', 'RANK', 'CONFIDENCE'])
         
         for criterion in criteria:
@@ -240,7 +240,7 @@ class ExportService:
             str: The CSV text (UTF-8).
         """
         output = io.StringIO()
-        writer = csv.writer(output)
+        writer = csv.writer(output, delimiter=';')
         writer.writerow(['Criterion', 'Unit', 'Alternative', 'Value'])
         for criterion in criteria:
             if not isinstance(criterion, dict):
@@ -280,7 +280,7 @@ class ExportService:
             str: The CSV text (UTF-8).
         """
         output = io.StringIO()
-        writer = csv.writer(output)
+        writer = csv.writer(output, delimiter=';')
         writer.writerow(['CRITERION_NAME', 'ALTERNATIVE', 'RANK', 'VALUE', 'CONFIDENCE'])
         for criterion in criteria:
             if not isinstance(criterion, dict) or not criterion.get('is_qualitative'):
@@ -328,7 +328,7 @@ class ExportService:
             str: The CSV text (UTF-8).
         """
         output = io.StringIO()
-        writer = csv.writer(output)
+        writer = csv.writer(output, delimiter=';')
         writer.writerow(['CRITERION_NAME', 'CONFIDENCE', 'LIST OF POINTS'])
         if isinstance(criteria, list) and len(criteria) > 0:
             for criterion in criteria:
@@ -425,7 +425,7 @@ class ExportService:
             str: The CSV text (UTF-8).
         """
         output = io.StringIO()
-        writer = csv.writer(output)
+        writer = csv.writer(output, delimiter=';')
         if isinstance(bwt_data, dict) and isinstance(bwt_data.get('comparisons'), list):
             writer.writerow(['REFERENCE_CRITERION', 'ADJUSTED_CRITERION', 'DATA_VALUE', 'TYPE', 'GROUP'])
             for comp in bwt_data.get('comparisons', []):
@@ -541,7 +541,7 @@ class ExportService:
         
         # Build CSV with a_value column
         output = io.StringIO()
-        writer = csv.writer(output)
+        writer = csv.writer(output, delimiter=';')
         if isinstance(bwt_data, dict) and isinstance(bwt_data.get('comparisons'), list):
             writer.writerow(['REFERENCE_CRITERION', 'ADJUSTED_CRITERION', 'DATA_VALUE', 'TYPE', 'GROUP', 'a_value'])
             for comp in bwt_data.get('comparisons', []):
@@ -704,7 +704,7 @@ class ExportService:
         if not comparisons:
             raise NotFoundError('No BWT data to export')
         output = io.StringIO()
-        writer = csv.writer(output)
+        writer = csv.writer(output, delimiter=';')
         writer.writerow(['REFERENCE_CRITERION', 'ADJUSTED_CRITERION', 'DATA_VALUE', 'TYPE'])
         for comp in comparisons:
             if isinstance(comp, dict):
@@ -985,7 +985,7 @@ class ExportService:
         has_bwt = session.get('bwt') is not None
         completed = sum([has_qi, has_vf, has_bwt])
         output = io.StringIO()
-        writer = csv.writer(output)
+        writer = csv.writer(output, delimiter=';')
         writer.writerow(['Field', 'Value'])
         writer.writerow(['Name', session.get('name')])
         writer.writerow(['Qualitative Indicators Filled', has_qi])

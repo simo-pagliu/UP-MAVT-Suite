@@ -2907,7 +2907,7 @@ function buildRankProbabilityCsv(results) {
   const rows = matrix.probabilities.map((rankRow, rankIndex) => (
     [rankIndex + 1, ...rankRow.map((probability) => Number(probability).toFixed(6))]
   ))
-  return [headers.join(','), ...rows.map((row) => row.join(','))].join('\n')
+  return [headers.join(';'), ...rows.map((row) => row.join(';'))].join('\n')
 }
 
 function buildRankingHeatmapSvg({ title, results }) {

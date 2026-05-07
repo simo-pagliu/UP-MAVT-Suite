@@ -80,12 +80,12 @@ export const generateInputCSV = (criteria) => {
       row
         .map(cell => {
           const str = String(cell)
-          if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          if (str.includes(';') || str.includes('"') || str.includes('\n')) {
             return `"${str.replace(/"/g, '""')}"`
           }
           return str
         })
-        .join(','),
+        .join(';'),
     )
     .join('\n')
 
