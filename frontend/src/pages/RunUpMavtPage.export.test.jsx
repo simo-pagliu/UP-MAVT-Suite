@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   buildRankProbabilityMatrix,
   buildRankProbabilityCsv,
+  buildSimulationRowsCsv,
+  buildSimulationCsvExports,
   buildRankingHeatmapSvg,
   getRankingHeatmapDimensions,
   buildPipelineChartExportTargets,
@@ -17,6 +19,37 @@ const sampleResults = {
     [0.8, 0.2],
     [0.2, 0.7],
   ],
+}
+
+const step2Results = {
+  alternative_names: ['Alt A', 'Alt B'],
+  results_by_elicitation: {
+    2: [
+      [0.9, 0.1],
+      [0.8, 0.2],
+    ],
+    10: [
+      [0.6, 0.4],
+    ],
+  },
+}
+
+const step4Results = {
+  results_by_aggregation: {
+    weighted_sum: {
+      alternative_names: ['Alt A', 'Alt B'],
+      aggregated_results: [
+        [0.7, 0.3],
+        [0.4, 0.6],
+      ],
+    },
+    harmonic_mean: {
+      alternative_names: ['Alt A', 'Alt B'],
+      aggregated_results: [
+        [0.5, 0.5],
+      ],
+    },
+  },
 }
 
 describe('RunUpMavtPage export helpers', () => {
@@ -45,8 +78,40 @@ describe('RunUpMavtPage export helpers', () => {
 
   it('builds CSV output for rank probabilities', () => {
     const csv = buildRankProbabilityCsv(sampleResults)
-    expect(csv).toContain('rank,Alt A,Alt B')
-    expect(csv).toContain('1,0.666667,0.333333')
+    expect(csv).toContain('rank;Alt A;Alt B')
+    expect(csv).toContain('1;0.666667;0.333333')
+  })
+
+  it('builds wide CSV output for raw simulation rows', () => {
+    const csv = buildSimulationRowsCsv({
+      alternative_names: ['Alt A', 'Alt B'],
+      aggregated_results: [
+        [1, 2],
+        [3.1234567, 4],
+      ],
+    })
+
+    expect(csv).toContain('iteration;Alt A;Alt B')
+    expect(csv).toContain('1;1.000000;2.000000')
+    expect(csv).toContain('2;3.123457;4.000000')
+  })
+
+  it('builds step-specific raw simulation export descriptors', () => {
+    const step2Exports = buildSimulationCsvExports(2, step2Results)
+    const step3Exports = buildSimulationCsvExports(3, sampleResults)
+    const step4Exports = buildSimulationCsvExports(4, step4Results)
+
+    expect(step2Exports).toHaveLength(2)
+    expect(step2Exports[0].filenameBase).toContain('step_2_elicitation_1')
+    expect(step2Exports[0].csvText).toContain('iteration;Alt A;Alt B')
+
+    expect(step3Exports).toHaveLength(1)
+    expect(step3Exports[0].filenameBase).toBe('step_3_simulation')
+
+    expect(step4Exports.map((entry) => entry.filenameBase)).toEqual([
+      'step_4_aggregation_harmonic_mean',
+      'step_4_aggregation_weighted_sum',
+    ])
   })
 
   it('returns fallback dimensions when heatmap data is missing', () => {

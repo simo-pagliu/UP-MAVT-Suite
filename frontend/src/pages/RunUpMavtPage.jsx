@@ -175,6 +175,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [exportingDataZip, setExportingDataZip] = useState(false)
   const [exportingResults, setExportingResults] = useState(false)
   const [exportIncludeResultsCsv, setExportIncludeResultsCsv] = useState(true)
+  const [exportIncludeSimulationCsvs, setExportIncludeSimulationCsvs] = useState(true)
   const [exportIncludePlotImages, setExportIncludePlotImages] = useState(true)
   const [exportIncludeFullData, setExportIncludeFullData] = useState(false)
   // PDF Modal states
@@ -954,12 +955,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     window.URL.revokeObjectURL(objectUrl)
   }
 
-  const sanitizeFilename = (value) => String(value || '')
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '') || 'export'
-
   const buildSvgMarkupFromElement = (svgElement) => {
     if (!svgElement) return null
     const clonedSvg = svgElement.cloneNode(true)
@@ -1306,7 +1301,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   }
 
   const handleExportFinalResults = async () => {
-    if (!exportIncludeResultsCsv && !exportIncludePlotImages && !exportIncludeFullData) {
+    if (!exportIncludeResultsCsv && !exportIncludeSimulationCsvs && !exportIncludePlotImages && !exportIncludeFullData) {
       toast({
         title: 'Choose at least one export item',
         status: 'warning',
@@ -1326,7 +1321,25 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           exportZip.file('results/final_results_rank_probabilities.csv', resultsCsv)
           exportedArtifacts += 1
         }
+      }
 
+      if (exportIncludeSimulationCsvs) {
+        const simulationExports = [
+          ...buildSimulationCsvExports(2, step2Results),
+          ...buildSimulationCsvExports(3, step3Results),
+          ...buildSimulationCsvExports(4, step4Results),
+          ...buildSimulationCsvExports(5, step5Results),
+          ...buildSimulationCsvExports(6, step6Results),
+        ]
+        simulationExports.forEach((entry) => {
+          exportZip.file(`results/simulation_csvs/${sanitizeFilename(entry.filenameBase)}.csv`, entry.csvText)
+        })
+        if (simulationExports.length > 0) {
+          exportedArtifacts += 1
+        }
+      }
+
+      if (exportIncludeResultsCsv) {
         const finalHeatmapSvg = buildRankingHeatmapSvg({
           title: 'Results Heatmap',
           results: step6Results,
@@ -2770,7 +2783,13 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   isChecked={exportIncludeResultsCsv}
                   onChange={(e) => setExportIncludeResultsCsv(e.target.checked)}
                 >
-                  Final ranking heatmap (CSV and IMAGE)
+                  Final ranking summary CSV
+                </Checkbox>
+                <Checkbox
+                  isChecked={exportIncludeSimulationCsvs}
+                  onChange={(e) => setExportIncludeSimulationCsvs(e.target.checked)}
+                >
+                  Raw simulation CSVs for steps 2-6
                 </Checkbox>
                 <Checkbox
                   isChecked={exportIncludePlotImages}
@@ -2882,6 +2901,14 @@ function escapeSvgText(value) {
     .replace(/`/g, '&#96;')
 }
 
+function sanitizeFilename(value) {
+  return String(value || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '') || 'export'
+}
+
 function getRankingHeatmapDimensions(results) {
   const matrix = buildRankProbabilityMatrix(results)
   if (!matrix) {
@@ -2908,6 +2935,92 @@ function buildRankProbabilityCsv(results) {
     [rankIndex + 1, ...rankRow.map((probability) => Number(probability).toFixed(6))]
   ))
   return [headers.join(';'), ...rows.map((row) => row.join(';'))].join('\n')
+}
+
+function formatSimulationCsvValue(value) {
+  const numericValue = Number(value)
+  if (!Number.isFinite(numericValue)) return ''
+  return numericValue.toFixed(6)
+}
+
+function buildSimulationRowsCsv(results) {
+  const alternatives = Array.isArray(results?.alternative_names) ? results.alternative_names : []
+  const rows = Array.isArray(results?.aggregated_results) ? results.aggregated_results : []
+
+  if (alternatives.length === 0 || rows.length === 0) return null
+
+  const headers = ['iteration', ...alternatives]
+  const csvRows = rows.map((scoresRow, iterationIndex) => {
+    const scoreValues = alternatives.map((_, altIndex) => formatSimulationCsvValue(scoresRow?.[altIndex]))
+    return [iterationIndex + 1, ...scoreValues]
+  })
+
+  return [headers.join(';'), ...csvRows.map((row) => row.join(';'))].join('\n')
+}
+
+function buildSimulationCsvExports(stepNumber, stepResults) {
+  const exports = []
+
+  if (stepNumber === 2 || stepNumber === 5) {
+    const alternatives = Array.isArray(stepResults?.alternative_names) ? stepResults.alternative_names : []
+    const byElicitation = stepResults?.results_by_elicitation
+    if (alternatives.length === 0 || !byElicitation || typeof byElicitation !== 'object') {
+      return exports
+    }
+
+    Object.entries(byElicitation)
+      .sort((a, b) => {
+        const aIndex = Number(a[0])
+        const bIndex = Number(b[0])
+        if (Number.isFinite(aIndex) && Number.isFinite(bIndex)) return aIndex - bIndex
+        return String(a[0]).localeCompare(String(b[0]))
+      })
+      .forEach(([elicitationKey, iterationRows], index) => {
+        const csvText = buildSimulationRowsCsv({
+          alternative_names: alternatives,
+          aggregated_results: iterationRows,
+        })
+        if (!csvText) return
+
+        exports.push({
+          filenameBase: `step_${stepNumber}_elicitation_${index + 1}_${sanitizeFilename(elicitationKey)}`,
+          csvText,
+        })
+      })
+
+    return exports
+  }
+
+  if (stepNumber === 4) {
+    const byAggregation = stepResults?.results_by_aggregation
+    if (!byAggregation || typeof byAggregation !== 'object') {
+      return exports
+    }
+
+    Object.entries(byAggregation)
+      .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+      .forEach(([aggregationName, aggregationResults]) => {
+        const csvText = buildSimulationRowsCsv(aggregationResults)
+        if (!csvText) return
+
+        exports.push({
+          filenameBase: `step_4_aggregation_${sanitizeFilename(aggregationName)}`,
+          csvText,
+        })
+      })
+
+    return exports
+  }
+
+  const csvText = buildSimulationRowsCsv(stepResults)
+  if (csvText) {
+    exports.push({
+      filenameBase: `step_${stepNumber}_simulation`,
+      csvText,
+    })
+  }
+
+  return exports
 }
 
 function buildRankingHeatmapSvg({ title, results }) {
@@ -3563,6 +3676,8 @@ function StepSection({
 export {
   buildRankProbabilityMatrix,
   buildRankProbabilityCsv,
+  buildSimulationRowsCsv,
+  buildSimulationCsvExports,
   buildRankingHeatmapSvg,
   getRankingHeatmapDimensions,
   buildPipelineChartExportTargets,
