@@ -217,7 +217,7 @@ const theme = extendTheme({
             textTransform: 'none',
           },
           td: {
-            borderColor: '#e6edf1',
+            borderColor: 'app.border',
             color: 'app.text',
           },
         },
