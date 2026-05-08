@@ -641,7 +641,6 @@ function LoginPage({ onLogin, onDocumentation }) {
       <Box borderTopWidth={1} borderColor="gray.200" bg="gray.100" px={{ base: 6, md: 10 }} py={5} mt="auto">
         <SimpleGrid columns={{ base: 1, md: 3 }} spacing={4}>
           <VStack align="start" spacing={1}>
-            <Text fontWeight="semibold">Software documentation</Text>
             <Link color="blue.700" onClick={onDocumentation}>Software documentation</Link>
           </VStack>
 
@@ -659,7 +658,6 @@ function LoginPage({ onLogin, onDocumentation }) {
           </VStack>
 
           <VStack align="start" spacing={1}>
-            <Text fontWeight="semibold">Legal and policy links</Text>
             <Link href={PSI_TERMS_OF_USE_URL} isExternal color="blue.700">PSI terms of use</Link>
           </VStack>
         </SimpleGrid>
