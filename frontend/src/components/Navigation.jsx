@@ -39,11 +39,13 @@ function Navigation({
   return (
     <Box
       as="header"
-      bg="#0f3155"
+      bg="app.primary"
       color="white"
-      px={{ base: 4, md: 8 }}
-      py={4}
-      boxShadow="sm"
+      px={{ base: 3, md: 4 }}
+      py={3}
+      boxShadow="0 8px 24px rgba(17, 38, 43, 0.18)"
+      borderBottomWidth="1px"
+      borderBottomColor="whiteAlpha.200"
     >
       <HStack spacing={6} align="center" wrap="wrap">
         <Button
@@ -59,14 +61,16 @@ function Navigation({
           <Image
             src="/psi_01_sn.svg"
             alt="PSI logo"
-            boxSize={{ base: '68px', md: '80px' }}
+            h="38px"
+            w="auto"
+            maxW="150px"
             objectFit="contain"
+            borderRadius="4px"
           />
           <Heading
             size="md"
-            letterSpacing="wide"
+            letterSpacing="0"
             color="white"
-            fontFamily='"Helvetica Neue", Helvetica, Arial, sans-serif'
             lineHeight="1"
             mt="3px"
           >
@@ -85,12 +89,13 @@ function Navigation({
                 return (
                   <Button
                     key={page.id}
-                    variant={isActive ? 'solid' : 'ghost'}
-                    bg={isActive ? 'white' : 'transparent'}
-                    color={isActive ? 'blue.700' : 'white'}
-                    _hover={{ bg: isActive ? 'white' : 'blue.600', color: isActive ? 'blue.700' : 'white' }}
-                    _active={{ bg: isActive ? 'white' : 'blue.600', color: isActive ? 'blue.700' : 'white' }}
+                    variant="ghost"
+                    bg={isActive ? 'whiteAlpha.200' : 'transparent'}
+                    color={isActive ? 'white' : 'whiteAlpha.800'}
+                    _hover={{ bg: 'whiteAlpha.200', color: 'white' }}
+                    _active={{ bg: 'whiteAlpha.200', color: 'white' }}
                     size="sm"
+                    borderRadius="6px"
                     onClick={() => onPageChange(page.id)}
                     whiteSpace="nowrap"
                     isDisabled={isDisabled}
@@ -113,8 +118,8 @@ function Navigation({
             icon={<InfoIcon />}
             variant="ghost"
             color="white"
-            _hover={{ bg: 'blue.600', color: 'white' }}
-            _active={{ bg: 'blue.600', color: 'white' }}
+            _hover={{ bg: 'whiteAlpha.200', color: 'white' }}
+            _active={{ bg: 'whiteAlpha.200', color: 'white' }}
             size="sm"
             onClick={onDocumentation}
           />
@@ -126,8 +131,8 @@ function Navigation({
             variant="outline"
             borderColor="whiteAlpha.700"
             color="white"
-            _hover={{ bg: 'blue.600', borderColor: 'whiteAlpha.800' }}
-            _active={{ bg: 'blue.600', borderColor: 'whiteAlpha.800' }}
+            _hover={{ bg: 'whiteAlpha.200', borderColor: 'whiteAlpha.800' }}
+            _active={{ bg: 'whiteAlpha.200', borderColor: 'whiteAlpha.800' }}
             onClick={onLogout}
           >
             Logout

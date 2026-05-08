@@ -362,7 +362,7 @@ function App() {
   }
 
   return (
-    <Box minH="100vh" bg="gray.50">
+    <Box minH="100vh" bg="app.bg">
       <Navigation
         onLogoClick={handleLogoClick}
         isLoggedIn={isLoggedIn}
