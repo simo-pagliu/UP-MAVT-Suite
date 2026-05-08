@@ -155,12 +155,14 @@ const theme = extendTheme({
     Textarea: {
       variants: {
         outline: {
-          borderColor: 'app.border',
-          borderRadius: '6px',
-          color: 'app.text',
-          _focusVisible: {
-            borderColor: 'app.primary',
-            boxShadow: focusRing,
+          field: {
+            borderColor: 'app.border',
+            borderRadius: '6px',
+            color: 'app.text',
+            _focusVisible: {
+              borderColor: 'app.primary',
+              boxShadow: focusRing,
+            },
           },
         },
       },
