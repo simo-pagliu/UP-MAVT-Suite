@@ -43,7 +43,7 @@ function Navigation({
       color="white"
       px={{ base: 3, md: 4 }}
       py={3}
-      boxShadow="0 8px 24px rgba(17, 38, 43, 0.18)"
+      boxShadow="md"
       borderBottomWidth="1px"
       borderBottomColor="whiteAlpha.200"
     >
