@@ -38,8 +38,12 @@ import {
   ModalCloseButton,
   ModalBody,
   ModalFooter,
+  Textarea,
+  Collapse,
+  
 } from '@chakra-ui/react'
 import { DownloadIcon, ExternalLinkIcon } from '@chakra-ui/icons'
+import { ChevronDownIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import JSZip from 'jszip'
 import PdfModal from '../components/PdfModal'
@@ -64,6 +68,7 @@ import {
   isPileBwtComplete,
   isSessionComplete,
 } from '../utils/sessionUtils'
+import { formatPerElicitationDistributionSummary, buildDistributionStatsCsv } from '../utils/distributionStats'
 
 const STEP2_COLORS = ['#3182CE', '#E57373', '#C77DFF', '#4DD0E1', '#38A169', '#D69E2E']
 const PNG_SCALE_FACTOR = 2
@@ -177,6 +182,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [exportIncludeResultsCsv, setExportIncludeResultsCsv] = useState(true)
   const [exportIncludeSimulationCsvs, setExportIncludeSimulationCsvs] = useState(true)
   const [exportIncludePlotImages, setExportIncludePlotImages] = useState(true)
+  const [exportIncludeStep2ConsensusQuantificationCsv, setExportIncludeStep2ConsensusQuantificationCsv] = useState(true)
+  const [exportIncludeStep5UncertaintyStatsCsv, setExportIncludeStep5UncertaintyStatsCsv] = useState(true)
   const [exportIncludeFullData, setExportIncludeFullData] = useState(false)
   // PDF Modal states
   const { isOpen: isUncertaintiesOpen, onOpen: onUncertaintiesOpen, onClose: onUncertaintiesClose } = useDisclosure()
@@ -719,15 +726,19 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const getDistributionDataForAlternative = (stepResults, altIndex) => {
     if (!stepResults?.results_by_elicitation || !stepResults?.alternative_names) return null
 
-    const expertValues = {}
+    const expertSeries = []
     const allValues = []
     const sortedElicitations = Object.entries(stepResults.results_by_elicitation)
       .sort((a, b) => Number(a[0]) - Number(b[0]))
 
-    sortedElicitations.forEach(([expertIdx, iterations]) => {
+    sortedElicitations.forEach(([expertIdx, iterations], idx) => {
       const expertName = getSessionLabel(sessions[parseInt(expertIdx)], `Expert ${parseInt(expertIdx) + 1}`)
       const values = iterations.map((row) => Number(row[altIndex])).filter((v) => Number.isFinite(v))
-      expertValues[expertName] = values
+      expertSeries.push({
+        label: `E${idx + 1}`,
+        expertName,
+        values,
+      })
       allValues.push(...values)
     })
 
@@ -759,7 +770,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     }
 
     const densityByExpert = {}
-    Object.entries(expertValues).forEach(([expertName, values]) => {
+    expertSeries.forEach(({ expertName, values }) => {
       const bins = new Array(numBins).fill(0)
       values.forEach((value) => {
         const clamped = Math.max(0, Math.min(1, value))
@@ -777,18 +788,21 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     const densityData = Array.from({ length: numBins }, (_, i) => {
       const x = (i + 0.5) / numBins
       const row = { x }
-      Object.keys(densityByExpert).forEach((expertName) => {
+      expertSeries.forEach(({ expertName }) => {
         row[expertName] = densityByExpert[expertName][i] || 0
       })
       return row
     })
 
+    const distributionSummary = formatPerElicitationDistributionSummary(expertSeries)
+
     return {
       altName: stepResults.alternative_names[altIndex],
       densityData,
-      expertNames: sortedElicitations.map(([expertIdx]) => (
-        getSessionLabel(sessions[parseInt(expertIdx)], `Expert ${parseInt(expertIdx) + 1}`)
-      )),
+      expertNames: expertSeries.map((entry) => entry.expertName),
+      expertSeries,
+      summaryText: distributionSummary.text,
+      summaryLines: distributionSummary.lines,
     }
   }
 
@@ -863,6 +877,13 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   })
 
   const weightSpaceSolutionCount = normalizeWeightSamples(weightSpaceData).length
+
+  // UI: toggles for showing per-distribution stats (collapsed by default)
+  const [showDistributionStats, setShowDistributionStats] = useState({})
+
+  const toggleDistributionStats = (key) => {
+    setShowDistributionStats((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
 
   const getConsistencyPlotData = () => {
     const sessionDoc = sessions.find((session) => session?._id === selectedWeightSession)
@@ -1017,9 +1038,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     image.src = svgUrl
   })
 
-  const createPolylinePath = (points) => points.length > 0
-    ? `M ${points.map((point) => `${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' L ')}`
-    : ''
+  const createPolylinePath = (points) => {
+    if (!Array.isArray(points) || points.length === 0) return ''
+    return `M ${points.map((point) => `${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' L ')}`
+  }
 
   const createClosedAreaPath = (points, baselineY) => {
     if (points.length === 0) return ''
@@ -1056,7 +1078,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     const declaredPoints = data.filter((point) => point?.type === 'declared')
     const computedPoints = data.filter((point) => point?.type === 'computed')
 
-    return `
+    const svgMarkup = `
       <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
         <rect width="100%" height="100%" fill="#ffffff" />
         <text x="${left}" y="26" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#1f2937">${escapeSvgText(title)}</text>
@@ -1099,17 +1121,33 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     `.replace(/\n\s+/g, '\n').trim()
   }
 
-  const buildDistributionPlotSvg = ({ title, altName, densityData, expertNames }) => {
+  const buildDistributionPlotSvg = ({ title, altName, densityData, expertNames, summaryLines = [] }) => {
     if (!Array.isArray(densityData) || densityData.length === 0 || !Array.isArray(expertNames) || expertNames.length === 0) return null
 
     const width = 980
     const top = 82
     const right = 30
-    const bottom = 55
+    const summaryLineHeight = 14
+    const normalizedSummaryLines = Array.isArray(summaryLines)
+      ? summaryLines.filter((line) => typeof line === 'string')
+      : []
+    const printableSummaryLines = normalizedSummaryLines.length > 0
+      ? ['Distribution Summary (per elicitation)', '', ...normalizedSummaryLines]
+      : []
+
+    const summaryBoxPadding = 12
+    const summaryBoxHeight = printableSummaryLines.length > 0
+      ? Math.max(62, (printableSummaryLines.length * summaryLineHeight) + (summaryBoxPadding * 2))
+      : 0
+
+    const bottom = printableSummaryLines.length > 0
+      ? (summaryBoxHeight + 70)
+      : 55
     const left = 70
     const plotWidth = width - left - right
     const plotHeight = 250
     const height = top + plotHeight + bottom
+    const summaryBoxY = top + plotHeight + 44
 
     const maxDensity = Math.max(0.001, ...densityData.flatMap((row) => expertNames.map((name) => Number(row?.[name]) || 0)))
     const scaleX = (value) => left + Math.max(0, Math.min(1, value)) * plotWidth
@@ -1149,7 +1187,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
         <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" stroke="#9ca3af" stroke-width="1.2" />
         <line x1="${left}" y1="${top + plotHeight}" x2="${left + plotWidth}" y2="${top + plotHeight}" stroke="#9ca3af" stroke-width="1.2" />
-        <text x="${left + plotWidth / 2}" y="${height - 16}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#4b5563">Value</text>
+        <text x="${left + plotWidth / 2}" y="${top + plotHeight + 36}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#4b5563">Value</text>
 
         ${fillPolygons.map((entry, idx) => `
           <polygon points="${entry.polygonPoints}" fill="${entry.color}" fill-opacity="0.22" stroke="none" />
@@ -1160,8 +1198,31 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         ${series.map((entry) => `
           <path d="${createPolylinePath(entry.points)}" fill="none" stroke="${entry.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
         `).join('')}
+
+        ${printableSummaryLines.length > 0 ? `
+          <rect
+            x="${left}"
+            y="${summaryBoxY}"
+            width="${plotWidth}"
+            height="${summaryBoxHeight}"
+            rx="6"
+            fill="#f8fafc"
+            stroke="#e2e8f0"
+          />
+          ${printableSummaryLines.map((line, idx) => {
+    const y = summaryBoxY + summaryBoxPadding + 12 + (idx * summaryLineHeight)
+    const fontWeight = idx === 0 ? '700' : '400'
+    return `<text x="${left + summaryBoxPadding}" y="${y}" font-family="Arial, sans-serif" font-size="11" font-weight="${fontWeight}" fill="#334155">${escapeSvgText(line)}</text>`
+  }).join('')}
+        ` : ''}
       </svg>
     `.replace(/\n\s+/g, '\n').trim()
+
+    return {
+      svgMarkup,
+      width,
+      height,
+    }
   }
 
   const handleDownloadChartPng = async (exportId, filenameBase) => {
@@ -1301,7 +1362,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   }
 
   const handleExportFinalResults = async () => {
-    if (!exportIncludeResultsCsv && !exportIncludeSimulationCsvs && !exportIncludePlotImages && !exportIncludeFullData) {
+    if (!exportIncludeResultsCsv && !exportIncludeSimulationCsvs && !exportIncludePlotImages && !exportIncludeStep2ConsensusQuantificationCsv && !exportIncludeStep5UncertaintyStatsCsv && !exportIncludeFullData) {
       toast({
         title: 'Choose at least one export item',
         status: 'warning',
@@ -1335,6 +1396,35 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           exportZip.file(`results/simulation_csvs/${sanitizeFilename(entry.filenameBase)}.csv`, entry.csvText)
         })
         if (simulationExports.length > 0) {
+          exportedArtifacts += 1
+        }
+      }
+
+      if (exportIncludeStep2ConsensusQuantificationCsv || exportIncludeStep5UncertaintyStatsCsv) {
+        if (exportIncludeStep2ConsensusQuantificationCsv) {
+          const step2StatsCsv = buildDistributionStatsCsv(null, {
+            title: 'Step 2 consensus quantification',
+            placeholderMessage: 'Consensus quantification stats are not available yet.',
+          })
+          exportZip.file('results/step2_consensus_quantification.csv', step2StatsCsv)
+          exportedArtifacts += 1
+        }
+
+        if (exportIncludeStep5UncertaintyStatsCsv) {
+          const step5Stats = (step5Results?.alternative_names || []).flatMap((altName, altIndex) => {
+            const distData = getDistributionDataForAlternative(step5Results, altIndex)
+            if (!distData) return []
+            return distData.expertSeries.map((entry) => ({
+              label: `${altName} - ${entry.label}`,
+              expertName: entry.expertName,
+              values: entry.values,
+            }))
+          })
+          const step5StatsCsv = buildDistributionStatsCsv(step5Stats, {
+            title: 'Step 5 uncertainty stats',
+            placeholderMessage: 'Uncertainty stats are not available yet.',
+          })
+          exportZip.file('results/step5_uncertainty_stats.csv', step5StatsCsv)
           exportedArtifacts += 1
         }
       }
@@ -1418,20 +1508,20 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         const appendDistributionTargets = (stepResults, stepPrefix) => {
           if (!stepResults?.alternative_names) return
           stepResults.alternative_names.forEach((altName, altIndex) => {
-            const distData = getDistributionDataForAlternative(stepResults, altIndex)
-            if (!distData) return
-            const svgMarkup = buildDistributionPlotSvg({
-              title: `${stepPrefix === 'step2' ? 'Distribution of Values' : 'Distribution of Values'}`,
-              altName,
-              densityData: distData.densityData,
-              expertNames: distData.expertNames,
-            })
+            const container = document.querySelector(`[data-export-id="${stepPrefix}_distribution_${altIndex}"]`)
+            const svgElement = getPlotSvgElement(container)
+            const svgMarkup = buildSvgMarkupFromElement(svgElement)
             if (!svgMarkup) return
+
+            const bounds = svgElement.getBoundingClientRect()
+            const width = Math.max(1, Math.round(bounds.width || DEFAULT_PNG_WIDTH))
+            const height = Math.max(1, Math.round(bounds.height || DEFAULT_PNG_HEIGHT))
+
             imageTargets.push({
               filenameBase: `${stepPrefix}_distribution_${altIndex}`,
               svgMarkup,
-              width: 980,
-              height: 387,
+              width,
+              height,
             })
           })
         }
@@ -2283,9 +2373,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                           </HStack>
                         )
                       })()}
-                      <Text fontSize="sm" color="gray.600">
-                        One plot per alternative with smooth overlapping distributions for each elicitation.
-                      </Text>
                       <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={5}>
                         {step2Results.alternative_names?.map((altName, altIndex) => {
                           const distData = getDistributionDataForAlternative(step2Results, altIndex)
@@ -2309,7 +2396,28 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   onClick={() => handleDownloadChartPng(`step2_distribution_${altIndex}`, `step2_distribution_${altName}`)}
                                 />
                               </Tooltip>
-                              <Text fontWeight="semibold" fontSize="sm" mb={2}>{`Distribution of Values for ${altName}`}</Text>
+                              <HStack justify="space-between" align="center" mb={2} pr={12}>
+                                <Text fontWeight="semibold" fontSize="sm">{`Distribution of Values for ${altName}`}</Text>
+                                <Button size="sm" variant="link" rightIcon={<ChevronDownIcon />} onClick={() => toggleDistributionStats(`step2_${altIndex}`)}>
+                                  Consensus quantification
+                                </Button>
+                              </HStack>
+                              <Collapse in={Boolean(showDistributionStats[`step2_${altIndex}`])} animateOpacity>
+                                <Box mb={3}>
+                                  <Textarea
+                                    value={''}
+                                    placeholder="No stats available for Step 2 yet."
+                                    isReadOnly
+                                    resize="vertical"
+                                    minH="110px"
+                                    maxH="260px"
+                                    fontFamily="mono"
+                                    fontSize="xs"
+                                    bg="white"
+                                    spellCheck={false}
+                                  />
+                                </Box>
+                              </Collapse>
                               <ResponsiveContainer width="100%" height={250}>
                                 <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 0, bottom: 24 }}>
                                   <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
@@ -2583,9 +2691,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                           </HStack>
                         )
                       })()}
-                      <Text fontSize="sm" color="gray.600">
-                        One plot per alternative with smooth overlapping distributions for each elicitation.
-                      </Text>
                       <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={5}>
                         {step5Results.alternative_names?.map((altName, altIndex) => {
                           const distData = getDistributionDataForAlternative(step5Results, altIndex)
@@ -2609,7 +2714,28 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   onClick={() => handleDownloadChartPng(`step5_distribution_${altIndex}`, `step5_distribution_${altName}`)}
                                 />
                               </Tooltip>
-                              <Text fontWeight="semibold" fontSize="sm" mb={2}>{`Distribution of Values for ${altName}`}</Text>
+                              <HStack justify="space-between" align="center" mb={2} pr={12}>
+                                <Text fontWeight="semibold" fontSize="sm">{`Distribution of Values for ${altName}`}</Text>
+                                <Button size="sm" variant="link" rightIcon={<ChevronDownIcon />} onClick={() => toggleDistributionStats(`step5_${altIndex}`)}>
+                                  Distribution stats
+                                </Button>
+                              </HStack>
+                              <Collapse in={Boolean(showDistributionStats[`step5_${altIndex}`])} animateOpacity>
+                                <Box mb={3}>
+                                  <Textarea
+                                    value={distData.summaryText}
+                                    isReadOnly
+                                    resize="vertical"
+                                    minH="110px"
+                                    maxH="260px"
+                                    mb={3}
+                                    fontFamily="mono"
+                                    fontSize="xs"
+                                    bg="white"
+                                    spellCheck={false}
+                                  />
+                                </Box>
+                              </Collapse>
                               <ResponsiveContainer width="100%" height={250}>
                                 <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 0, bottom: 24 }}>
                                   <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
@@ -2796,6 +2922,18 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onChange={(e) => setExportIncludePlotImages(e.target.checked)}
                 >
                   Plot Images (PNG and SVG)
+                </Checkbox>
+                <Checkbox
+                  isChecked={exportIncludeStep2ConsensusQuantificationCsv}
+                  onChange={(e) => setExportIncludeStep2ConsensusQuantificationCsv(e.target.checked)}
+                >
+                  Step 2 consensus quantification
+                </Checkbox>
+                <Checkbox
+                  isChecked={exportIncludeStep5UncertaintyStatsCsv}
+                  onChange={(e) => setExportIncludeStep5UncertaintyStatsCsv(e.target.checked)}
+                >
+                  Step 5 uncertainty stats
                 </Checkbox>
                 <Checkbox
                   isChecked={exportIncludeFullData}
