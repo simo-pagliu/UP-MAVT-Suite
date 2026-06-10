@@ -2432,7 +2432,12 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                             onClick={async () => {
                               if (pairIdx === currentPairIndex) return
                               if (isDisabled) return
+                              const targetComparison = getComparisonForPair(pairIdx)
                               if (isReadOnlyLockedSession) {
+                                navigateToPair(pairIdx)
+                                return
+                              }
+                              if (targetComparison) {
                                 navigateToPair(pairIdx)
                                 return
                               }
@@ -2468,9 +2473,35 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                             }}
                             _hover={isDisabled ? {} : { shadow: 'sm' }}
                           >
-                            <Text fontSize="xs" fontWeight="bold" color={isDisabled ? 'gray.400' : isActivePair ? 'white' : 'black'} noOfLines={2}>
-                              {pair.reference.criterion_name.substring(0, 12)} → {pair.adjusted.criterion_name.substring(0, 12)}
-                            </Text>
+                            <VStack align="start" spacing={0} width="100%">
+                              <Text
+                                fontSize="xs"
+                                fontWeight="bold"
+                                color={isDisabled ? 'gray.400' : isActivePair ? 'white' : 'black'}
+                                noOfLines={1}
+                                width="100%"
+                              >
+                                {pair.reference.criterion_name}
+                              </Text>
+                              <HStack spacing={1} width="100%" align="baseline" overflow="hidden">
+                                <Text
+                                  fontSize="xs"
+                                  color={isDisabled ? 'gray.400' : isActivePair ? 'whiteAlpha.800' : 'gray.600'}
+                                  flexShrink={0}
+                                >
+                                  vs
+                                </Text>
+                                <Text
+                                  fontSize="xs"
+                                  fontWeight="bold"
+                                  color={isDisabled ? 'gray.400' : isActivePair ? 'white' : 'black'}
+                                  noOfLines={1}
+                                  flex={1}
+                                >
+                                  {pair.adjusted.criterion_name}
+                                </Text>
+                              </HStack>
+                            </VStack>
                             {comp && (
                               <Text fontSize="xs" color={isDisabled ? 'gray.400' : isActivePair ? 'whiteAlpha.800' : 'green.700'}>
                                 ✓ {comp.data_value.toFixed(2)}
