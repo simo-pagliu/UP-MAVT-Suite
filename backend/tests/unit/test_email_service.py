@@ -1,4 +1,5 @@
 """Unit tests for EmailService."""
+import time
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -222,3 +223,29 @@ class TestEmailServiceMessageContent:
         from app.services.email_service import EmailService
         svc = EmailService()
         assert not svc._base_url.endswith('/')
+
+
+class TestEmailServiceTimeouts:
+    def test_invalid_timeout_uses_default(self, monkeypatch):
+        monkeypatch.setenv('SMTP_HOST', 'smtp.example.com')
+        monkeypatch.setenv('SMTP_TIMEOUT_SECONDS', 'invalid')
+        from app.services.email_service import EmailService
+        svc = EmailService()
+        assert svc._smtp_timeout_seconds == 15.0
+
+    def test_send_timeout_returns_failed_with_timeout_code(self, monkeypatch):
+        monkeypatch.setenv('SMTP_HOST', 'smtp.example.com')
+        monkeypatch.setenv('SMTP_TIMEOUT_SECONDS', '0.01')
+        from app.services.email_service import EmailService
+        svc = EmailService()
+
+        def _slow_send(_msg, _to):
+            time.sleep(0.1)
+            return {'status': 'sent'}
+
+        monkeypatch.setattr(svc, '_send_blocking', _slow_send)
+        result = svc.send_session_confirmation('user@example.com', 'sid-timeout')
+
+        assert result['status'] == 'failed'
+        assert result['error_code'] == 'timeout'
+        assert 'timed out' in result['error']

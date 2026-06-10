@@ -149,6 +149,11 @@ def request_email_verification_code():
         return jsonify({
             'error': 'Email sending is not configured on the server (SMTP_HOST missing)',
         }), 503
+    
+    if send_result.get('error_code') == 'timeout':
+        return jsonify({
+            'error': send_result.get('error', 'Verification email delivery timed out'),
+        }), 504
 
     return jsonify({
         'error': send_result.get('error', 'Failed to send verification email'),
