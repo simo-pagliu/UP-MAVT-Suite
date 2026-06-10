@@ -1,5 +1,4 @@
 """Unit tests for EmailService."""
-import time
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -234,6 +233,8 @@ class TestEmailServiceTimeouts:
         assert svc._smtp_timeout_seconds == 15.0
 
     def test_send_timeout_returns_failed_with_timeout_code(self, monkeypatch):
+        import time
+
         monkeypatch.setenv('SMTP_HOST', 'smtp.example.com')
         monkeypatch.setenv('SMTP_TIMEOUT_SECONDS', '0.01')
         from app.services.email_service import EmailService

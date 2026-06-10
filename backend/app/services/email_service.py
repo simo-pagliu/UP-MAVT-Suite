@@ -39,7 +39,9 @@ import logging
 import os
 import smtplib
 import base64
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+from functools import partial
+from queue import Queue, Empty
+from threading import Thread
 from urllib.parse import quote
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
@@ -381,16 +383,30 @@ class EmailService:
         return msg
 
     def _run_with_timeout(self, func, operation):
-        executor = ThreadPoolExecutor(max_workers=1)
-        future = executor.submit(func)
-        try:
-            return future.result(timeout=self._smtp_timeout_seconds)
-        except FutureTimeoutError as exc:
+        result_queue = Queue(maxsize=1)
+
+        def _runner():
+            try:
+                result_queue.put(('result', func()))
+            except Exception as exc:  # pragma: no cover - defensive propagation
+                result_queue.put(('error', exc))
+
+        worker = Thread(target=_runner, daemon=True)
+        worker.start()
+        worker.join(self._smtp_timeout_seconds)
+        if worker.is_alive():
             raise TimeoutError(
                 f'{operation} timed out after {self._smtp_timeout_seconds:g}s'
-            ) from exc
-        finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+            )
+
+        try:
+            tag, payload = result_queue.get_nowait()
+        except Empty as exc:  # pragma: no cover - defensive fallback
+            raise RuntimeError(f'{operation} failed without returning a result') from exc
+
+        if tag == 'error':
+            raise payload
+        return payload
 
     def _send_blocking(self, msg, to):
         """Transmit *msg* via SMTP and return a status dict.
@@ -452,10 +468,12 @@ class EmailService:
     def _send(self, msg, to):
         try:
             return self._run_with_timeout(
-                lambda: self._send_blocking(msg, to),
+                partial(self._send_blocking, msg, to),
                 'SMTP send',
             )
         except TimeoutError as exc:
+            # The SMTP/OAuth2 call runs in a daemon worker thread and may still
+            # finish in the background after this timeout response is returned.
             logger.error(
                 'EmailService: timed out sending "%s" to %s: %s',
                 msg['Subject'],
