@@ -32,7 +32,7 @@ import {
   useDisclosure,
   useToast,
 } from '@chakra-ui/react'
-import { DeleteIcon, HamburgerIcon, RepeatIcon, CopyIcon, LockIcon, UnlockIcon } from '@chakra-ui/icons'
+import { DeleteIcon, HamburgerIcon, RepeatIcon, CopyIcon, ExternalLinkIcon, LockIcon, UnlockIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { API_URL } from '../config'
@@ -213,8 +213,60 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
   }
 
   useEffect(() => {
-    loadSessions()
-  }, [studySessionId])
+    let isActive = true
+
+    if (!studySessionId) {
+      setSessions([])
+      setFriendlyNames({})
+      setCriteria([])
+      setLoading(false)
+      return () => {
+        isActive = false
+      }
+    }
+
+    setLoading(true)
+    setSessions([])
+    setFriendlyNames({})
+    setCriteria([])
+
+    const fetchSessions = async () => {
+      try {
+        const response = await axios.get(`${API_URL}/study-session/${studySessionId}/elicitation-sessions`)
+        if (!isActive) return
+
+        const data = response.data
+        const loadedSessions = Array.isArray(data.sessions) ? data.sessions : []
+        setSessions(loadedSessions)
+        setFriendlyNames(
+          loadedSessions.reduce((acc, session) => {
+            acc[session._id] = session.friendly_name || ''
+            return acc
+          }, {})
+        )
+        setCriteria(Array.isArray(data.criteria) ? data.criteria : [])
+      } catch (error) {
+        if (!isActive) return
+        toast({
+          title: 'Request failed',
+          description: error.response?.data?.error || 'Failed to load sessions',
+          status: 'error',
+          duration: 3000,
+          isClosable: true,
+        })
+      } finally {
+        if (isActive) {
+          setLoading(false)
+        }
+      }
+    }
+
+    fetchSessions()
+
+    return () => {
+      isActive = false
+    }
+  }, [studySessionId, toast])
 
   const handleFeatureToggle = async (featureName) => {
     const newFeatures = { ...features, [featureName]: !features[featureName] }
@@ -545,6 +597,11 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
     await copyUuidLink(sessionId, 'Session')
   }
 
+  const handleOpenSessionLink = (sessionId) => {
+    if (!sessionId) return
+    window.open(buildUuidLink(sessionId), '_blank', 'noopener,noreferrer')
+  }
+
   // If no study session accessed, show access form
   if (!studySessionId) {
     return (
@@ -637,6 +694,10 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
           </VStack>
         </Box>
 
+        <Text fontSize="sm" color="gray.600">
+          Use the copy button to save and share the link for autonomous stakeholder elicitation. Use the open button to launch the elicitation view immediately for guided or in-person elicitation.
+        </Text>
+
         <Box overflowX="auto">
           <Table variant="simple" size="sm">
             <Thead>
@@ -662,6 +723,16 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
                           size="xs"
                           variant="ghost"
                           onClick={() => handleCopySessionLink(session._id)}
+                          isDisabled={!session._id}
+                        />
+                      </Tooltip>
+                      <Tooltip label={session._id ? 'Open elicitation view' : 'No session ID'} hasArrow>
+                        <IconButton
+                          aria-label="Open elicitation view"
+                          icon={<ExternalLinkIcon />}
+                          size="xs"
+                          variant="ghost"
+                          onClick={() => handleOpenSessionLink(session._id)}
                           isDisabled={!session._id}
                         />
                       </Tooltip>
