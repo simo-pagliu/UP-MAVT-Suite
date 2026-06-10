@@ -50,6 +50,8 @@ import { API_URL } from '../config'
 import QuestionPrompt from '../components/QuestionPrompt'
 
 function PileBwtPage({ sessionId, onPageChange }, ref) {
+  const CONSISTENCY_EPSILON = 1e-10
+
   const [criteria, setCriteria] = useState([])
   const [valueFunction, setValueFunction] = useState({})
   const [loading, setLoading] = useState(true)
@@ -724,19 +726,37 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               c.type === targetPair.type &&
               c.group === groupName
           )
-          setSliderValue(existing ? existing.data_value : getWorstDataValue(targetPair.adjusted))
+          const initialValue = existing ? existing.data_value : getWorstDataValue(targetPair.adjusted)
+          const constraintState = checkConsistency(0, initialValue, comparisons)
+          const forcedValue = constraintState.isForcedConstraint && Number.isFinite(constraintState.thresholdDataValue)
+            ? constraintState.thresholdDataValue
+            : initialValue
+          setSliderValue(forcedValue)
+          setSliderInputValue(Number.isFinite(forcedValue) ? forcedValue.toFixed(2) : '')
+          setSliderTouched(Boolean(constraintState.isForcedConstraint))
         }
       }
     }
   }, [loading, selectedGroupIndex, allGroups, pairsGroupName])
 
   useEffect(() => {
-    if (Number.isFinite(sliderValue)) {
-      setSliderInputValue(sliderValue.toFixed(2))
-      // Check consistency whenever slider value changes
-      if (currentPairIndex !== null && pairs[currentPairIndex]) {
-        const { isConsistent } = checkConsistency(currentPairIndex, sliderValue, comparisons)
-        setIsConsistencyError(!isConsistent)
+    if (!Number.isFinite(sliderValue)) return
+
+    if (currentPairIndex !== null && pairs[currentPairIndex]) {
+      const constraintState = checkConsistency(currentPairIndex, sliderValue, comparisons)
+      const forcedValue = constraintState.isForcedConstraint && Number.isFinite(constraintState.thresholdDataValue)
+        ? constraintState.thresholdDataValue
+        : sliderValue
+
+      setSliderInputValue(forcedValue.toFixed(2))
+      setIsConsistencyError(!constraintState.isForcedConstraint && !constraintState.isConsistent)
+
+      if (constraintState.isForcedConstraint && sliderValue !== forcedValue) {
+        setSliderValue(forcedValue)
+      }
+
+      if (constraintState.isForcedConstraint) {
+        setSliderTouched(true)
       }
     }
   }, [sliderValue, currentPairIndex, pairs, comparisons, bestToWorstValue])
@@ -771,7 +791,15 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     setSliderTouched(false)
     setIsConsistencyError(false)
     const targetComp = getComparisonForPair(pairIdx, comps)
-    setSliderValue(targetComp ? targetComp.data_value : getWorstDataValue(pairs[pairIdx].adjusted))
+    const nextValue = targetComp ? targetComp.data_value : getWorstDataValue(pairs[pairIdx].adjusted)
+    const constraintState = checkConsistency(pairIdx, nextValue, comps)
+    const forcedValue = constraintState.isForcedConstraint && Number.isFinite(constraintState.thresholdDataValue)
+      ? constraintState.thresholdDataValue
+      : nextValue
+    setSliderValue(forcedValue)
+    setSliderInputValue(Number.isFinite(forcedValue) ? forcedValue.toFixed(2) : '')
+    setSliderTouched(Boolean(constraintState.isForcedConstraint))
+    setIsConsistencyError(!constraintState.isForcedConstraint && !constraintState.isConsistent)
     if (mainContentRef.current) {
       mainContentRef.current.scrollTop = 0
     }
@@ -1151,12 +1179,26 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
 
     if (lowerBound === null && upperBound === null) {
       // No constraint
-      return { isConsistent: true, threshold: null, thresholdDataValue: null, thresholdKind: null }
+      return { isConsistent: true, threshold: null, thresholdDataValue: null, thresholdKind: null, isForcedConstraint: false }
     }
 
-    const epsilon = 1e-10
-    const violatesLower = lowerBound !== null && currentVFValue < lowerBound - epsilon
-    const violatesUpper = upperBound !== null && currentVFValue > upperBound + epsilon
+    const isForcedConstraint = lowerBound !== null && upperBound !== null && Math.abs(lowerBound - upperBound) <= CONSISTENCY_EPSILON
+    const forcedDataValue = isForcedConstraint ? inverseValueFunction(pair.adjusted.criterion_name, lowerBound) : null
+
+    if (isForcedConstraint) {
+      return {
+        isConsistent: true,
+        threshold: lowerBound,
+        thresholdDataValue: Number.isFinite(forcedDataValue) ? forcedDataValue : dataValue,
+        thresholdKind: 'forced',
+        isForcedConstraint: true,
+        lowerBound,
+        upperBound,
+      }
+    }
+
+    const violatesLower = lowerBound !== null && currentVFValue < lowerBound - CONSISTENCY_EPSILON
+    const violatesUpper = upperBound !== null && currentVFValue > upperBound + CONSISTENCY_EPSILON
     const isConsistent = !violatesLower && !violatesUpper
 
     let threshold = null
@@ -1176,7 +1218,15 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       ? null
       : inverseValueFunction(pair.adjusted.criterion_name, threshold)
 
-    return { isConsistent, threshold, thresholdDataValue, thresholdKind }
+    return {
+      isConsistent,
+      threshold,
+      thresholdDataValue,
+      thresholdKind,
+      isForcedConstraint: false,
+      lowerBound,
+      upperBound,
+    }
   }
 
   const getBarChartData = (groupCriteria) => {
@@ -1855,8 +1905,16 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
       const groupCriteria = allGroups[selectedGroupIndex].criteria
       const comparison = getComparisonForPair(currentPairIndex)
       const isAllComplete = isGroupComplete(selectedGroupIndex)
-      const currentVFValue = interpolateVF(pair.adjusted.criterion_name, sliderValue)
+      const constraintState = checkConsistency(currentPairIndex, sliderValue, comparisons)
+      const isForcedConstraint = Boolean(constraintState.isForcedConstraint)
+      const displaySliderValue = isForcedConstraint && Number.isFinite(constraintState.thresholdDataValue)
+        ? constraintState.thresholdDataValue
+        : sliderValue
+      const currentVFValue = interpolateVF(pair.adjusted.criterion_name, displaySliderValue)
       const isAdjustedIncreasing = isVFIncreasing(pair.adjusted.criterion_name)
+      const sliderTrackColor = isForcedConstraint ? 'orange.500' : isConsistencyError ? 'red.500' : 'blue.500'
+      const sliderThumbColor = isForcedConstraint ? 'orange.500' : 'blue.500'
+      const showConstraintAlert = isConsistencyError || isForcedConstraint
 
       const plot1Data = groupCriteria.map((crit) => {
         const isReference = crit.criterion_name === pair.reference.criterion_name
@@ -1871,7 +1929,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
 
       const plot2Data = groupCriteria.map((crit) => {
         const isAdjusted = crit.criterion_name === pair.adjusted.criterion_name
-        const value = isAdjusted ? interpolateVF(crit.criterion_name, sliderValue) : 0
+        const value = isAdjusted ? interpolateVF(crit.criterion_name, displaySliderValue) : 0
         return {
           name: crit.criterion_name,
           value: value,
@@ -1941,17 +1999,18 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               min={adjustedRange.min}
               max={adjustedRange.max}
               step={(adjustedRange.max - adjustedRange.min) / 100}
-              value={sliderValue}
-              isDisabled={isReadOnlyLockedSession}
+              value={displaySliderValue}
+              isDisabled={isReadOnlyLockedSession || isForcedConstraint}
               isReversed={!isAdjustedIncreasing}
               onChange={(value) => {
+                if (isForcedConstraint) return
                 setSliderValue(value)
                 setSliderTouched(true)
               }}
             >
               <SliderTrack bg="gray.200" h="8px" borderRadius="md" border="1px solid" borderColor="gray.300">
                 {/* Red zone indicator for inconsistent region */}
-                {isConsistencyError && (
+                {isConsistencyError && !isForcedConstraint && (
                   <Box
                     position="absolute"
                     left="0"
@@ -1962,14 +2021,14 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                     pointerEvents="none"
                     style={{
                       width: `${
-                        ((Math.min(sliderValue, checkConsistency(currentPairIndex, sliderValue, comparisons).thresholdDataValue || adjustedRange.min) - adjustedRange.min) / (adjustedRange.max - adjustedRange.min)) * 100
+                        ((Math.min(displaySliderValue, constraintState.thresholdDataValue ?? adjustedRange.min) - adjustedRange.min) / (adjustedRange.max - adjustedRange.min)) * 100
                       }%`,
                     }}
                   />
                 )}
-                <SliderFilledTrack bg={isConsistencyError ? 'red.500' : 'blue.500'} />
+                <SliderFilledTrack bg={sliderTrackColor} />
               </SliderTrack>
-              <SliderThumb w="20px" h="20px" bg="blue.500" borderRadius="full" border="2px solid white" boxShadow="0 2px 4px rgba(0,0,0,0.2)" />
+              <SliderThumb w="20px" h="20px" bg={sliderThumbColor} borderRadius="full" border="2px solid white" boxShadow="0 2px 4px rgba(0,0,0,0.2)" />
             </Slider>
             <HStack spacing={2} mt={3} fontSize="sm" color="gray.600" justify="space-between">
               <Text>{(isAdjustedIncreasing ? adjustedRange.min : adjustedRange.max).toFixed(2)}</Text>
@@ -1983,8 +2042,9 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                   max={adjustedRange.max}
                   step={(adjustedRange.max - adjustedRange.min) / 100}
                   precision={2}
-                  isDisabled={isReadOnlyLockedSession}
+                  isDisabled={isReadOnlyLockedSession || isForcedConstraint}
                   onChange={(valueString) => {
+                    if (isForcedConstraint) return
                     setSliderInputValue(valueString)
                     setSliderTouched(true)
                   }}
@@ -2004,6 +2064,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                     bg="white"
                     _focus={{ borderColor: 'blue.400', boxShadow: '0 0 0 1px #63b3ed' }}
                     onBlur={() => {
+                      if (isForcedConstraint) return
                       const parsed = Number(sliderInputValue)
                       if (Number.isFinite(parsed)) {
                         const clamped = Math.min(adjustedRange.max, Math.max(adjustedRange.min, parsed))
@@ -2092,7 +2153,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                   await handleNextPair()
                 }
               }} 
-              isDisabled={isReadOnlyLockedSession ? false : (!sliderTouched || isConsistencyError)}
+              isDisabled={isReadOnlyLockedSession ? false : ((!sliderTouched && !isForcedConstraint) || isConsistencyError)}
               isLoading={saving}
               size="md"
             >
@@ -2103,29 +2164,37 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
           </HStack>
 
           {/* Error tooltip for consistency violation */}
-          {isConsistencyError && (
+          {showConstraintAlert && (
             <Box
-              bg="red.50"
+              bg={isForcedConstraint ? 'orange.50' : 'red.50'}
               border="2px"
-              borderColor="red.400"
+              borderColor={isForcedConstraint ? 'orange.400' : 'red.400'}
               borderRadius="md"
               p={3}
             >
               <HStack spacing={2} alignItems="flex-start">
-                <WarningIcon color="red.600" boxSize={5} mt={0.5} />
+                <WarningIcon color={isForcedConstraint ? 'orange.600' : 'red.600'} boxSize={5} mt={0.5} />
                 <VStack align="start" spacing={1} flex={1}>
-                  <Text fontWeight="bold" color="red.700" fontSize="sm">
-                    Inconsistent judgment
+                  <Text fontWeight="bold" color={isForcedConstraint ? 'orange.700' : 'red.700'} fontSize="sm">
+                    {isForcedConstraint ? 'Over-constrained comparison' : 'Inconsistent judgment'}
                   </Text>
                   {(() => {
-                    const pair = pairs[currentPairIndex]
-                    const { thresholdDataValue, thresholdKind } = checkConsistency(currentPairIndex, sliderValue, comparisons)
+                    const { thresholdDataValue, thresholdKind } = constraintState
                     const isIncreasing = isVFIncreasing(pair.adjusted.criterion_name)
                     // lower VF bound means VF must be >= threshold
                     // upper VF bound means VF must be <= threshold
                     const adjective = thresholdKind === 'upper'
                       ? (isIncreasing ? 'at most' : 'at least')
                       : (isIncreasing ? 'at least' : 'at most')
+
+                    if (isForcedConstraint) {
+                      return (
+                        <Text color="orange.700" fontSize="sm">
+                          Previous judgments over-constrain this pairwise comparison. To keep the solution consistent,
+                          this value is fixed at <strong>{Number.isFinite(thresholdDataValue) ? thresholdDataValue.toFixed(2) : sliderInputValue}</strong> {pair.adjusted.unit}. You can keep this forced value and continue, or go back and relax earlier judgments to loosen the limits.
+                        </Text>
+                      )
+                    }
                     
                     if (pair?.type === 'best') {
                       return (
