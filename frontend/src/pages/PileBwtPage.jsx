@@ -2437,7 +2437,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                                 navigateToPair(pairIdx)
                                 return
                               }
-                              if (targetComparison) {
+                              if (targetComparison && !sliderTouched) {
                                 navigateToPair(pairIdx)
                                 return
                               }
