@@ -21,6 +21,7 @@ Configuration is read from the following environment variables:
 * ``OAUTH2_SCOPE``    – OAuth scope (default:
                         ``https://outlook.office365.com/.default``).
 * ``SMTP_USE_TLS``   – Use STARTTLS when ``"true"`` (default: ``"true"``).
+* ``SMTP_TIMEOUT_SECONDS`` – Max seconds for SMTP/OAuth2 operations (default: ``15``).
 * ``EMAIL_FROM``     – Sender address (default: ``noreply@elicitation-tools.local``).
 * ``APP_BASE_URL``   – Public base URL used to build links in emails
                        (default: ``http://localhost:3000``).
@@ -38,6 +39,9 @@ import logging
 import os
 import smtplib
 import base64
+from functools import partial
+from queue import Queue, Empty
+from threading import Thread
 from urllib.parse import quote
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
@@ -148,6 +152,9 @@ class EmailService:
             self._oauth2_token_url = ''
             self._oauth2_username = ''
             self._use_tls = True
+            self._smtp_timeout_seconds = self._parse_timeout_seconds(
+                os.getenv('SMTP_TIMEOUT_SECONDS', '15')
+            )
             self._from = 'noreply@elicitation-tools.local'
             self._base_url = 'http://localhost:3000'
         else:
@@ -155,6 +162,9 @@ class EmailService:
             self._port = int(os.getenv('SMTP_PORT', '587'))
             self._user = os.getenv('SMTP_USER', '').strip()
             self._password = _get_secret_env('SMTP_PASSWORD')
+            self._smtp_timeout_seconds = self._parse_timeout_seconds(
+                os.getenv('SMTP_TIMEOUT_SECONDS', '15')
+            )
             self._auth_mode = os.getenv('EMAIL_AUTH_MODE', 'basic').strip().lower()
             self._oauth2_tenant_id = os.getenv('OAUTH2_TENANT_ID', '').strip()
             self._oauth2_client_id = os.getenv('OAUTH2_CLIENT_ID', '').strip()
@@ -167,6 +177,16 @@ class EmailService:
             self._use_tls = os.getenv('SMTP_USE_TLS', 'true').lower() == 'true'
             self._from = os.getenv('EMAIL_FROM', 'noreply@elicitation-tools.local').strip()
             self._base_url = os.getenv('APP_BASE_URL', 'http://localhost:3000').rstrip('/')
+    
+    @staticmethod
+    def _parse_timeout_seconds(value):
+        try:
+            parsed = float(value)
+            if parsed > 0:
+                return parsed
+        except (TypeError, ValueError):
+            pass
+        return 15.0
 
     @property
     def _configured(self):
@@ -253,6 +273,7 @@ class EmailService:
                 'host': self._host,
                 'port': self._port,
                 'use_tls': self._use_tls,
+                'timeout_seconds': self._smtp_timeout_seconds,
             },
             'oauth2': {
                 'enabled': self._oauth2_enabled,
@@ -275,7 +296,10 @@ class EmailService:
         token = None
         if self._oauth2_enabled:
             try:
-                token = self._fetch_oauth2_access_token()
+                token = self._run_with_timeout(
+                    self._fetch_oauth2_access_token,
+                    'oauth2 token retrieval',
+                )
                 result['oauth2']['token_ok'] = True
             except (requests.RequestException, ValueError) as exc:
                 result['oauth2']['token_ok'] = False
@@ -284,7 +308,11 @@ class EmailService:
                 return result
 
         try:
-            with smtplib.SMTP(self._host, self._port, timeout=15) as server:
+            with smtplib.SMTP(
+                self._host,
+                self._port,
+                timeout=self._smtp_timeout_seconds,
+            ) as server:
                 server.ehlo()
                 if self._use_tls:
                     server.starttls()
@@ -310,6 +338,12 @@ class EmailService:
             OSError,
         ) as exc:
             result['error_stage'] = 'smtp_auth'
+            result['error'] = str(exc)
+            if self._oauth2_enabled:
+                result['oauth2']['smtp_auth_ok'] = False
+            return result
+        except TimeoutError as exc:
+            result['error_stage'] = 'timeout'
             result['error'] = str(exc)
             if self._oauth2_enabled:
                 result['oauth2']['smtp_auth_ok'] = False
@@ -348,7 +382,33 @@ class EmailService:
 
         return msg
 
-    def _send(self, msg, to):
+    def _run_with_timeout(self, func, operation):
+        result_queue = Queue(maxsize=1)
+
+        def _runner():
+            try:
+                result_queue.put(('result', func()))
+            except Exception as exc:  # pragma: no cover - defensive propagation
+                result_queue.put(('error', exc))
+
+        worker = Thread(target=_runner, daemon=True)
+        worker.start()
+        worker.join(self._smtp_timeout_seconds)
+        if worker.is_alive():
+            raise TimeoutError(
+                f'{operation} timed out after {self._smtp_timeout_seconds:g}s'
+            )
+
+        try:
+            tag, payload = result_queue.get_nowait()
+        except Empty as exc:  # pragma: no cover - defensive fallback
+            raise RuntimeError(f'{operation} failed without returning a result') from exc
+
+        if tag == 'error':
+            raise payload
+        return payload
+
+    def _send_blocking(self, msg, to):
         """Transmit *msg* via SMTP and return a status dict.
 
         Args:
@@ -367,7 +427,11 @@ class EmailService:
 
         try:
             if self._use_tls:
-                with smtplib.SMTP(self._host, self._port, timeout=15) as server:
+                with smtplib.SMTP(
+                    self._host,
+                    self._port,
+                    timeout=self._smtp_timeout_seconds,
+                ) as server:
                     server.ehlo()
                     server.starttls()
                     # RFC 3207: client must EHLO again after STARTTLS.
@@ -375,7 +439,11 @@ class EmailService:
                     self._authenticate(server)
                     server.sendmail(self._from, [to], msg.as_string())
             else:
-                with smtplib.SMTP(self._host, self._port, timeout=15) as server:
+                with smtplib.SMTP(
+                    self._host,
+                    self._port,
+                    timeout=self._smtp_timeout_seconds,
+                ) as server:
                     server.ehlo()
                     self._authenticate(server)
                     server.sendmail(self._from, [to], msg.as_string())
@@ -396,6 +464,27 @@ class EmailService:
                 msg['Subject'], to, exc, exc_info=True,
             )
             return {'status': 'failed', 'error': str(exc)}
+    
+    def _send(self, msg, to):
+        try:
+            return self._run_with_timeout(
+                partial(self._send_blocking, msg, to),
+                'SMTP send',
+            )
+        except TimeoutError as exc:
+            # The SMTP/OAuth2 call runs in a daemon worker thread and may still
+            # finish in the background after this timeout response is returned.
+            logger.error(
+                'EmailService: timed out sending "%s" to %s: %s',
+                msg['Subject'],
+                to,
+                exc,
+            )
+            return {
+                'status': 'failed',
+                'error': str(exc),
+                'error_code': 'timeout',
+            }
 
     # ------------------------------------------------------------------
     # Public send methods

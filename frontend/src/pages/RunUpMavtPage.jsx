@@ -1526,11 +1526,13 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
             Run UP-MAVT
           </Heading>
           <Text color="gray.700">
-            Uncertainty Propagated - Multi-Attribute Value Theory (UP-MAVT) is an extension of traditional MAVT developed by S.P. (see{' '}
+            Uncertainty Propagated - Multi-Attribute Value Theory (UP-MAVT) is an extension of traditional MAVT, developed by Pagliuca et al. (2026 - publications forthcoming) to systematically incorporate uncertainty into the decision analysis process.
+            
+            {/* {' '}
             <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
               PLACEHOLDER <ExternalLinkIcon mx="2px" />
             </Link>
-            ).
+            ). */}
             <Link color="blue.600" textDecoration="underline" cursor="pointer" onClick={onUncertaintiesOpen}>
               This diagram illustrates the sources of uncertainty considered in the framework.
             </Link>
