@@ -17,6 +17,8 @@ COPY . .
 # Override at build time with --build-arg VITE_API_URL=<url> if needed.
 ARG VITE_API_URL=/api
 ENV VITE_API_URL=$VITE_API_URL
+ARG VITE_DEBUG_CONSOLE=false
+ENV VITE_DEBUG_CONSOLE=$VITE_DEBUG_CONSOLE
 RUN npm run build
 
 # ---- Production stage ----

@@ -668,6 +668,16 @@ class StudySessionService:
         if not requested_study_code:
             raise ValidationError('Backup metadata missing study code')
 
+        declared_sessions = metadata.get('sessions')
+        if (
+            isinstance(declared_sessions, list)
+            and len(declared_sessions) > 0
+            and len(session_payloads) == 0
+        ):
+            raise ValidationError(
+                'Backup ZIP is incompatible: metadata declares sessions, but no session payload files were found under sessions/*.json'
+            )
+
         if self._studies.find_by_code(requested_study_code):
             if on_conflict == 'abort':
                 raise ConflictError('Study code conflict')
@@ -740,10 +750,18 @@ class StudySessionService:
         if study_updates:
             self._studies.update(study_session_id, study_updates)
 
+        warnings = []
+        if len(imported_sessions) == 0:
+            warnings.append(
+                'No elicitation sessions were found in the backup ZIP. The study was imported without sessions.'
+            )
+
         return {
             'study_session_id': study_session_id,
             'code': requested_study_code,
             'imported_sessions': imported_sessions,
+            'imported_session_count': len(imported_sessions),
+            'warnings': warnings,
         }
 
     # ------------------------------------------------------------------

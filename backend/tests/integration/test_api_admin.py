@@ -56,6 +56,10 @@ class TestAdminLogin:
         resp = client.post('/api/admin/login', json={'password': 'admin123'})
         assert resp.status_code == 200
 
+    def test_login_get_method_returns_405(self, client):
+        resp = client.get('/api/admin/login')
+        assert resp.status_code == 405
+
 
 class TestAdminLogout:
     def test_logout_clears_cookies(self, client):
@@ -249,4 +253,3 @@ class TestAdminEmailDiagnostics:
         assert resp.status_code == 502
         assert resp.json['success'] is False
         assert resp.json['error_stage'] == 'smtp_auth'
-

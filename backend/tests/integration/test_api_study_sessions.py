@@ -343,6 +343,9 @@ class TestImportStudyBackupWithEmail:
 
         assert import_resp.status_code == 201
         assert import_resp.json.get('email_status') == 'skipped'
+        assert import_resp.json.get('status') == 'imported_with_warnings'
+        assert import_resp.json.get('imported_session_count') == 0
+        assert import_resp.json.get('warnings')
 
 
 # ---------------------------------------------------------------------------
@@ -468,5 +471,4 @@ class TestNotifyInactiveStudySessions:
         assert 'notified' in data
         assert 'skipped' in data
         assert 'failed' in data
-
 
