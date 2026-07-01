@@ -235,7 +235,7 @@ class EmailService:
                 'scope': self._oauth2_scope,
                 'grant_type': 'client_credentials',
             },
-            timeout=15,
+            timeout=self._smtp_timeout_seconds,
         )
         response.raise_for_status()
         token = response.json().get('access_token', '').strip()
@@ -334,7 +334,6 @@ class EmailService:
         except (
             smtplib.SMTPException,
             ConnectionError,
-            TimeoutError,
             OSError,
         ) as exc:
             result['error_stage'] = 'smtp_auth'
@@ -395,6 +394,14 @@ class EmailService:
         worker.start()
         worker.join(self._smtp_timeout_seconds)
         if worker.is_alive():
+            logger.error(
+                'EmailService: %s timed out after %ss (auth_mode=%s, host=%s, port=%s)',
+                operation,
+                self._smtp_timeout_seconds,
+                self._auth_mode,
+                self._host,
+                self._port,
+            )
             raise TimeoutError(
                 f'{operation} timed out after {self._smtp_timeout_seconds:g}s'
             )
@@ -475,9 +482,12 @@ class EmailService:
             # The SMTP/OAuth2 call runs in a daemon worker thread and may still
             # finish in the background after this timeout response is returned.
             logger.error(
-                'EmailService: timed out sending "%s" to %s: %s',
+                'EmailService: timed out sending "%s" to %s (auth_mode=%s, host=%s, port=%s): %s',
                 msg['Subject'],
                 to,
+                self._auth_mode,
+                self._host,
+                self._port,
                 exc,
             )
             return {

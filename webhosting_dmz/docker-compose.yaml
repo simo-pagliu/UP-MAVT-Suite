@@ -77,7 +77,8 @@ services:
     restart: always
 
   up-mavt-suite-backend:
-    image: gitea.psi.ch/images/up-mavt-suite-backend:0.9.6
+    # Keep UP-MAVT backend/frontend/worker on the same release version.
+    image: gitea.psi.ch/images/up-mavt-suite-backend:${UP_MAVT_SUITE_VERSION:-0.9.6}
     container_name: up-mavt-suite-backend
     environment:
       MONGO_URI: mongodb://up-mavt-suite-mongo:27017/elicitation
@@ -103,7 +104,7 @@ services:
     restart: always
 
   up-mavt-suite-worker:
-    image: gitea.psi.ch/images/up-mavt-suite-worker:0.9.6
+    image: gitea.psi.ch/images/up-mavt-suite-worker:${UP_MAVT_SUITE_VERSION:-0.9.6}
     container_name: up-mavt-suite-worker
     environment:
       MONGO_URI: mongodb://up-mavt-suite-mongo:27017/elicitation
@@ -114,7 +115,7 @@ services:
     restart: always
 
   up-mavt-suite-frontend:
-    image: gitea.psi.ch/images/up-mavt-suite-frontend:0.9.6
+    image: gitea.psi.ch/images/up-mavt-suite-frontend:${UP_MAVT_SUITE_VERSION:-0.9.6}
     container_name: up-mavt-suite-frontend
     depends_on:
       - up-mavt-suite-backend

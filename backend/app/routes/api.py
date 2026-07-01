@@ -718,6 +718,10 @@ def upload_case_study():
         email_status = email_result.get('status')
     if email_status is not None:
         result['email_status'] = email_status
+    if result.get('warnings'):
+        result['status'] = 'imported_with_warnings'
+    else:
+        result['status'] = 'imported'
     return jsonify(result), 201
 
 
