@@ -1,4 +1,8 @@
 """Unit tests for StudySessionService."""
+import io
+import json
+import zipfile
+
 import pytest
 from bson.objectid import ObjectId
 
@@ -346,6 +350,25 @@ class TestImportBackupEmptyCriteria:
         assert imported['title'] == 'Metadata Only Study'
         assert imported['creator_email'] == 'uploader@example.com'
         assert svc.get_input(result['study_session_id']) == []
+        assert result['imported_session_count'] == 0
+        assert result['warnings']
+
+    def test_import_backup_rejects_declared_sessions_without_payload_files(self, svc):
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr(
+                'metadata.json',
+                json.dumps({
+                    'version': 2,
+                    'study': {'code': 'BROKEN-BACKUP'},
+                    'sessions': [{'name': 'S1'}],
+                    'workflow': {},
+                }),
+            )
+            zf.writestr('input/input.json', json.dumps({'criteria': []}))
+
+        with pytest.raises(ValidationError, match='metadata declares sessions'):
+            svc.import_study_case(buf.getvalue(), on_conflict='regenerate')
 
 
 # ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@ import os
 from flask import Flask
 from flask_cors import CORS
 from pymongo import MongoClient
+from werkzeug.exceptions import HTTPException
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +44,10 @@ def create_app():
     # Register global error handler
     @app.errorhandler(Exception)
     def handle_general_error(e):
+        if isinstance(e, HTTPException):
+            # Preserve framework-generated HTTP errors (e.g. 404/405) so clients
+            # receive accurate status codes instead of a generic 500.
+            return {'error': e.description}, e.code
         error_type = type(e).__name__
         error_msg = str(e)
         logger.error("UNHANDLED ERROR: %s: %s", error_type, error_msg, exc_info=True)
