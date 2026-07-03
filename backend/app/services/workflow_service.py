@@ -86,7 +86,9 @@ class WorkflowService:
         return str(self._tasks.insert(doc))
 
     def create_run_step_task(self, study_session_id, step_number, selected_session_ids,
-                             mc_iterations, aggregation_method, mc_mode, use_random_weights):
+                             mc_iterations, aggregation_method='weighted_sum', aggregation_alpha=0.0,
+                             aggregation_methods=None, aggregation_alphas=None,
+                             mc_mode='non_strict', use_random_weights=False):
         """Enqueue a background task to execute a UP-MAVT analysis step.
 
         Validates preconditions, normalises qualitative indicators for the
@@ -99,9 +101,12 @@ class WorkflowService:
             selected_session_ids (list): The elicitation session IDs to include.
             mc_iterations (int): Number of Monte-Carlo iterations (clamped to
                 [100, 5000] for steps 2-5, [100, 10000] for step 6).
-            aggregation_method (str): Aggregation method shortcode or full
-                name (``'SUM'``/``'weighted_sum'``, ``'GEO'``/``'geometric_mean'``,
-                ``'HAR'``/``'harmonic_mean'``).
+            aggregation_method (str): Primary aggregation method token.
+            aggregation_alpha (float): Aggregation alpha parameter in [-1, 1].
+            aggregation_methods (list[str] | None): Optional list of aggregation
+                method tokens (used by step 4 to run multiple methods).
+            aggregation_alphas (dict | None): Optional mapping
+                ``aggregation_method -> alpha``.
             mc_mode (str): Monte-Carlo mode string passed directly to the
                 worker (e.g. ``'non_strict'``).
             use_random_weights (bool): Whether to use random weights in the
@@ -128,15 +133,55 @@ class WorkflowService:
             mc_iterations = 10000 if step_number == 6 else 1000
 
         agg_map = {
-            'SUM': 'weighted_sum', 'GEO': 'geometric_mean', 'HAR': 'harmonic_mean',
-            'weighted_sum': 'weighted_sum', 'geometric_mean': 'geometric_mean', 'harmonic_mean': 'harmonic_mean',
+            'SUM': 'weighted_sum',
+            'WAM': 'weighted_sum',
+            'GEO': 'geometric_mean',
+            'HAR': 'harmonic_mean',
+            'GEO_OFFSET': 'geometric_mean_offset',
+            'WAM_MIN': 'weighted_sum_min_mix',
+            'WPM': 'weighted_power_mean',
+            'WEM': 'weighted_exponential_mean',
+            'weighted_sum': 'weighted_sum',
+            'geometric_mean': 'geometric_mean',
+            'harmonic_mean': 'harmonic_mean',
+            'geometric_mean_offset': 'geometric_mean_offset',
+            'weighted_sum_min_mix': 'weighted_sum_min_mix',
+            'weighted_power_mean': 'weighted_power_mean',
+            'weighted_exponential_mean': 'weighted_exponential_mean',
         }
         aggregation_method = agg_map.get(aggregation_method, 'weighted_sum')
+        try:
+            aggregation_alpha = max(-1.0, min(1.0, float(aggregation_alpha)))
+        except (TypeError, ValueError):
+            aggregation_alpha = 0.0
+
+        normalized_methods = []
+        if isinstance(aggregation_methods, list):
+            for method in aggregation_methods:
+                normalized = agg_map.get(method)
+                if normalized and normalized not in normalized_methods:
+                    normalized_methods.append(normalized)
+        if not normalized_methods:
+            normalized_methods = [aggregation_method]
+
+        normalized_alphas = {}
+        if isinstance(aggregation_alphas, dict):
+            for key, value in aggregation_alphas.items():
+                mapped_key = agg_map.get(key)
+                if not mapped_key:
+                    continue
+                try:
+                    normalized_alphas[mapped_key] = max(-1.0, min(1.0, float(value)))
+                except (TypeError, ValueError):
+                    normalized_alphas[mapped_key] = 0.0
+        for method in normalized_methods:
+            if method not in normalized_alphas:
+                normalized_alphas[method] = aggregation_alpha
 
         step_names = {
             2: 'Consensus Analysis (SMC)',
             3: 'Dominance Analysis (NSMC + Random Weights)',
-            4: 'Compensation Analysis (NSMC + All Aggregations)',
+            4: 'Aggregation Analysis (NSMC)',
             5: 'Uncertainty Analysis (SMC)',
             6: 'Final Results (NSMC)',
         }
@@ -177,6 +222,9 @@ class WorkflowService:
                 'step_name': step_names.get(step_number, f'Step {step_number}'),
                 'mc_iterations': mc_iterations,
                 'aggregation_method': aggregation_method,
+                'aggregation_alpha': aggregation_alpha,
+                'aggregation_methods': normalized_methods,
+                'aggregation_alphas': normalized_alphas,
                 'mc_mode': mc_mode,
                 'use_random_weights': use_random_weights,
                 'opinion_weights': None,
@@ -333,9 +381,14 @@ class WorkflowService:
                     'mc_mode': step_data.get('mc_mode'),
                 }
                 if step_num == 4:
-                    step_info['aggregation_methods'] = list(step_data.get('results_by_aggregation', {}).keys())
+                    by_aggregation = step_data.get('results_by_aggregation', {})
+                    if isinstance(by_aggregation, dict) and by_aggregation:
+                        step_info['aggregation_methods'] = list(by_aggregation.keys())
+                    else:
+                        step_info['aggregation_method'] = step_data.get('aggregation_method')
                 else:
                     step_info['aggregation_method'] = step_data.get('aggregation_method')
+                step_info['aggregation_alpha'] = step_data.get('aggregation_alpha')
                 steps_status[str(step_num)] = step_info
             else:
                 steps_status[str(step_num)] = {'completed': False}

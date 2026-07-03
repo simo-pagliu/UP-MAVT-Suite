@@ -31,6 +31,10 @@ import {
   NumberInputStepper,
   NumberIncrementStepper,
   NumberDecrementStepper,
+  Slider,
+  SliderTrack,
+  SliderFilledTrack,
+  SliderThumb,
   Modal,
   ModalOverlay,
   ModalContent,
@@ -47,6 +51,8 @@ import { ChevronDownIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import JSZip from 'jszip'
 import PdfModal from '../components/PdfModal'
+import { InlineMath, BlockMath } from 'react-katex'
+import 'katex/dist/katex.min.css'
 
 import {
   AreaChart,
@@ -90,6 +96,106 @@ const SVG_INLINE_STYLE_PROPS = [
   'font-size',
   'font-weight',
 ]
+
+const AGGREGATION_METHODS = [
+  {
+    id: 'WAM',
+    label: 'WAM',
+    fullName: 'Weighted Arithmetic Mean',
+    backendMethod: 'weighted_sum',
+    usesAlpha: false,
+    formula: String.raw`V_{WAM} = \sum_{i=1}^{n} w_i v_i`,
+  },
+  {
+    id: 'GEO',
+    label: 'GEO',
+    fullName: 'Geometric Mean',
+    backendMethod: 'geometric_mean',
+    usesAlpha: false,
+    formula: String.raw`V_{GEO} = \prod_{i=1}^{n} v_i^{w_i}`,
+  },
+  {
+    id: 'HAR',
+    label: 'HAR',
+    fullName: 'Harmonic Mean',
+    backendMethod: 'harmonic_mean',
+    usesAlpha: false,
+    formula: String.raw`V_{HAR} = \left(\sum_{i=1}^{n} \frac{w_i}{v_i}\right)^{-1}`,
+  },
+  {
+    id: 'GEO_OFFSET',
+    label: 'GEO+offset',
+    fullName: 'Geometric Mean with Offset',
+    backendMethod: 'geometric_mean_offset',
+    usesAlpha: true,
+    formula: String.raw`V_{GEO+offset} = \left( \prod_{i=1}^{n} (v_i - \log(\alpha))^{w_i} \right) + \log(\alpha)`,
+  },
+  {
+    id: 'WAM_MIN',
+    label: 'WAM+MIN',
+    fullName: 'Mixture of Weighted Arithmetic Mean and Minimum',
+    backendMethod: 'weighted_sum_min_mix',
+    usesAlpha: true,
+    formula: String.raw`V_{WAM+MIN} = (1 - \alpha) \cdot \sum_{i=1}^{n} w_i v_i + \alpha \cdot \min(\mathbf{v})`,
+  },
+  {
+    id: 'WPM',
+    label: 'WPM',
+    fullName: 'Weighted Power Mean',
+    backendMethod: 'weighted_power_mean',
+    usesAlpha: true,
+    formula: String.raw`V_{WPM} =
+\begin{cases}
+\left( \sum_{i=1}^{n} w_i v_i^{\ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1} \right)^{\frac{1}{\ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1}} & \text{if } \ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1 \neq 0 \\
+\prod_{i=1}^{n} v_i^{w_i} & \text{if } \ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1 = 0 \\
+\min(\mathbf{v}) & \text{if } \ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1 = -\infty \\
+\max(\mathbf{v}) & \text{if } \ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1 = \infty
+\end{cases}`,
+  },
+  {
+    id: 'WEM',
+    label: 'WEM',
+    fullName: 'Weighted Exponential Mean',
+    backendMethod: 'weighted_exponential_mean',
+    usesAlpha: true,
+    formula: String.raw`V_{WEM} =
+\begin{cases}
+\log_{\left( - \frac{\ln\left(\frac{\alpha + 1}{2}\right)}{\ln(2)}\right)} \left( \sum_{i=1}^{n} w_i \cdot \left( - \frac{\ln\left(\frac{\alpha + 1}{2}\right)}{\ln(2)}\right)^{v_i} \right) & \text{if } - \frac{\ln\left(\frac{\alpha + 1}{2}\right)}{\ln(2)} \neq 1 \\
+\sum_{i=1}^{n} w_i v_i & \text{if } - \frac{\ln\left(\frac{\alpha + 1}{2}\right)}{\ln(2)} = 1
+\end{cases}`,
+  },
+]
+const DEFAULT_AGGREGATION_STEP_METHODS = ['WAM', 'GEO', 'HAR']
+
+function getAggregationMeta(methodId) {
+  const token = String(methodId || '').trim().toUpperCase()
+  return AGGREGATION_METHODS.find((entry) => entry.id === token) || AGGREGATION_METHODS[0]
+}
+
+function toBackendAggregationMethod(methodId) {
+  return getAggregationMeta(methodId).backendMethod
+}
+
+function formatAlphaValue(alphaValue) {
+  const numericValue = Number(alphaValue)
+  if (!Number.isFinite(numericValue)) return null
+  const clamped = Math.max(-1, Math.min(1, numericValue))
+  return Number(clamped.toFixed(2)).toString()
+}
+
+function getAggregationPlotLabel(backendMethod, alphaMap = null, fallbackAlpha = null) {
+  const meta = AGGREGATION_METHODS.find((entry) => entry.backendMethod === backendMethod)
+  const label = meta?.label || backendMethod
+  if (!meta?.usesAlpha) return label
+
+  let alpha = fallbackAlpha
+  if (alphaMap && typeof alphaMap === 'object' && Object.prototype.hasOwnProperty.call(alphaMap, backendMethod)) {
+    alpha = alphaMap[backendMethod]
+  }
+  const formattedAlpha = formatAlphaValue(alpha)
+  if (formattedAlpha === null) return `${label} (alpha = 0)`
+  return `${label} (alpha = ${formattedAlpha})`
+}
 
 function inlineSvgComputedStyles(sourceNode, cloneNode) {
   if (
@@ -149,10 +255,14 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   })
 
   // Aggregation method per step
-  const [consensusAggregation, setConsensusAggregation] = useState('SUM')
-  const [dominanceAggregation, setDominanceAggregation] = useState('SUM')
-  const [uncertaintyAggregation, setUncertaintyAggregation] = useState('')
-  const [resultsAggregation, setResultsAggregation] = useState('')
+  const [consensusAggregation, setConsensusAggregation] = useState('WAM')
+  const [aggregationStepMethods, setAggregationStepMethods] = useState(DEFAULT_AGGREGATION_STEP_METHODS)
+  const [uncertaintyAggregation, setUncertaintyAggregation] = useState('WAM')
+  const [resultsAggregation, setResultsAggregation] = useState('WAM')
+  const [aggregationStepAlphas, setAggregationStepAlphas] = useState({})
+  const [uncertaintyAggregationAlpha, setUncertaintyAggregationAlpha] = useState(0)
+  const [consensusAggregationAlpha, setConsensusAggregationAlpha] = useState(0)
+  const [resultsAggregationAlpha, setResultsAggregationAlpha] = useState(0)
 
   // Weight space plot state
   const [selectedWeightSession, setSelectedWeightSession] = useState('')
@@ -174,7 +284,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   // Step 2 results state
   const [step2Results, setStep2Results] = useState(null)
   const [step5Results, setStep5Results] = useState(null)
-  const [step3Results, setStep3Results] = useState(null)
   const [step4Results, setStep4Results] = useState(null)
   const [step6Results, setStep6Results] = useState(null)
   const [exportingDataZip, setExportingDataZip] = useState(false)
@@ -236,16 +345,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       setStep5Results(response.data)
     } catch (error) {
       console.error('Error fetching step 5 results:', error)
-    }
-  }, [studySessionId])
-
-  const fetchStep3Results = useCallback(async () => {
-    if (!studySessionId) return
-    try {
-      const response = await axios.get(`${API_URL}/study-session/${studySessionId}/step-results/3`)
-      setStep3Results(response.data)
-    } catch (error) {
-      console.error('Error fetching step 3 results:', error)
     }
   }, [studySessionId])
 
@@ -375,12 +474,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   }, [workflowStatus?.steps?.['5']?.completed, fetchStep5Results])
 
   useEffect(() => {
-    if (workflowStatus?.steps?.['3']?.completed) {
-      fetchStep3Results()
-    }
-  }, [workflowStatus?.steps?.['3']?.completed, fetchStep3Results])
-
-  useEffect(() => {
     if (workflowStatus?.steps?.['4']?.completed) {
       fetchStep4Results()
     }
@@ -416,8 +509,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           // Then fetch the step results for the completed step
           if (stepNumber === 2) {
             await fetchStep2Results()
-          } else if (stepNumber === 3) {
-            await fetchStep3Results()
           } else if (stepNumber === 4) {
             await fetchStep4Results()
           } else if (stepNumber === 5) {
@@ -454,7 +545,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         console.error('Polling error:', error)
       }
     }, 2000)
-  }, [fetchWorkflowStatus, fetchStep2Results, fetchStep3Results, fetchStep4Results, fetchStep5Results, fetchStep6Results, fetchWeightSpace, selectedWeightSession, toast])
+  }, [fetchWorkflowStatus, fetchStep2Results, fetchStep4Results, fetchStep5Results, fetchStep6Results, fetchWeightSpace, selectedWeightSession, toast])
 
   // Check for active/running tasks on mount (called after startPolling is defined)
   const checkForActiveTask = useCallback(async () => {
@@ -602,14 +693,51 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       toast({ title: 'Select at least one session', status: 'warning', duration: 3000 })
       return
     }
+    if (stepNumber === 4 && aggregationStepMethods.length === 0) {
+      toast({ title: 'Select at least one aggregation method', status: 'warning', duration: 3000 })
+      return
+    }
+
+    const selectedAggregationMethodIds = aggregationStepMethods.length > 0
+      ? aggregationStepMethods
+      : DEFAULT_AGGREGATION_STEP_METHODS
+    const selectedBackendMethods = [...new Set(selectedAggregationMethodIds.map((id) => toBackendAggregationMethod(id)))]
+    const selectedBackendAlphas = {}
+    selectedAggregationMethodIds.forEach((methodId) => {
+      const meta = getAggregationMeta(methodId)
+      const value = Number(aggregationStepAlphas[methodId])
+      const alpha = Number.isFinite(value) ? Math.max(-1, Math.min(1, value)) : 0
+      selectedBackendAlphas[meta.backendMethod] = meta.usesAlpha ? alpha : 0
+    })
 
     // Build step-specific params
     const stepConfigs = {
-      2: { mc_mode: 'strict', aggregation_method: consensusAggregation, use_random_weights: false },
-      3: { mc_mode: 'non_strict', aggregation_method: dominanceAggregation, use_random_weights: true },
-      4: { mc_mode: 'non_strict', aggregation_method: 'weighted_sum', use_random_weights: false },
-      5: { mc_mode: 'strict', aggregation_method: uncertaintyAggregation, use_random_weights: false },
-      6: { mc_mode: 'non_strict', aggregation_method: resultsAggregation, use_random_weights: false },
+      2: {
+        mc_mode: 'strict',
+        aggregation_method: toBackendAggregationMethod(consensusAggregation),
+        aggregation_alpha: consensusAggregationAlpha,
+        use_random_weights: false,
+      },
+      4: {
+        mc_mode: 'non_strict',
+        aggregation_method: selectedBackendMethods[0] || 'weighted_sum',
+        aggregation_alpha: selectedBackendAlphas[selectedBackendMethods[0]] ?? 0,
+        aggregation_methods: selectedBackendMethods,
+        aggregation_alphas: selectedBackendAlphas,
+        use_random_weights: false,
+      },
+      5: {
+        mc_mode: 'strict',
+        aggregation_method: toBackendAggregationMethod(uncertaintyAggregation),
+        aggregation_alpha: uncertaintyAggregationAlpha,
+        use_random_weights: false,
+      },
+      6: {
+        mc_mode: 'non_strict',
+        aggregation_method: toBackendAggregationMethod(resultsAggregation),
+        aggregation_alpha: resultsAggregationAlpha,
+        use_random_weights: false,
+      },
     }
 
     const config = { ...stepConfigs[stepNumber], ...overrides }
@@ -617,7 +745,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     // Clear previous results for this step so they don't linger during the new run
     const stepResultClearers = {
       2: () => setStep2Results(null),
-      3: () => setStep3Results(null),
       4: () => setStep4Results(null),
       5: () => setStep5Results(null),
       6: () => setStep6Results(null),
@@ -625,7 +752,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     stepResultClearers[stepNumber]?.()
 
     setRunningStep(stepName)
-    setConsoleOutput(`Submitting Step ${stepNumber} task...\n`)
+    setConsoleOutput(`Submitting ${stepName} task...\n`)
 
     try {
       const response = await axios.post(
@@ -635,6 +762,9 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           selected_session_ids: selectedSessions,
           mc_iterations: mcIterations[stepNumber] || (stepNumber === 6 ? 10000 : 1000),
           aggregation_method: config.aggregation_method,
+          aggregation_alpha: config.aggregation_alpha ?? 0,
+          aggregation_methods: config.aggregation_methods,
+          aggregation_alphas: config.aggregation_alphas,
           mc_mode: config.mc_mode,
           use_random_weights: config.use_random_weights,
         }
@@ -720,6 +850,165 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     setMcIterations((prev) => ({ ...prev, [step]: v }))
   }
 
+  const renderAggregationSelector = ({
+    selectedMethod,
+    setSelectedMethod,
+    alphaValue,
+    setAlphaValue,
+  }) => {
+    const meta = getAggregationMeta(selectedMethod)
+
+    return (
+      <VStack spacing={3} align="stretch">
+        <HStack spacing={3} align="center" flexWrap="wrap">
+          <Text fontWeight="bold">Aggregation:</Text>
+          <Select
+            value={selectedMethod}
+            onChange={(e) => setSelectedMethod(e.target.value)}
+            width="220px"
+            isDisabled={runningStep !== null}
+          >
+            {AGGREGATION_METHODS.map((method) => (
+              <option key={method.id} value={method.id}>{method.label}</option>
+            ))}
+          </Select>
+          {meta.usesAlpha && (
+            <HStack spacing={2} minW="340px" flex={1}>
+              <Text fontWeight="medium">α:</Text>
+              <Slider
+                value={alphaValue}
+                min={-1}
+                max={1}
+                step={0.01}
+                isDisabled={runningStep !== null}
+                onChange={(value) => setAlphaValue(Number(value))}
+                flex={1}
+              >
+                <SliderTrack>
+                  <SliderFilledTrack />
+                </SliderTrack>
+                <SliderThumb />
+              </Slider>
+              <NumberInput
+                value={alphaValue}
+                min={-1}
+                max={1}
+                step={0.01}
+                precision={2}
+                width="100px"
+                isDisabled={runningStep !== null}
+                onChange={(_, valueAsNumber) => {
+                  if (!Number.isFinite(valueAsNumber)) return
+                  setAlphaValue(Math.max(-1, Math.min(1, valueAsNumber)))
+                }}
+              >
+                <NumberInputField />
+                <NumberInputStepper>
+                  <NumberIncrementStepper />
+                  <NumberDecrementStepper />
+                </NumberInputStepper>
+              </NumberInput>
+            </HStack>
+          )}
+        </HStack>
+        <VStack spacing={1} align="stretch">
+          <Text fontSize="sm" color="gray.700">
+            <strong>{meta.label}</strong> = {meta.fullName}
+          </Text>
+          <Box bg="white" borderWidth={1} borderColor="gray.200" borderRadius="md" p={3} overflowX="auto">
+            <BlockMath math={meta.formula} />
+          </Box>
+          {meta.usesAlpha && (
+            <Text fontSize="xs" color="gray.600">
+              α ∈ [-1, 1]. At α = 0 the aggregation is fully compensatory; values toward 1 emphasize poor performance, while values toward -1 emphasize strong performance.
+            </Text>
+          )}
+        </VStack>
+      </VStack>
+    )
+  }
+
+  const renderAggregationChecklist = () => (
+    <VStack spacing={3} align="stretch">
+      <Text fontWeight="bold">Aggregation methods (select one or more):</Text>
+      {AGGREGATION_METHODS.map((method) => {
+        const isSelected = aggregationStepMethods.includes(method.id)
+        const alphaValue = Number(aggregationStepAlphas[method.id] ?? 0)
+        return (
+          <Box key={method.id} bg="white" borderWidth={1} borderColor="gray.200" borderRadius="md" p={3}>
+            <VStack spacing={2} align="stretch">
+              <HStack spacing={3} align="center" flexWrap="wrap">
+                <Checkbox
+                  isChecked={isSelected}
+                  isDisabled={runningStep !== null}
+                  onChange={(e) => {
+                    const checked = e.target.checked
+                    setAggregationStepMethods((prev) => {
+                      if (checked) {
+                        return prev.includes(method.id) ? prev : [...prev, method.id]
+                      }
+                      return prev.filter((id) => id !== method.id)
+                    })
+                  }}
+                >
+                  <Text fontWeight="semibold">{method.label}</Text>
+                </Checkbox>
+                <Text fontSize="sm" color="gray.700">
+                  {method.fullName}
+                </Text>
+              </HStack>
+              <Box borderWidth={1} borderColor="gray.200" borderRadius="md" p={3} overflowX="auto">
+                <BlockMath math={method.formula} />
+              </Box>
+              {method.usesAlpha && isSelected && (
+                <HStack spacing={2} align="center" flexWrap="wrap">
+                  <Text fontWeight="medium">α:</Text>
+                  <Slider
+                    value={alphaValue}
+                    min={-1}
+                    max={1}
+                    step={0.01}
+                    isDisabled={runningStep !== null}
+                    onChange={(value) => setAggregationStepAlphas((prev) => ({ ...prev, [method.id]: Number(value) }))}
+                    flex={1}
+                  >
+                    <SliderTrack>
+                      <SliderFilledTrack />
+                    </SliderTrack>
+                    <SliderThumb />
+                  </Slider>
+                  <NumberInput
+                    value={alphaValue}
+                    min={-1}
+                    max={1}
+                    step={0.01}
+                    precision={2}
+                    width="100px"
+                    isDisabled={runningStep !== null}
+                    onChange={(_, valueAsNumber) => {
+                      if (!Number.isFinite(valueAsNumber)) return
+                      const clamped = Math.max(-1, Math.min(1, valueAsNumber))
+                      setAggregationStepAlphas((prev) => ({ ...prev, [method.id]: clamped }))
+                    }}
+                  >
+                    <NumberInputField />
+                    <NumberInputStepper>
+                      <NumberIncrementStepper />
+                      <NumberDecrementStepper />
+                    </NumberInputStepper>
+                  </NumberInput>
+                </HStack>
+              )}
+            </VStack>
+          </Box>
+        )
+      })}
+      <Text fontSize="xs" color="gray.600">
+        α ∈ [-1, 1]. At α = 0 the aggregation is fully compensatory; values toward 1 emphasize poor performance, while values toward -1 emphasize strong performance.
+      </Text>
+    </VStack>
+  )
+
   // ============================================================================
   // STEP 2: DISTRIBUTION PLOT HELPERS
   // ============================================================================
@@ -795,14 +1084,17 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     })
 
     const distributionSummary = formatPerElicitationDistributionSummary(expertSeries)
+    const expertNames = expertSeries.map((entry) => entry.expertName)
+    const consensus = computeConsensusQuantification(densityData, expertNames)
 
     return {
       altName: stepResults.alternative_names[altIndex],
       densityData,
-      expertNames: expertSeries.map((entry) => entry.expertName),
+      expertNames,
       expertSeries,
       summaryText: distributionSummary.text,
       summaryLines: distributionSummary.lines,
+      consensus,
     }
   }
 
@@ -1387,7 +1679,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       if (exportIncludeSimulationCsvs) {
         const simulationExports = [
           ...buildSimulationCsvExports(2, step2Results),
-          ...buildSimulationCsvExports(3, step3Results),
           ...buildSimulationCsvExports(4, step4Results),
           ...buildSimulationCsvExports(5, step5Results),
           ...buildSimulationCsvExports(6, step6Results),
@@ -1402,9 +1693,18 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
       if (exportIncludeStep2ConsensusQuantificationCsv || exportIncludeStep5UncertaintyStatsCsv) {
         if (exportIncludeStep2ConsensusQuantificationCsv) {
-          const step2StatsCsv = buildDistributionStatsCsv(null, {
+          const step2ConsensusRows = (step2Results?.alternative_names || []).map((altName, altIndex) => {
+            const distData = getDistributionDataForAlternative(step2Results, altIndex)
+            if (!distData?.consensus) return null
+            return {
+              alternative: altName,
+              ...distData.consensus,
+            }
+          }).filter(Boolean)
+
+          const step2StatsCsv = buildConsensusQuantificationCsv(step2ConsensusRows, {
             title: 'Step 2 consensus quantification',
-            placeholderMessage: 'Consensus quantification stats are not available yet.',
+            placeholderMessage: 'Consensus quantification is not available yet.',
           })
           exportZip.file('results/step2_consensus_quantification.csv', step2StatsCsv)
           exportedArtifacts += 1
@@ -1530,7 +1830,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         appendDistributionTargets(step5Results, 'step5')
 
         const heatmapTargets = buildPipelineHeatmapExports({
-          step3Results,
           step4Results,
           step6Results,
         })
@@ -1628,7 +1927,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
             </Link>
           </Text>
           <Text color="gray.700">
-            The workflow is designed to examine all aspects of the framework, including consensus among multiple opinions, dominance patterns,
+            The workflow is designed to examine all aspects of the framework, including consensus among multiple opinions,
             compensatory dynamics for selecting the aggregation model, overall uncertainty assessment, and the final results.
             The UP-MAVT code implements two Monte Carlo approaches with distinct roles: Strict Monte Carlo (SMC) and Non-Strict Monte Carlo (NSMC).
             {' '}SMC is used to produce per-decision-maker results, generating a value distribution for each alternative and for each decision maker; these outputs support the analysis phase.
@@ -1762,19 +2061,16 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                 Step 1: Weights {weightsComputed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
               <Tab isDisabled={isStepDisabled(1)}>
-                Step 2: Consensus {getStepStatus(2)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 2: Aggregation {getStepStatus(4)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
               <Tab isDisabled={isStepDisabled(2)}>
-                Step 3: Dominance {getStepStatus(3)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 3: Uncertainty {getStepStatus(5)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
               <Tab isDisabled={isStepDisabled(3)}>
-                Step 4: Compensation {getStepStatus(4)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 4: Consensus {getStepStatus(2)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
               <Tab isDisabled={isStepDisabled(4)}>
-                Step 5: Uncertainty {getStepStatus(5)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
-              </Tab>
-              <Tab isDisabled={isStepDisabled(5)}>
-                Step 6: Results {getStepStatus(6)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 5: Results {getStepStatus(6)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
             </TabList>
 
@@ -2297,320 +2593,113 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                 </StepSection>
               </TabPanel>
 
-              {/* Step 2: Consensus (SMC, strict) */}
+              {/* Step 2: Aggregation */}
               <TabPanel>
                 <StepSection
-                  title="Consensus Analysis"
-                  description="The output of the SMC can be used to assess the consensus or agreement among experts. If the distributions largely overlap, consensus can be considered reached. Otherwise, it is important to reflect on the implications of aggregating divergent opinions."
-                  onRun={() => handleRunStep(2, 'Consensus')}
+                  title="Aggregation Analysis"
+                  description="Select one or more aggregation methods and run NSMC to compare ranking behavior. For methods with α, α = 0 is fully compensatory; moving α toward 1 penalizes poor criterion performance more, while moving α toward -1 rewards strong criterion performance more."
+                  onRun={() => handleRunStep(4, 'Aggregation')}
                   onStop={handleStopExecution}
-                  isRunning={runningStep === 'Consensus'}
-                  isDisabled={isButtonDisabled(1) || selectedSessions.length === 0}
-                  showConsole={showConsole}
-                  consoleOutput={consoleOutput}
-                  onToggleConsole={() => setShowConsole(!showConsole)}
-                  statusInfo={
-                    getStepStatus(2)?.completed ? (
-                      <HStack spacing={3}>
-                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 2 completed</Badge>
-                        <Text fontSize="sm" color="gray.500">{formatTimestamp(getStepStatus(2)?.timestamp)}</Text>
-                      </HStack>
-                    ) : null
-                  }
-                  parameters={
-                    <HStack spacing={6} flexWrap="wrap">
-                      <HStack spacing={3}>
-                        <Text fontWeight="bold">Aggregation:</Text>
-                        <Select
-                          value={consensusAggregation}
-                          onChange={(e) => setConsensusAggregation(e.target.value)}
-                          width="150px"
-                          isDisabled={runningStep !== null}
-                        >
-                          <option value="SUM">SUM (default)</option>
-                          <option value="GEO">GEO</option>
-                          <option value="HAR">HAR</option>
-                        </Select>
-                      </HStack>
-                      <HStack spacing={3}>
-                        <Text fontWeight="bold">MC Iterations:</Text>
-                        <NumberInput
-                          value={mcIterations[2]}
-                          min={100}
-                          max={5000}
-                          step={100}
-                          onChange={(_, val) => updateMcIterations(2, val)}
-                          isDisabled={runningStep !== null}
-                          width="120px"
-                        >
-                          <NumberInputField />
-                          <NumberInputStepper>
-                            <NumberIncrementStepper />
-                            <NumberDecrementStepper />
-                          </NumberInputStepper>
-                        </NumberInput>
-                      </HStack>
-                    </HStack>
-                  }
-                >
-                  {step2Results ? (
-                    <VStack spacing={8} align="stretch">
-                      {(() => {
-                        const legendItems = getLegendItems(step2Results)
-                        return (
-                          <HStack spacing={4} flexWrap="wrap">
-                            <Text fontSize="sm" fontWeight="semibold">Elicitation:</Text>
-                            {legendItems.map((item, idx) => (
-                              <HStack key={`${item.label}-${idx}`} spacing={2}>
-                                <Box
-                                  w={3}
-                                  h={3}
-                                  bg={STEP2_COLORS[idx % STEP2_COLORS.length]}
-                                  opacity={0.45}
-                                  borderRadius="sm"
-                                />
-                                <Text fontSize="sm">{item.label}</Text>
-                              </HStack>
-                            ))}
-                          </HStack>
-                        )
-                      })()}
-                      <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={5}>
-                        {step2Results.alternative_names?.map((altName, altIndex) => {
-                          const distData = getDistributionDataForAlternative(step2Results, altIndex)
-                          if (!distData) return null
-                          const legendItems = getLegendItems(step2Results)
-                          const legendLabelByExpert = Object.fromEntries(
-                            legendItems.map((item) => [item.expertName, item.label])
-                          )
-                          return (
-                            <Box key={`${altName}-${altIndex}`} borderWidth={1} borderRadius="md" p={3} bg="gray.50" position="relative" data-export-id={`step2_distribution_${altIndex}`}>
-                              <Tooltip label="Download image as PNG" hasArrow>
-                                <IconButton
-                                  aria-label={`Download distribution image for ${altName}`}
-                                  icon={<DownloadIcon />}
-                                  size="sm"
-                                  variant="ghost"
-                                  position="absolute"
-                                  top={2}
-                                  right={2}
-                                  zIndex={2}
-                                  onClick={() => handleDownloadChartPng(`step2_distribution_${altIndex}`, `step2_distribution_${altName}`)}
-                                />
-                              </Tooltip>
-                              <HStack justify="space-between" align="center" mb={2} pr={12}>
-                                <Text fontWeight="semibold" fontSize="sm">{`Distribution of Values for ${altName}`}</Text>
-                                <Button size="sm" variant="link" rightIcon={<ChevronDownIcon />} onClick={() => toggleDistributionStats(`step2_${altIndex}`)}>
-                                  Consensus quantification
-                                </Button>
-                              </HStack>
-                              <Collapse in={Boolean(showDistributionStats[`step2_${altIndex}`])} animateOpacity>
-                                <Box mb={3}>
-                                  <Textarea
-                                    value={''}
-                                    placeholder="No stats available for Step 2 yet."
-                                    isReadOnly
-                                    resize="vertical"
-                                    minH="110px"
-                                    maxH="260px"
-                                    fontFamily="mono"
-                                    fontSize="xs"
-                                    bg="white"
-                                    spellCheck={false}
-                                  />
-                                </Box>
-                              </Collapse>
-                              <ResponsiveContainer width="100%" height={250}>
-                                <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 0, bottom: 24 }}>
-                                  <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
-                                  <XAxis
-                                    type="number"
-                                    dataKey="x"
-                                    domain={[0, 1]}
-                                    ticks={[0, 0.2, 0.4, 0.6, 0.8, 1]}
-                                    tickFormatter={(v) => Number(v).toFixed(1)}
-                                    tick={{ fontSize: 11 }}
-                                    label={{ value: 'Value', position: 'insideBottom', offset: -10 }}
-                                  />
-                                  <YAxis
-                                    tickFormatter={(v) => `${(Number(v) * 100).toFixed(1)}%`}
-                                    tick={{ fontSize: 11 }}
-                                    label={{ value: 'Probability', angle: -90, position: 'insideLeft' }}
-                                  />
-                                  <RechartsTooltip
-                                    wrapperStyle={{ pointerEvents: 'auto' }}
-                                    isAnimationActive={false}
-                                    formatter={(value, name) => [`${(Number(value) * 100).toFixed(2)}%`, String(name)]}
-                                    labelFormatter={(v) => `Value ${Number(v).toFixed(3)}`}
-                                  />
-                                  {distData.expertNames.map((expertName, idx) => (
-                                    <Area
-                                      key={`${expertName}-${idx}`}
-                                      dataKey={expertName}
-                                      fill={STEP2_COLORS[idx % STEP2_COLORS.length]}
-                                      fillOpacity={0.22}
-                                      stroke={STEP2_COLORS[idx % STEP2_COLORS.length]}
-                                      strokeWidth={2}
-                                      type="monotone"
-                                      dot={false}
-                                      isAnimationActive={false}
-                                      name={legendLabelByExpert[expertName] || expertName}
-                                    />
-                                  ))}
-                                </AreaChart>
-                              </ResponsiveContainer>
-                            </Box>
-                          )
-                        })}
-                      </SimpleGrid>
-                    </VStack>
-                  ) : (
-                    <VStack spacing={3} align="stretch">
-                      <Text color="gray.600" fontSize="sm">Run Step 2 to display one distribution plot per alternative.</Text>
-                    </VStack>
-                  )}
-                </StepSection>
-              </TabPanel>
-
-              {/* Step 3: Dominance (NSMC, random weights) */}
-              <TabPanel>
-                <StepSection
-                  title="Dominance Analysis"
-                  description="Dominance patterns can be observed in the NSMC heatmaps when using random weights. If an alternative consistently dominates others regardless of the weights assigned to its criteria, this should prompt reflection: while it is possible that the alternative is genuinely superior across all preferences, such behavior may also suggest a bias in the indicator definitions."
-                  onRun={() => handleRunStep(3, 'Dominance')}
-                  onStop={handleStopExecution}
-                  isRunning={runningStep === 'Dominance'}
-                  isDisabled={isButtonDisabled(2) || selectedSessions.length === 0}
-                  showConsole={showConsole}
-                  consoleOutput={consoleOutput}
-                  onToggleConsole={() => setShowConsole(!showConsole)}
-                  statusInfo={
-                    getStepStatus(3)?.completed ? (
-                      <HStack spacing={3}>
-                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 3 completed</Badge>
-                        <Text fontSize="sm" color="gray.500">{formatTimestamp(getStepStatus(3)?.timestamp)}</Text>
-                      </HStack>
-                    ) : null
-                  }
-                  parameters={
-                    <HStack spacing={6} flexWrap="wrap">
-                      <HStack spacing={3}>
-                        <Text fontWeight="bold">Aggregation:</Text>
-                        <Select
-                          value={dominanceAggregation}
-                          onChange={(e) => setDominanceAggregation(e.target.value)}
-                          width="150px"
-                          isDisabled={runningStep !== null}
-                        >
-                          <option value="SUM">SUM (default)</option>
-                          <option value="GEO">GEO</option>
-                          <option value="HAR">HAR</option>
-                        </Select>
-                      </HStack>
-                      <HStack spacing={3}>
-                        <Text fontWeight="bold">MC Iterations:</Text>
-                        <NumberInput
-                          value={mcIterations[3]}
-                          min={100}
-                          max={5000}
-                          step={100}
-                          onChange={(_, val) => updateMcIterations(3, val)}
-                          isDisabled={runningStep !== null}
-                          width="120px"
-                        >
-                          <NumberInputField />
-                          <NumberInputStepper>
-                            <NumberIncrementStepper />
-                            <NumberDecrementStepper />
-                          </NumberInputStepper>
-                        </NumberInput>
-                      </HStack>
-                    </HStack>
-                  }
-                >
-                  {step3Results ? (
-                    <RankingHeatmap
-                      title="Dominance Heatmap"
-                      results={step3Results}
-                      onDownloadPng={() => handleDownloadHeatmapPng(step3Results, 'Dominance Heatmap', 'dominance_heatmap')}
-                    />
-                  ) : (
-                    <Box bg="gray.100" h={220} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                      <Text color="gray.500">Run Step 3 to display the dominance ranking heatmap.</Text>
-                    </Box>
-                  )}
-                </StepSection>
-              </TabPanel>
-
-              {/* Step 4: Compensation (NSMC, all 3 aggregation methods, random weights) */}
-              <TabPanel>
-                <StepSection
-                  title="Compensation Analysis"
-                  description="The code offers a choice of three aggregation methods: SUM (weighted sum), which is fully compensatory, and GEO (geometric mean) and HAR (harmonic mean), which are partially compensatory. By comparing the differences in the NSMC heatmaps, the practitioner can determine which aggregation method is most appropriate for their study."
-                  onRun={() => handleRunStep(4, 'Compensation')}
-                  onStop={handleStopExecution}
-                  isRunning={runningStep === 'Compensation'}
-                  isDisabled={isButtonDisabled(3) || selectedSessions.length === 0}
+                  isRunning={runningStep === 'Aggregation'}
+                  isDisabled={isButtonDisabled(1) || selectedSessions.length === 0 || aggregationStepMethods.length === 0}
                   showConsole={showConsole}
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
                   statusInfo={
                     getStepStatus(4)?.completed ? (
                       <HStack spacing={3}>
-                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 4 completed</Badge>
+                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 2 completed</Badge>
                         <Text fontSize="sm" color="gray.500">{formatTimestamp(getStepStatus(4)?.timestamp)}</Text>
                       </HStack>
                     ) : null
                   }
                   parameters={
-                    <HStack spacing={3}>
-                      <Text fontWeight="bold">MC Iterations (per method):</Text>
-                      <NumberInput
-                        value={mcIterations[4]}
-                        min={100}
-                        max={5000}
-                        step={100}
-                        onChange={(_, val) => updateMcIterations(4, val)}
-                        isDisabled={runningStep !== null}
-                        width="120px"
-                      >
-                        <NumberInputField />
-                        <NumberInputStepper>
-                          <NumberIncrementStepper />
-                          <NumberDecrementStepper />
-                        </NumberInputStepper>
-                      </NumberInput>
-                      <Text fontSize="sm" color="gray.500">(runs 3x, once per aggregation method)</Text>
-                    </HStack>
+                    <VStack spacing={3} align="stretch">
+                      {renderAggregationChecklist()}
+                      <HStack spacing={3}>
+                        <Text fontWeight="bold">MC Iterations:</Text>
+                        <NumberInput
+                          value={mcIterations[4]}
+                          min={100}
+                          max={5000}
+                          step={100}
+                          onChange={(_, val) => updateMcIterations(4, val)}
+                          isDisabled={runningStep !== null}
+                          width="120px"
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                      </HStack>
+                    </VStack>
                   }
                 >
-                  {step4Results?.results_by_aggregation ? (
-                    <VStack spacing={4} align="stretch">
-                      <RankingHeatmap
-                        title="SUM Aggregation Heatmap"
-                        results={step4Results.results_by_aggregation.weighted_sum}
-                        onDownloadPng={() => handleDownloadHeatmapPng(step4Results.results_by_aggregation.weighted_sum, 'SUM Aggregation Heatmap', 'sum_aggregation_heatmap')}
-                      />
-                      <RankingHeatmap
-                        title="GEO Aggregation Heatmap"
-                        results={step4Results.results_by_aggregation.geometric_mean}
-                        onDownloadPng={() => handleDownloadHeatmapPng(step4Results.results_by_aggregation.geometric_mean, 'GEO Aggregation Heatmap', 'geo_aggregation_heatmap')}
-                      />
-                      <RankingHeatmap
-                        title="HAR Aggregation Heatmap"
-                        results={step4Results.results_by_aggregation.harmonic_mean}
-                        onDownloadPng={() => handleDownloadHeatmapPng(step4Results.results_by_aggregation.harmonic_mean, 'HAR Aggregation Heatmap', 'har_aggregation_heatmap')}
-                      />
-                    </VStack>
-                  ) : (
-                    <Box bg="gray.100" h={220} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                      <Text color="gray.500">Run Step 4 to display compensation ranking heatmaps.</Text>
-                    </Box>
-                  )}
+                  {(() => {
+                    const byAggregation = step4Results?.results_by_aggregation
+                    if (byAggregation && typeof byAggregation === 'object') {
+                      const methodOrder = AGGREGATION_METHODS.map((entry) => entry.backendMethod)
+                      const orderedEntries = Object.entries(byAggregation).sort((a, b) => {
+                        const aIdx = methodOrder.indexOf(a[0])
+                        const bIdx = methodOrder.indexOf(b[0])
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx
+                        if (aIdx >= 0) return -1
+                        if (bIdx >= 0) return 1
+                        return String(a[0]).localeCompare(String(b[0]))
+                      })
+                      return (
+                        <VStack spacing={4} align="stretch">
+                          {orderedEntries.map(([backendMethod, result]) => {
+                            const plotLabel = getAggregationPlotLabel(
+                              backendMethod,
+                              step4Results?.aggregation_alphas,
+                              step4Results?.aggregation_alpha
+                            )
+                            const fileBase = `step4_${sanitizeFilename(backendMethod)}_aggregation_heatmap`
+                            return (
+                              <RankingHeatmap
+                                key={backendMethod}
+                                title={`${plotLabel} Aggregation Heatmap`}
+                                results={result}
+                                onDownloadPng={() => handleDownloadHeatmapPng(result, `${plotLabel} Aggregation Heatmap`, fileBase)}
+                              />
+                            )
+                          })}
+                        </VStack>
+                      )
+                    }
+
+                    if (step4Results?.aggregated_results) {
+                      const plotLabel = getAggregationPlotLabel(
+                        step4Results?.aggregation_method,
+                        step4Results?.aggregation_alphas,
+                        step4Results?.aggregation_alpha
+                      ) || 'Aggregation'
+                      return (
+                        <VStack spacing={4} align="stretch">
+                          <RankingHeatmap
+                            title={`${plotLabel} Aggregation Heatmap`}
+                            results={step4Results}
+                            onDownloadPng={() => handleDownloadHeatmapPng(step4Results, `${plotLabel} Aggregation Heatmap`, `step4_${sanitizeFilename(plotLabel)}_aggregation_heatmap`)}
+                          />
+                        </VStack>
+                      )
+                    }
+
+                    return (
+                      <VStack spacing={4} align="stretch">
+                        <Box bg="gray.100" h={220} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
+                          <Text color="gray.500">Run Step 2 to display aggregation ranking heatmaps.</Text>
+                        </Box>
+                      </VStack>
+                    )
+                  })()}
                 </StepSection>
               </TabPanel>
 
-              {/* Step 5: Uncertainty (SMC, strict) */}
+              {/* Step 3: Uncertainty (SMC, strict) */}
               <TabPanel>
                 <StepSection
                   title="Uncertainty Analysis"
@@ -2618,38 +2707,29 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onRun={() => handleRunStep(5, 'Uncertainty')}
                   onStop={handleStopExecution}
                   isRunning={runningStep === 'Uncertainty'}
-                  isDisabled={isButtonDisabled(4) || !uncertaintyAggregation || selectedSessions.length === 0}
+                  isDisabled={isButtonDisabled(2) || !uncertaintyAggregation || selectedSessions.length === 0}
                   showConsole={showConsole}
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
                   statusInfo={
                     getStepStatus(5)?.completed ? (
                       <HStack spacing={3}>
-                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 5 completed</Badge>
+                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 3 completed</Badge>
                         <Text fontSize="sm" color="gray.500">{formatTimestamp(getStepStatus(5)?.timestamp)}</Text>
                       </HStack>
                     ) : null
                   }
                   parameters={
-                    <HStack spacing={6} flexWrap="wrap">
-                      <HStack spacing={3}>
-                        <Text fontWeight="bold">Aggregation:</Text>
-                        <Select
-                          placeholder="Select aggregation method"
-                          value={uncertaintyAggregation}
-                          onChange={(e) => {
-                            setUncertaintyAggregation(e.target.value)
-                            if (!resultsAggregation) setResultsAggregation(e.target.value)
-                          }}
-                          width="200px"
-                          isDisabled={runningStep !== null}
-                        >
-                          <option value="SUM">SUM</option>
-                          <option value="GEO">GEO</option>
-                          <option value="HAR">HAR</option>
-                        </Select>
-                        {!uncertaintyAggregation && <Text color="red.500" fontSize="sm">Required</Text>}
-                      </HStack>
+                    <VStack spacing={3} align="stretch">
+                      {renderAggregationSelector({
+                        selectedMethod: uncertaintyAggregation,
+                        setSelectedMethod: (methodId) => {
+                          setUncertaintyAggregation(methodId)
+                          if (!resultsAggregation) setResultsAggregation(methodId)
+                        },
+                        alphaValue: uncertaintyAggregationAlpha,
+                        setAlphaValue: setUncertaintyAggregationAlpha,
+                      })}
                       <HStack spacing={3}>
                         <Text fontWeight="bold">MC Iterations:</Text>
                         <NumberInput
@@ -2668,7 +2748,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                           </NumberInputStepper>
                         </NumberInput>
                       </HStack>
-                    </HStack>
+                    </VStack>
                   }
                 >
                   {step5Results ? (
@@ -2784,13 +2864,175 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     </VStack>
                   ) : (
                     <VStack spacing={3} align="stretch">
-                      <Text color="gray.600" fontSize="sm">Run Step 5 to display uncertainty distributions for each alternative.</Text>
+                      <Text color="gray.600" fontSize="sm">Run Step 3 to display uncertainty distributions for each alternative.</Text>
                     </VStack>
                   )}
                 </StepSection>
               </TabPanel>
 
-              {/* Step 6: Results (NSMC, non-strict) */}
+              {/* Step 4: Consensus (SMC, strict) */}
+              <TabPanel>
+                <StepSection
+                  title="Consensus Analysis"
+                  description={(
+                    <Text>
+                      The output of the SMC can be used to assess the consensus or agreement among experts. Consensus is quantified as{' '}
+                      <InlineMath math={'C = \\frac{A}{N-1}'} />
+                      , with{' '}
+                      <InlineMath math={'A = \\sum_x \\left|\\max_i p_i(x) - \\sum_i p_i(x)\\right|'} />
+                      . If distributions overlap strongly, consensus is high; otherwise, aggregating divergent opinions requires caution.
+                    </Text>
+                  )}
+                  onRun={() => handleRunStep(2, 'Consensus')}
+                  onStop={handleStopExecution}
+                  isRunning={runningStep === 'Consensus'}
+                  isDisabled={isButtonDisabled(3) || selectedSessions.length === 0}
+                  showConsole={showConsole}
+                  consoleOutput={consoleOutput}
+                  onToggleConsole={() => setShowConsole(!showConsole)}
+                  statusInfo={
+                    getStepStatus(2)?.completed ? (
+                      <HStack spacing={3}>
+                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 4 completed</Badge>
+                        <Text fontSize="sm" color="gray.500">{formatTimestamp(getStepStatus(2)?.timestamp)}</Text>
+                      </HStack>
+                    ) : null
+                  }
+                  parameters={
+                    <VStack spacing={3} align="stretch">
+                      {renderAggregationSelector({
+                        selectedMethod: consensusAggregation,
+                        setSelectedMethod: setConsensusAggregation,
+                        alphaValue: consensusAggregationAlpha,
+                        setAlphaValue: setConsensusAggregationAlpha,
+                      })}
+                      <HStack spacing={3}>
+                        <Text fontWeight="bold">MC Iterations:</Text>
+                        <NumberInput
+                          value={mcIterations[2]}
+                          min={100}
+                          max={5000}
+                          step={100}
+                          onChange={(_, val) => updateMcIterations(2, val)}
+                          isDisabled={runningStep !== null}
+                          width="120px"
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                      </HStack>
+                    </VStack>
+                  }
+                >
+                  {step2Results ? (
+                    <VStack spacing={8} align="stretch">
+                      {(() => {
+                        const legendItems = getLegendItems(step2Results)
+                        return (
+                          <HStack spacing={4} flexWrap="wrap">
+                            <Text fontSize="sm" fontWeight="semibold">Elicitation:</Text>
+                            {legendItems.map((item, idx) => (
+                              <HStack key={`${item.label}-${idx}`} spacing={2}>
+                                <Box
+                                  w={3}
+                                  h={3}
+                                  bg={STEP2_COLORS[idx % STEP2_COLORS.length]}
+                                  opacity={0.45}
+                                  borderRadius="sm"
+                                />
+                                <Text fontSize="sm">{item.label}</Text>
+                              </HStack>
+                            ))}
+                          </HStack>
+                        )
+                      })()}
+                      <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={5}>
+                        {step2Results.alternative_names?.map((altName, altIndex) => {
+                          const distData = getDistributionDataForAlternative(step2Results, altIndex)
+                          if (!distData) return null
+                          const legendItems = getLegendItems(step2Results)
+                          const legendLabelByExpert = Object.fromEntries(
+                            legendItems.map((item) => [item.expertName, item.label])
+                          )
+                          return (
+                            <Box key={`${altName}-${altIndex}`} borderWidth={1} borderRadius="md" p={3} bg="gray.50" position="relative" data-export-id={`step2_distribution_${altIndex}`}>
+                              <Tooltip label="Download image as PNG" hasArrow>
+                                <IconButton
+                                  aria-label={`Download distribution image for ${altName}`}
+                                  icon={<DownloadIcon />}
+                                  size="sm"
+                                  variant="ghost"
+                                  position="absolute"
+                                  top={2}
+                                  right={2}
+                                  zIndex={2}
+                                  onClick={() => handleDownloadChartPng(`step2_distribution_${altIndex}`, `step2_distribution_${altName}`)}
+                                />
+                              </Tooltip>
+                              <HStack justify="space-between" align="center" mb={2} pr={12}>
+                                <HStack spacing={3}>
+                                  <Text fontWeight="semibold" fontSize="sm">{`Distribution of Values for ${altName}`}</Text>
+                                  <Badge colorScheme="blue" variant="subtle">
+                                    {`Consensus = ${Number(distData.consensus?.consensusPercent || 0).toFixed(2)}%`}
+                                  </Badge>
+                                </HStack>
+                              </HStack>
+                              <ResponsiveContainer width="100%" height={250}>
+                                <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 0, bottom: 24 }}>
+                                  <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
+                                  <XAxis
+                                    type="number"
+                                    dataKey="x"
+                                    domain={[0, 1]}
+                                    ticks={[0, 0.2, 0.4, 0.6, 0.8, 1]}
+                                    tickFormatter={(v) => Number(v).toFixed(1)}
+                                    tick={{ fontSize: 11 }}
+                                    label={{ value: 'Value', position: 'insideBottom', offset: -10 }}
+                                  />
+                                  <YAxis
+                                    tickFormatter={(v) => `${(Number(v) * 100).toFixed(1)}%`}
+                                    tick={{ fontSize: 11 }}
+                                    label={{ value: 'Probability', angle: -90, position: 'insideLeft' }}
+                                  />
+                                  <RechartsTooltip
+                                    wrapperStyle={{ pointerEvents: 'auto' }}
+                                    isAnimationActive={false}
+                                    formatter={(value, name) => [`${(Number(value) * 100).toFixed(2)}%`, String(name)]}
+                                    labelFormatter={(v) => `Value ${Number(v).toFixed(3)}`}
+                                  />
+                                  {distData.expertNames.map((expertName, idx) => (
+                                    <Area
+                                      key={`${expertName}-${idx}`}
+                                      dataKey={expertName}
+                                      fill={STEP2_COLORS[idx % STEP2_COLORS.length]}
+                                      fillOpacity={0.22}
+                                      stroke={STEP2_COLORS[idx % STEP2_COLORS.length]}
+                                      strokeWidth={2}
+                                      type="monotone"
+                                      dot={false}
+                                      isAnimationActive={false}
+                                      name={legendLabelByExpert[expertName] || expertName}
+                                    />
+                                  ))}
+                                </AreaChart>
+                              </ResponsiveContainer>
+                            </Box>
+                          )
+                        })}
+                      </SimpleGrid>
+                    </VStack>
+                  ) : (
+                    <VStack spacing={3} align="stretch">
+                      <Text color="gray.600" fontSize="sm">Run Step 4 to display one distribution plot per alternative.</Text>
+                    </VStack>
+                  )}
+                </StepSection>
+              </TabPanel>
+
+              {/* Step 5: Results (NSMC, non-strict) */}
               <TabPanel>
                 <StepSection
                   title="Results"
@@ -2798,35 +3040,26 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onRun={() => handleRunStep(6, 'Results')}
                   onStop={handleStopExecution}
                   isRunning={runningStep === 'Results'}
-                  isDisabled={isButtonDisabled(5) || !resultsAggregation || selectedSessions.length === 0}
+                  isDisabled={isButtonDisabled(4) || !resultsAggregation || selectedSessions.length === 0}
                   showConsole={showConsole}
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
                   statusInfo={
                     getStepStatus(6)?.completed ? (
                       <HStack spacing={3}>
-                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 6 completed</Badge>
+                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 5 completed</Badge>
                         <Text fontSize="sm" color="gray.500">{formatTimestamp(getStepStatus(6)?.timestamp)}</Text>
                       </HStack>
                     ) : null
                   }
                   parameters={
-                    <HStack spacing={6} flexWrap="wrap">
-                      <HStack spacing={3}>
-                        <Text fontWeight="bold">Aggregation:</Text>
-                        <Select
-                          placeholder="Select aggregation method"
-                          value={resultsAggregation}
-                          onChange={(e) => setResultsAggregation(e.target.value)}
-                          width="200px"
-                          isDisabled={runningStep !== null}
-                        >
-                          <option value="SUM">SUM</option>
-                          <option value="GEO">GEO</option>
-                          <option value="HAR">HAR</option>
-                        </Select>
-                        {!resultsAggregation && <Text color="red.500" fontSize="sm">Required</Text>}
-                      </HStack>
+                    <VStack spacing={3} align="stretch">
+                      {renderAggregationSelector({
+                        selectedMethod: resultsAggregation,
+                        setSelectedMethod: setResultsAggregation,
+                        alphaValue: resultsAggregationAlpha,
+                        setAlphaValue: setResultsAggregationAlpha,
+                      })}
                       <HStack spacing={3}>
                         <Text fontWeight="bold">MC Iterations:</Text>
                         <NumberInput
@@ -2845,7 +3078,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                           </NumberInputStepper>
                         </NumberInput>
                       </HStack>
-                    </HStack>
+                    </VStack>
                   }
                 >
                   {step6Results ? (
@@ -2856,7 +3089,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     />
                   ) : (
                     <Box bg="gray.100" h={220} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                      <Text color="gray.500">Run Step 6 to display the final ranking heatmap.</Text>
+                      <Text color="gray.500">Run Step 5 to display the final ranking heatmap.</Text>
                     </Box>
                   )}
 
@@ -2917,7 +3150,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   isChecked={exportIncludeSimulationCsvs}
                   onChange={(e) => setExportIncludeSimulationCsvs(e.target.checked)}
                 >
-                  Raw simulation CSVs for steps 2-6
+                  Raw simulation CSVs for workflow steps
                 </Checkbox>
                 <Checkbox
                   isChecked={exportIncludePlotImages}
@@ -3066,6 +3299,79 @@ function getRankingHeatmapDimensions(results) {
   return { width, height }
 }
 
+function computeConsensusQuantification(densityData, expertNames) {
+  if (!Array.isArray(densityData) || densityData.length === 0 || !Array.isArray(expertNames) || expertNames.length === 0) {
+    return null
+  }
+
+  const normalizedExpertNames = expertNames
+    .map((name) => String(name || '').trim())
+    .filter((name) => name.length > 0)
+
+  if (normalizedExpertNames.length === 0) return null
+
+  let differenceArea = 0
+  densityData.forEach((row) => {
+    let distributionSum = 0
+    let profile = 0
+
+    normalizedExpertNames.forEach((expertName) => {
+      const density = Number(row?.[expertName])
+      const value = Number.isFinite(density) ? density : 0
+      distributionSum += value
+      if (value > profile) profile = value
+    })
+
+    differenceArea += Math.abs(profile - distributionSum)
+  })
+
+  const elicitationCount = normalizedExpertNames.length
+  const rawConsensus = elicitationCount > 1 ? (differenceArea / (elicitationCount - 1)) : 1
+  const consensusRatio = Math.max(0, Math.min(1, rawConsensus))
+
+  return {
+    differenceArea,
+    elicitationCount,
+    consensusRatio,
+    consensusPercent: consensusRatio * 100,
+  }
+}
+
+function buildConsensusQuantificationCsv(consensusRows, options = {}) {
+  const title = String(options.title || 'Step 2 consensus quantification').trim()
+  const placeholderMessage = String(
+    options.placeholderMessage || 'Consensus quantification is not available yet.'
+  ).trim()
+
+  const lines = [
+    `title;${title}`,
+    'alternative;elicitation_count;difference_area;consensus_ratio;consensus_percent',
+  ]
+
+  if (!Array.isArray(consensusRows) || consensusRows.length === 0) {
+    lines.push(`;note;${placeholderMessage}`)
+    return `${lines.join('\n')}\n`
+  }
+
+  consensusRows.forEach((row) => {
+    const altName = String(row?.alternative || '').replace(/;/g, ',')
+    const elicitationCount = Number(row?.elicitationCount)
+    const differenceArea = Number(row?.differenceArea)
+    const consensusRatio = Number(row?.consensusRatio)
+    const consensusPercent = Number(row?.consensusPercent)
+
+    lines.push([
+      altName,
+      Number.isFinite(elicitationCount) ? String(elicitationCount) : '',
+      Number.isFinite(differenceArea) ? differenceArea.toFixed(6) : '',
+      Number.isFinite(consensusRatio) ? consensusRatio.toFixed(6) : '',
+      Number.isFinite(consensusPercent) ? consensusPercent.toFixed(2) : '',
+    ].join(';'))
+  })
+
+  return `${lines.join('\n')}\n`
+}
+
 function buildRankProbabilityCsv(results) {
   const matrix = buildRankProbabilityMatrix(results)
   if (!matrix) return null
@@ -3133,22 +3439,30 @@ function buildSimulationCsvExports(stepNumber, stepResults) {
 
   if (stepNumber === 4) {
     const byAggregation = stepResults?.results_by_aggregation
-    if (!byAggregation || typeof byAggregation !== 'object') {
+    if (byAggregation && typeof byAggregation === 'object') {
+      Object.entries(byAggregation)
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+        .forEach(([aggregationName, aggregationResults]) => {
+          const csvText = buildSimulationRowsCsv(aggregationResults)
+          if (!csvText) return
+
+          exports.push({
+            filenameBase: `step_4_aggregation_${sanitizeFilename(aggregationName)}`,
+            csvText,
+          })
+        })
+
       return exports
     }
 
-    Object.entries(byAggregation)
-      .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
-      .forEach(([aggregationName, aggregationResults]) => {
-        const csvText = buildSimulationRowsCsv(aggregationResults)
-        if (!csvText) return
-
-        exports.push({
-          filenameBase: `step_4_aggregation_${sanitizeFilename(aggregationName)}`,
-          csvText,
-        })
+    const csvText = buildSimulationRowsCsv(stepResults)
+    if (csvText) {
+      const stepAggregation = sanitizeFilename(stepResults?.aggregation_method || 'selected')
+      exports.push({
+        filenameBase: `step_4_aggregation_${stepAggregation}`,
+        csvText,
       })
-
+    }
     return exports
   }
 
@@ -3251,36 +3565,40 @@ function buildPipelineChartExportTargets({
   return targets
 }
 
-function buildPipelineHeatmapExports({ step3Results, step4Results, step6Results }) {
+function buildPipelineHeatmapExports({ step4Results, step6Results }) {
   const targets = []
-
-  if (step3Results) {
-    targets.push({
-      title: 'Dominance Heatmap',
-      filenameBase: 'step3_dominance_heatmap',
-      results: step3Results,
+  const byAggregation = step4Results?.results_by_aggregation
+  if (byAggregation && typeof byAggregation === 'object') {
+    const methodOrder = AGGREGATION_METHODS.map((entry) => entry.backendMethod)
+    const orderedEntries = Object.entries(byAggregation).sort((a, b) => {
+      const aIdx = methodOrder.indexOf(a[0])
+      const bIdx = methodOrder.indexOf(b[0])
+      if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx
+      if (aIdx >= 0) return -1
+      if (bIdx >= 0) return 1
+      return String(a[0]).localeCompare(String(b[0]))
+    })
+    orderedEntries.forEach(([backendMethod, result]) => {
+      const label = getAggregationPlotLabel(
+        backendMethod,
+        step4Results?.aggregation_alphas,
+        step4Results?.aggregation_alpha
+      )
+      targets.push({
+        title: `${label} Aggregation Heatmap`,
+        filenameBase: `step4_${sanitizeFilename(label)}_aggregation_heatmap`,
+        results: result,
+      })
     })
   }
 
-  if (step4Results?.results_by_aggregation?.weighted_sum) {
+  if (targets.length === 0 && step4Results?.aggregated_results) {
+    const method = step4Results?.aggregation_method
+    const label = getAggregationPlotLabel(method, step4Results?.aggregation_alphas, step4Results?.aggregation_alpha) || 'Aggregation'
     targets.push({
-      title: 'SUM Aggregation Heatmap',
-      filenameBase: 'step4_sum_aggregation_heatmap',
-      results: step4Results.results_by_aggregation.weighted_sum,
-    })
-  }
-  if (step4Results?.results_by_aggregation?.geometric_mean) {
-    targets.push({
-      title: 'GEO Aggregation Heatmap',
-      filenameBase: 'step4_geo_aggregation_heatmap',
-      results: step4Results.results_by_aggregation.geometric_mean,
-    })
-  }
-  if (step4Results?.results_by_aggregation?.harmonic_mean) {
-    targets.push({
-      title: 'HAR Aggregation Heatmap',
-      filenameBase: 'step4_har_aggregation_heatmap',
-      results: step4Results.results_by_aggregation.harmonic_mean,
+      title: `${label} Aggregation Heatmap`,
+      filenameBase: `step4_${sanitizeFilename(label)}_aggregation_heatmap`,
+      results: step4Results,
     })
   }
 
@@ -3816,6 +4134,8 @@ function StepSection({
 export {
   buildRankProbabilityMatrix,
   buildRankProbabilityCsv,
+  computeConsensusQuantification,
+  buildConsensusQuantificationCsv,
   buildSimulationRowsCsv,
   buildSimulationCsvExports,
   buildRankingHeatmapSvg,

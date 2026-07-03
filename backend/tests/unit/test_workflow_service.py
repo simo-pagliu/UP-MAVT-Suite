@@ -105,6 +105,7 @@ class TestCreateRunStepTask:
             selected_session_ids=[session_id],
             mc_iterations=500,
             aggregation_method='weighted_sum',
+            aggregation_alpha=0.0,
             mc_mode='non_strict',
             use_random_weights=False,
         )
@@ -116,6 +117,7 @@ class TestCreateRunStepTask:
                 study_with_weights, step_number=99,
                 selected_session_ids=[session_id],
                 mc_iterations=500, aggregation_method='weighted_sum',
+                aggregation_alpha=0.0,
                 mc_mode='non_strict', use_random_weights=False,
             )
 
@@ -125,6 +127,7 @@ class TestCreateRunStepTask:
                 study_with_weights, step_number=2,
                 selected_session_ids=[],
                 mc_iterations=500, aggregation_method='weighted_sum',
+                aggregation_alpha=0.0,
                 mc_mode='non_strict', use_random_weights=False,
             )
 
@@ -134,6 +137,7 @@ class TestCreateRunStepTask:
                 study_id, step_number=2,
                 selected_session_ids=[session_id],
                 mc_iterations=500, aggregation_method='weighted_sum',
+                aggregation_alpha=0.0,
                 mc_mode='non_strict', use_random_weights=False,
             )
 
@@ -144,6 +148,7 @@ class TestCreateRunStepTask:
             selected_session_ids=[session_id],
             mc_iterations=1,
             aggregation_method='weighted_sum',
+            aggregation_alpha=0.0,
             mc_mode='non_strict', use_random_weights=False,
         )
         task = wf_svc.get_task_status(task_id)
@@ -155,6 +160,7 @@ class TestCreateRunStepTask:
             study_with_weights, step_number=3,
             selected_session_ids=[session_id],
             mc_iterations=200, aggregation_method='GEO',
+            aggregation_alpha=0.0,
             mc_mode='non_strict', use_random_weights=False,
         )
         task = mock_db.tasks.find_one({'_id': ObjectId(task_id)})
@@ -166,6 +172,7 @@ class TestCreateRunStepTask:
                 str(ObjectId()), step_number=2,
                 selected_session_ids=[session_id],
                 mc_iterations=500, aggregation_method='weighted_sum',
+                aggregation_alpha=0.0,
                 mc_mode='non_strict', use_random_weights=False,
             )
 

@@ -851,6 +851,9 @@ def run_step_endpoint(study_session_id):
         selected_session_ids=data.get('selected_session_ids', []),
         mc_iterations=data.get('mc_iterations', 10000 if step_number == 6 else 1000),
         aggregation_method=data.get('aggregation_method', 'weighted_sum'),
+        aggregation_alpha=data.get('aggregation_alpha', 0.0),
+        aggregation_methods=data.get('aggregation_methods'),
+        aggregation_alphas=data.get('aggregation_alphas'),
         mc_mode=data.get('mc_mode', 'non_strict'),
         use_random_weights=data.get('use_random_weights', False),
     )

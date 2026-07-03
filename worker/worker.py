@@ -219,6 +219,9 @@ def handle_run_step(task):
 
     mc_iterations = params.get('mc_iterations', 1000)
     aggregation_method = params.get('aggregation_method', 'weighted_sum')
+    aggregation_alpha = params.get('aggregation_alpha', 0.0)
+    aggregation_methods = params.get('aggregation_methods', None)
+    aggregation_alphas = params.get('aggregation_alphas', None)
     mc_mode = params.get('mc_mode', 'non_strict')
     use_random_weights = params.get('use_random_weights', False)
     opinion_weights = params.get('opinion_weights', None)
@@ -279,43 +282,49 @@ def handle_run_step(task):
         logger.log(f"  ✓ Loaded {len(alternatives)} alternatives")
         logger.log(f"  ✓ Criteria: {criteria_names}")
 
-        # Step 4 special case: run all 3 aggregation methods
         if step_number == 4:
-            logger.log("\nStep 4: Running all three aggregation methods...")
+            if isinstance(aggregation_methods, list) and aggregation_methods:
+                methods_to_run = [str(m) for m in aggregation_methods]
+            else:
+                methods_to_run = [aggregation_method]
+            alpha_map = aggregation_alphas if isinstance(aggregation_alphas, dict) else {}
+            logger.log(f"\nStep 4: Running {len(methods_to_run)} selected aggregation method(s)...")
             results_by_aggregation = {}
-
-            for agg_idx, agg_method in enumerate(['weighted_sum', 'geometric_mean', 'harmonic_mean']):
-                logger.log(f"\n--- Aggregation method {agg_idx + 1}/3: {agg_method} ---")
+            for idx, method in enumerate(methods_to_run):
+                method_alpha = alpha_map.get(method, aggregation_alpha)
+                logger.log(f"\n--- Aggregation method {idx + 1}/{len(methods_to_run)}: {method} (alpha={method_alpha}) ---")
                 step_params = {
                     'mc_iterations': mc_iterations,
-                    'aggregation_method': agg_method,
+                    'aggregation_method': method,
+                    'aggregation_alpha': method_alpha,
                     'mc_mode': mc_mode,
                     'use_random_weights': use_random_weights,
                     'opinion_weights': opinion_weights,
                 }
-
                 formatted = run_upmavt(
                     vf_lists, confidence_lists, weight_solutions_list,
                     alternatives, criteria_names,
                     step_params,
                     print_fn=logger.log
                 )
-                results_by_aggregation[agg_method] = formatted
+                results_by_aggregation[method] = formatted
 
-            # Save combined results
             result_doc = {
                 'mc_iterations': mc_iterations,
+                'aggregation_method': methods_to_run[0] if methods_to_run else aggregation_method,
+                'aggregation_alpha': alpha_map.get(methods_to_run[0], aggregation_alpha) if methods_to_run else aggregation_alpha,
+                'aggregation_methods': methods_to_run,
+                'aggregation_alphas': alpha_map,
                 'mc_mode': mc_mode,
                 'use_random_weights': use_random_weights,
                 'results_by_aggregation': results_by_aggregation,
             }
-
             save_step_results(db, study_session_id, step_number, result_doc)
-
         else:
             step_params = {
                 'mc_iterations': mc_iterations,
                 'aggregation_method': aggregation_method,
+                'aggregation_alpha': aggregation_alpha,
                 'mc_mode': mc_mode,
                 'use_random_weights': use_random_weights,
                 'opinion_weights': opinion_weights,
@@ -333,6 +342,7 @@ def handle_run_step(task):
             result_doc.update({
                 'mc_iterations': mc_iterations,
                 'aggregation_method': aggregation_method,
+                'aggregation_alpha': aggregation_alpha,
                 'mc_mode': mc_mode,
                 'use_random_weights': use_random_weights,
             })
