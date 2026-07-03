@@ -2,6 +2,8 @@ services:
   mongo:
     image: mongo:7.0
     container_name: elicitation-mongo
+    ports:
+      - "27017:27017"
     environment:
       MONGO_INITDB_DATABASE: elicitation
     volumes:
@@ -21,7 +23,7 @@ services:
     environment:
       APP_BASE_URL: http://localhost:3000
       MONGO_URI: mongodb://mongo:27017/elicitation
-      FLASK_ENV: production
+      FLASK_ENV: development
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       DISABLE_EMAIL: true
       # OAUTH2_CLIENT_SECRET: ${MCDA_UP_OAUTH2_SECRET}
@@ -30,6 +32,11 @@ services:
       # OAUTH2_CLIENT_SECRET_FILE: /run/secrets/oauth2_client_secret
     depends_on:
       - mongo
+    volumes:
+      - ./backend:/app
+      - ./examples:/app/examples:ro
+      - ./frontend/public:/frontend/public:ro
+      - ./worker/scripts:/worker/scripts:ro
     networks:
       - elicitation-network
 
@@ -40,6 +47,8 @@ services:
       MONGO_URI: mongodb://mongo:27017/elicitation
     depends_on:
       - mongo
+    volumes:
+      - ./worker:/app
     networks:
       - elicitation-network
     restart: unless-stopped
@@ -51,8 +60,13 @@ services:
     container_name: elicitation-frontend
     ports:
       - "3000:3000"
+    environment:
+      VITE_API_URL: http://localhost:5000/api
     depends_on:
       - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
     networks:
       - elicitation-network
 

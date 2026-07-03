@@ -82,6 +82,7 @@ The `docker-compose.yml` backend section already includes these two lines as com
 | `SMTP_USE_TLS` | `true` to use STARTTLS |
 | `EMAIL_FROM` | Sender address shown in outgoing emails |
 | `APP_BASE_URL` | Public URL of the frontend (e.g. `https://yourdomain.com`) |
+| `VITE_DEBUG_CONSOLE` | Frontend build-time flag (`true`/`false`) to print failed API calls and uncaught JS errors in browser DevTools. Default `false`. |
 
 **5. Build and start all services**
 

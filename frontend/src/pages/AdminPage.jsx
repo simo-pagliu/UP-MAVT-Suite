@@ -436,11 +436,19 @@ function AdminPage(props, ref) {
         formData,
         { headers: { 'Content-Type': 'multipart/form-data' } },
       )
+      const importedCountRaw = response.data?.imported_session_count
+      const importedCount = Number.isFinite(importedCountRaw)
+        ? importedCountRaw
+        : (Array.isArray(response.data?.imported_sessions) ? response.data.imported_sessions.length : 0)
+      const warnings = Array.isArray(response.data?.warnings)
+        ? response.data.warnings.filter((w) => typeof w === 'string' && w.trim().length > 0)
+        : []
+      const warningSummary = warnings.length > 0 ? ` Warning: ${warnings.join(' ')}` : ''
       toast({
-        title: 'Case study imported',
-        description: `Study ID: ${response.data?.study_session_id || 'created'}`,
-        status: 'success',
-        duration: 3000,
+        title: warnings.length > 0 ? 'Case study imported with warnings' : 'Case study imported',
+        description: `Study ID: ${response.data?.study_session_id || 'created'}; imported sessions: ${importedCount}.${warningSummary}`,
+        status: warnings.length > 0 ? 'warning' : 'success',
+        duration: warnings.length > 0 ? 6000 : 3000,
         isClosable: true,
       })
       fetchSessions()
