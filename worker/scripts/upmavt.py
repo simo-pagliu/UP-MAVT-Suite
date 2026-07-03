@@ -221,6 +221,69 @@ def harmonic_mean(intermediate_results):
     return 0.001  # Avoid zero
 
 
+def geometric_mean_offset(intermediate_results, alpha):
+    """GEO+offset aggregation with alpha in [-1, 1]."""
+    alpha_safe = max(alpha, 1e-12)
+    offset = np.log(alpha_safe)
+    product = 1.0
+    for weight, value in intermediate_results:
+        shifted = max(1e-12, value - offset)
+        product *= shifted ** weight
+    return np.clip(product + offset, 0.001, 1.0)
+
+
+def weighted_sum_min_mix(intermediate_results, alpha):
+    """WAM+MIN aggregation with alpha in [-1, 1]."""
+    alpha_clamped = max(-1.0, min(1.0, alpha))
+    total = weighted_sum(intermediate_results)
+    min_value = min((value for _, value in intermediate_results), default=0.001)
+    score = (1.0 - alpha_clamped) * total + alpha_clamped * min_value
+    return np.clip(score, 0.001, 1.0)
+
+
+def weighted_power_mean(intermediate_results, alpha):
+    """WPM aggregation with alpha in [-1, 1]."""
+    alpha_clamped = max(-1.0, min(1.0, alpha))
+
+    if alpha_clamped >= 1.0:
+        return min((value for _, value in intermediate_results), default=0.001)
+    if alpha_clamped <= -1.0:
+        return max((value for _, value in intermediate_results), default=1.0)
+
+    p = np.log((2.0 / (alpha_clamped + 1.0)) - 1.0) + 1.0
+
+    if np.isneginf(p):
+        return min((value for _, value in intermediate_results), default=0.001)
+    if np.isposinf(p):
+        return max((value for _, value in intermediate_results), default=1.0)
+    if np.isclose(p, 0.0):
+        return geometric_mean(intermediate_results)
+
+    s = 0.0
+    for weight, value in intermediate_results:
+        s += weight * (max(value, 1e-12) ** p)
+    return np.clip(s ** (1.0 / p), 0.001, 1.0)
+
+
+def weighted_exponential_mean(intermediate_results, alpha):
+    """WEM aggregation with alpha in [-1, 1]."""
+    alpha_clamped = max(-1.0, min(1.0, alpha))
+    base = -np.log((alpha_clamped + 1.0) / 2.0) / np.log(2.0)
+
+    if np.isposinf(base):
+        return max((value for _, value in intermediate_results), default=1.0)
+    if np.isclose(base, 1.0):
+        return weighted_sum(intermediate_results)
+    if base <= 0:
+        return min((value for _, value in intermediate_results), default=0.001)
+
+    s = 0.0
+    for weight, value in intermediate_results:
+        s += weight * (base ** value)
+    score = np.log(s) / np.log(base)
+    return np.clip(score, 0.001, 1.0)
+
+
 # ============================================================================
 # EVALUATION FUNCTION
 # ============================================================================
@@ -278,7 +341,7 @@ def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_list
 # MONTE CARLO SIMULATION
 # ============================================================================
 def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
-                    confidence_lists, constraint_data_list, aggregation_method,
+                    confidence_lists, constraint_data_list, aggregation_method, aggregation_alpha,
                     opinion_weights, num_iterations, mc_mode, use_random_weights=False,
                     print_fn=None):
     """Run MC simulation.
@@ -314,6 +377,10 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
         'weighted_sum': weighted_sum,
         'geometric_mean': geometric_mean,
         'harmonic_mean': harmonic_mean,
+        'geometric_mean_offset': lambda intermediate_results: geometric_mean_offset(intermediate_results, aggregation_alpha),
+        'weighted_sum_min_mix': lambda intermediate_results: weighted_sum_min_mix(intermediate_results, aggregation_alpha),
+        'weighted_power_mean': lambda intermediate_results: weighted_power_mean(intermediate_results, aggregation_alpha),
+        'weighted_exponential_mean': lambda intermediate_results: weighted_exponential_mean(intermediate_results, aggregation_alpha),
     }
     agg_func = agg_funcs.get(aggregation_method, weighted_sum)
 
@@ -456,7 +523,8 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
     params : dict
         Parameters:
         - mc_iterations: int
-        - aggregation_method: str ("weighted_sum", "geometric_mean", "harmonic_mean")
+        - aggregation_method: str
+        - aggregation_alpha: float in [-1, 1]
         - mc_mode: str ("strict" or "non_strict")
         - use_random_weights: bool
         - opinion_weights: list or None
@@ -473,9 +541,14 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
 
     mc_iterations = params.get('mc_iterations', 1000)
     aggregation_method = params.get('aggregation_method', 'weighted_sum')
+    aggregation_alpha = params.get('aggregation_alpha', 0.0)
     mc_mode = params.get('mc_mode', 'non_strict')
     use_random_weights = params.get('use_random_weights', False)
     opinion_weights_raw = params.get('opinion_weights', None)
+    try:
+        aggregation_alpha = max(-1.0, min(1.0, float(aggregation_alpha)))
+    except (TypeError, ValueError):
+        aggregation_alpha = 0.0
 
     num_elicitations = len(vf_lists)
 
@@ -501,6 +574,7 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
     print_fn(f"  Iterations: {mc_iterations}")
     print_fn(f"  Mode: {mc_mode}")
     print_fn(f"  Aggregation: {aggregation_method}")
+    print_fn(f"  Aggregation alpha: {aggregation_alpha}")
     print_fn(f"  Random weights: {use_random_weights}")
     print_fn(f"  Elicitations: {num_elicitations}")
     print_fn(f"  Opinion weights: {opinion_weights.tolist()}")
@@ -522,7 +596,7 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
     
     results = run_monte_carlo(
         alternatives, criteria_names, weight_solutions_list, vf_lists,
-        confidence_lists, constraint_data_list, aggregation_method,
+        confidence_lists, constraint_data_list, aggregation_method, aggregation_alpha,
         opinion_weights, mc_iterations, mc_mode, use_random_weights=use_random_weights,
         print_fn=print_fn,
     )
@@ -532,6 +606,7 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
     formatted = format_results_for_db(results, alternatives, mc_mode)
     formatted['mc_iterations'] = mc_iterations
     formatted['aggregation_method'] = aggregation_method
+    formatted['aggregation_alpha'] = aggregation_alpha
     formatted['mc_mode'] = mc_mode
     formatted['use_random_weights'] = use_random_weights
 
