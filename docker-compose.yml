@@ -22,12 +22,8 @@ services:
       APP_BASE_URL: http://localhost:3000
       MONGO_URI: mongodb://mongo:27017/elicitation
       FLASK_ENV: production
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      ADMIN_PASSWORD: admin
       DISABLE_EMAIL: true
-      # OAUTH2_CLIENT_SECRET: ${MCDA_UP_OAUTH2_SECRET}
-      # File-based secret fallback (uncomment to use mounted secret files):
-      # ADMIN_PASSWORD_FILE: /run/secrets/admin_password
-      # OAUTH2_CLIENT_SECRET_FILE: /run/secrets/oauth2_client_secret
     depends_on:
       - mongo
     networks:
@@ -62,9 +58,3 @@ volumes:
 networks:
   elicitation-network:
     driver: bridge
-
-secrets:
-  admin_password:
-    file: ./secrets/admin_password.txt
-  oauth2_client_secret:
-    file: ./secrets/oauth2_client_secret.txt

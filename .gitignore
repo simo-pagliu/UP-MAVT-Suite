@@ -8,3 +8,4 @@ frontend/.vite/
 .env
 secrets/
 webhosting_dmz/
+docker-compose.yml.psi
