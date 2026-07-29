@@ -2058,19 +2058,19 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           <Tabs index={activeStep} onChange={setActiveStep} variant="soft-rounded" colorScheme="blue">
             <TabList overflowX="auto" pb={2}>
               <Tab isDisabled={isStepDisabled(0)}>
-                Step 1: Weights {weightsComputed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 1: Finalize Elicited data {weightsComputed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
               <Tab isDisabled={isStepDisabled(1)}>
-                Step 2: Aggregation {getStepStatus(4)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 2: Choose Aggregation Method {getStepStatus(4)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
               <Tab isDisabled={isStepDisabled(2)}>
-                Step 3: Uncertainty {getStepStatus(5)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 3: Uncertainty Analysis {getStepStatus(5)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
               <Tab isDisabled={isStepDisabled(3)}>
-                Step 4: Consensus {getStepStatus(2)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 4: Consensus Analysis {getStepStatus(2)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
               <Tab isDisabled={isStepDisabled(4)}>
-                Step 5: Results {getStepStatus(6)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 5: Final Results {getStepStatus(6)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
             </TabList>
 
