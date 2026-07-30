@@ -178,7 +178,7 @@ def handle_compute_weights(task):
             ),
         )
 
-        logger.log(f"\n✓ All weights computed and saved to database.")
+        logger.log("\n✓ All weights computed and saved to database.")
         logger.log(f"  Processed {len(weight_solutions)} elicitation session(s).")
         logger.finalize()
 
@@ -253,7 +253,6 @@ def handle_run_step(task):
         
         for i, session_doc in enumerate(session_docs):
             session_id = str(session_doc.get('_id', session_doc.get('session_id', i)))
-            session_name = session_doc.get('name', session_id)
             
             # Build value functions and confidence
             vf_dict, conf_dict = build_value_functions_from_session(
@@ -422,7 +421,7 @@ def main():
             logger.info("Worker shutting down...")
             break
         except Exception as e:
-            logger.error("Worker loop error: %s", e, exc_info=True)
+            logger.exception("Worker loop error: %s", e, exc_info=True)
             time.sleep(POLL_INTERVAL)
 
 

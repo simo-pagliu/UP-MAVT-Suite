@@ -497,7 +497,7 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
     print_fn(f"✓ Criteria: {criteria_names}")
 
     # Run MC simulation
-    print_fn(f"\nRunning Monte Carlo simulation...")
+    print_fn("\nRunning Monte Carlo simulation...")
     print_fn(f"  Iterations: {mc_iterations}")
     print_fn(f"  Mode: {mc_mode}")
     print_fn(f"  Aggregation: {aggregation_method}")
