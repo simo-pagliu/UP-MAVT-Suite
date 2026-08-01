@@ -3,7 +3,9 @@ services:
     image: mongo:7.0
     container_name: elicitation-mongo
     environment:
-      MONGO_INITDB_DATABASE: elicitation
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-elicitation}
+    env_file:
+      - .env
     volumes:
       - mongo_data:/data/db
     networks:
@@ -17,7 +19,7 @@ services:
     ports:
       - "5000:5000"
     env_file:
-      - backend.env
+      - .env
     depends_on:
       - mongo
     networks:
@@ -26,8 +28,8 @@ services:
   worker:
     build: ./worker
     container_name: elicitation-worker
-    environment:
-      MONGO_URI: mongodb://mongo:27017/elicitation
+    env_file:
+      - .env
     depends_on:
       - mongo
     networks:
@@ -40,7 +42,7 @@ services:
       target: dev
     container_name: elicitation-frontend
     env_file:
-      - frontend.env
+      - .env
     ports:
       - "3000:3000"
     depends_on:
