@@ -3,7 +3,9 @@ services:
     image: mongo:7.0
     container_name: elicitation-mongo
     environment:
-      MONGO_INITDB_DATABASE: elicitation
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-elicitation}
+    env_file:
+      - .env
     volumes:
       - mongo_data:/data/db
     networks:
@@ -16,18 +18,8 @@ services:
     container_name: elicitation-backend
     ports:
       - "5000:5000"
-    # env_file:
-    #   - .env
-    environment:
-      APP_BASE_URL: http://localhost:3000
-      MONGO_URI: mongodb://mongo:27017/elicitation
-      FLASK_ENV: production
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-      DISABLE_EMAIL: true
-      # OAUTH2_CLIENT_SECRET: ${MCDA_UP_OAUTH2_SECRET}
-      # File-based secret fallback (uncomment to use mounted secret files):
-      # ADMIN_PASSWORD_FILE: /run/secrets/admin_password
-      # OAUTH2_CLIENT_SECRET_FILE: /run/secrets/oauth2_client_secret
+    env_file:
+      - .env
     depends_on:
       - mongo
     networks:
@@ -36,8 +28,8 @@ services:
   worker:
     build: ./worker
     container_name: elicitation-worker
-    environment:
-      MONGO_URI: mongodb://mongo:27017/elicitation
+    env_file:
+      - .env
     depends_on:
       - mongo
     networks:
@@ -49,6 +41,8 @@ services:
       context: ./frontend
       target: dev
     container_name: elicitation-frontend
+    env_file:
+      - .env
     ports:
       - "3000:3000"
     depends_on:
@@ -62,9 +56,3 @@ volumes:
 networks:
   elicitation-network:
     driver: bridge
-
-secrets:
-  admin_password:
-    file: ./secrets/admin_password.txt
-  oauth2_client_secret:
-    file: ./secrets/oauth2_client_secret.txt

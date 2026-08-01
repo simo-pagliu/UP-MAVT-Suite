@@ -8,6 +8,7 @@ task state and exporting results.
 import csv
 import io
 import json
+import math
 import re
 import zipfile
 from pathlib import Path
@@ -86,7 +87,9 @@ class WorkflowService:
         return str(self._tasks.insert(doc))
 
     def create_run_step_task(self, study_session_id, step_number, selected_session_ids,
-                             mc_iterations, aggregation_method, mc_mode, use_random_weights):
+                             mc_iterations, aggregation_method='weighted_sum', aggregation_alpha=0.0,
+                             aggregation_methods=None, aggregation_alphas=None,
+                             mc_mode='non_strict', use_random_weights=False):
         """Enqueue a background task to execute a UP-MAVT analysis step.
 
         Validates preconditions, normalises qualitative indicators for the
@@ -99,9 +102,12 @@ class WorkflowService:
             selected_session_ids (list): The elicitation session IDs to include.
             mc_iterations (int): Number of Monte-Carlo iterations (clamped to
                 [100, 5000] for steps 2-5, [100, 10000] for step 6).
-            aggregation_method (str): Aggregation method shortcode or full
-                name (``'SUM'``/``'weighted_sum'``, ``'GEO'``/``'geometric_mean'``,
-                ``'HAR'``/``'harmonic_mean'``).
+            aggregation_method (str): Primary aggregation method token.
+            aggregation_alpha (float): Aggregation alpha parameter in [-1, 1].
+            aggregation_methods (list[str] | None): Optional list of aggregation
+                method tokens (used by step 4 to run multiple methods).
+            aggregation_alphas (dict | None): Optional mapping
+                ``aggregation_method -> alpha``.
             mc_mode (str): Monte-Carlo mode string passed directly to the
                 worker (e.g. ``'non_strict'``).
             use_random_weights (bool): Whether to use random weights in the
@@ -128,15 +134,55 @@ class WorkflowService:
             mc_iterations = 10000 if step_number == 6 else 1000
 
         agg_map = {
-            'SUM': 'weighted_sum', 'GEO': 'geometric_mean', 'HAR': 'harmonic_mean',
-            'weighted_sum': 'weighted_sum', 'geometric_mean': 'geometric_mean', 'harmonic_mean': 'harmonic_mean',
+            'SUM': 'weighted_sum',
+            'WAM': 'weighted_sum',
+            'GEO': 'geometric_mean',
+            'HAR': 'harmonic_mean',
+            'GEO_OFFSET': 'geometric_mean_offset',
+            'WAM_MIN': 'weighted_sum_min_mix',
+            'WPM': 'weighted_power_mean',
+            'WEM': 'weighted_exponential_mean',
+            'weighted_sum': 'weighted_sum',
+            'geometric_mean': 'geometric_mean',
+            'harmonic_mean': 'harmonic_mean',
+            'geometric_mean_offset': 'geometric_mean_offset',
+            'weighted_sum_min_mix': 'weighted_sum_min_mix',
+            'weighted_power_mean': 'weighted_power_mean',
+            'weighted_exponential_mean': 'weighted_exponential_mean',
         }
         aggregation_method = agg_map.get(aggregation_method, 'weighted_sum')
+        try:
+            aggregation_alpha = max(-1.0, min(1.0, float(aggregation_alpha)))
+        except (TypeError, ValueError):
+            aggregation_alpha = 0.0
+
+        normalized_methods = []
+        if isinstance(aggregation_methods, list):
+            for method in aggregation_methods:
+                normalized = agg_map.get(method)
+                if normalized and normalized not in normalized_methods:
+                    normalized_methods.append(normalized)
+        if not normalized_methods:
+            normalized_methods = [aggregation_method]
+
+        normalized_alphas = {}
+        if isinstance(aggregation_alphas, dict):
+            for key, value in aggregation_alphas.items():
+                mapped_key = agg_map.get(key)
+                if not mapped_key:
+                    continue
+                try:
+                    normalized_alphas[mapped_key] = max(-1.0, min(1.0, float(value)))
+                except (TypeError, ValueError):
+                    normalized_alphas[mapped_key] = 0.0
+        for method in normalized_methods:
+            if method not in normalized_alphas:
+                normalized_alphas[method] = aggregation_alpha
 
         step_names = {
             2: 'Consensus Analysis (SMC)',
             3: 'Dominance Analysis (NSMC + Random Weights)',
-            4: 'Compensation Analysis (NSMC + All Aggregations)',
+            4: 'Aggregation Analysis (NSMC)',
             5: 'Uncertainty Analysis (SMC)',
             6: 'Final Results (NSMC)',
         }
@@ -151,6 +197,22 @@ class WorkflowService:
             raise ValidationError('No valid session IDs selected')
 
         session_docs = self._sessions.find_by_ids(selected_session_ids)
+        session_docs_by_id = {
+            str(doc.get('_id')): doc
+            for doc in session_docs
+            if self._sessions._to_oid(doc.get('study_session_id')) == self._studies._to_oid(study_session_id)
+        }
+        selected_session_ids = [sid for sid in selected_session_ids if str(sid) in session_docs_by_id]
+        if not selected_session_ids:
+            raise ValidationError('No valid session IDs selected')
+        session_docs = [session_docs_by_id[str(sid)] for sid in selected_session_ids]
+        confidence_adjustments = (
+            (study.get('workflow_preferences') or {})
+            .get('run_page', {})
+            .get('confidence_adjustments_by_session') or {}
+        )
+        raw_opinion_weights = []
+        session_ids_ordered = []
         for session_doc in session_docs:
             session_study_id = self._sessions._to_oid(session_doc.get('study_session_id'))
             if session_study_id != self._studies._to_oid(study_session_id):
@@ -161,6 +223,21 @@ class WorkflowService:
             normalized_qi = self._session_svc.normalize_qualitative_indicators(criteria, current_qi)
             if normalized_qi != current_qi:
                 self._sessions.update(session_doc['_id'], {'qualitative_indicators': normalized_qi})
+            sid = str(session_doc.get('_id', ''))
+            session_ids_ordered.append(sid)
+            base_confidence = self._compute_session_base_confidence(session_doc)
+            try:
+                adjustment = float(confidence_adjustments.get(sid, 0.0))
+            except (TypeError, ValueError):
+                adjustment = 0.0
+            adjusted = max(0.0, base_confidence + adjustment)
+            raw_opinion_weights.append(adjusted)
+
+        total_opinion_weight = sum(raw_opinion_weights)
+        if total_opinion_weight <= 0:
+            opinion_weights = None
+        else:
+            opinion_weights = [w / total_opinion_weight for w in raw_opinion_weights]
 
         if not study.get('computed_weights'):
             raise ValidationError('Compute weights first (Step 1)')
@@ -177,14 +254,48 @@ class WorkflowService:
                 'step_name': step_names.get(step_number, f'Step {step_number}'),
                 'mc_iterations': mc_iterations,
                 'aggregation_method': aggregation_method,
+                'aggregation_alpha': aggregation_alpha,
+                'aggregation_methods': normalized_methods,
+                'aggregation_alphas': normalized_alphas,
                 'mc_mode': mc_mode,
                 'use_random_weights': use_random_weights,
-                'opinion_weights': None,
+                'opinion_weights': opinion_weights,
             },
             'console_output': '',
             'created_at': datetime.now(timezone.utc),
         }
         return str(self._tasks.insert(doc))
+
+    @staticmethod
+    def _compute_session_base_confidence(session_doc):
+        """Compute the average self-declared confidence for a session (0–4 scale).
+
+        Reads confidence values from both value functions and qualitative
+        indicators and returns their mean. Returns 2.0 (mid-scale) when no
+        confidence data is available.
+        """
+        scores = []
+        vf = session_doc.get('value_functions') or {}
+        if isinstance(vf, dict):
+            for crit_data in (vf.get('criteria') or {}).values():
+                if isinstance(crit_data, dict) and crit_data.get('confidence') is not None:
+                    try:
+                        scores.append(float(crit_data['confidence']))
+                    except (TypeError, ValueError):
+                        pass
+        qi = session_doc.get('qualitative_indicators') or {}
+        if isinstance(qi, dict):
+            for indicator in qi.values():
+                if not isinstance(indicator, dict):
+                    continue
+                for conf_val in (indicator.get('confidences') or {}).values():
+                    try:
+                        scores.append(float(conf_val))
+                    except (TypeError, ValueError):
+                        pass
+        if not scores:
+            return 2.0
+        return sum(scores) / len(scores)
 
     def get_task_status(self, task_id):
         """Return the current status and metadata of a task.
@@ -333,9 +444,14 @@ class WorkflowService:
                     'mc_mode': step_data.get('mc_mode'),
                 }
                 if step_num == 4:
-                    step_info['aggregation_methods'] = list(step_data.get('results_by_aggregation', {}).keys())
+                    by_aggregation = step_data.get('results_by_aggregation', {})
+                    if isinstance(by_aggregation, dict) and by_aggregation:
+                        step_info['aggregation_methods'] = list(by_aggregation.keys())
+                    else:
+                        step_info['aggregation_method'] = step_data.get('aggregation_method')
                 else:
                     step_info['aggregation_method'] = step_data.get('aggregation_method')
+                step_info['aggregation_alpha'] = step_data.get('aggregation_alpha')
                 steps_status[str(step_num)] = step_info
             else:
                 steps_status[str(step_num)] = {'completed': False}
@@ -357,6 +473,11 @@ class WorkflowService:
                         for session_id in run_page.get('selected_session_ids', [])
                         if session_id is not None
                     ],
+                    'confidence_adjustments_by_session': {
+                        str(k): float(v)
+                        for k, v in (run_page.get('confidence_adjustments_by_session') or {}).items()
+                        if v is not None
+                    },
                 }
             },
         }
@@ -366,6 +487,7 @@ class WorkflowService:
         study_session_id,
         use_non_linear_model=None,
         selected_session_ids=None,
+        confidence_adjustments_by_session=None,
     ):
         """Persist run-page preferences to the study session document."""
         study = self._studies.find_by_id(study_session_id)
@@ -384,6 +506,15 @@ class WorkflowService:
                 for session_id in selected_session_ids
                 if session_id is not None
             ]
+
+        if confidence_adjustments_by_session is not None:
+            if not isinstance(confidence_adjustments_by_session, dict):
+                raise ValidationError('confidence_adjustments_by_session must be a dict')
+            updates['workflow_preferences.run_page.confidence_adjustments_by_session'] = {
+                str(k): max(-4.0, min(4.0, float(v)))
+                for k, v in confidence_adjustments_by_session.items()
+                if v is not None
+            }
 
         if updates:
             self._studies.update(study_session_id, updates)
@@ -736,6 +867,154 @@ class WorkflowService:
             zf.writestr(path, self._rows_to_csv(headers, rows))
 
     @staticmethod
+    def _quantile_from_sorted(sorted_values, quantile):
+        if not isinstance(sorted_values, list) or not sorted_values:
+            return None
+        q = max(0.0, min(1.0, float(quantile)))
+        if len(sorted_values) == 1:
+            return float(sorted_values[0])
+
+        position = (len(sorted_values) - 1) * q
+        low_index = int(math.floor(position))
+        high_index = int(math.ceil(position))
+        weight = position - low_index
+        if low_index == high_index:
+            return float(sorted_values[low_index])
+        return float(sorted_values[low_index]) + (float(sorted_values[high_index]) - float(sorted_values[low_index])) * weight
+
+    @classmethod
+    def _compute_distribution_stats(cls, values):
+        numeric_values = []
+        for value in values if isinstance(values, list) else []:
+            try:
+                casted = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(casted):
+                numeric_values.append(casted)
+
+        n = len(numeric_values)
+        if n == 0:
+            return {
+                'n': 0,
+                'average': None,
+                'median': None,
+                'stdDev': None,
+                'iqr': None,
+                'skewness': None,
+                'kurtosis': None,
+                'min': None,
+                'p5': None,
+                'p25': None,
+                'p75': None,
+                'p95': None,
+                'max': None,
+            }
+
+        sorted_values = sorted(numeric_values)
+        avg = sum(numeric_values) / n
+        variance = sum(((value - avg) ** 2) for value in numeric_values) / n
+        std_dev = math.sqrt(variance)
+
+        if std_dev > 0:
+            skewness = sum((((value - avg) / std_dev) ** 3) for value in numeric_values) / n
+            kurtosis = (sum((((value - avg) / std_dev) ** 4) for value in numeric_values) / n) - 3
+        else:
+            skewness = 0.0
+            kurtosis = 0.0
+
+        p25 = cls._quantile_from_sorted(sorted_values, 0.25)
+        p75 = cls._quantile_from_sorted(sorted_values, 0.75)
+
+        return {
+            'n': n,
+            'average': avg,
+            'median': cls._quantile_from_sorted(sorted_values, 0.5),
+            'stdDev': std_dev,
+            'iqr': (p75 - p25) if p75 is not None and p25 is not None else None,
+            'skewness': skewness,
+            'kurtosis': kurtosis,
+            'min': sorted_values[0],
+            'p5': cls._quantile_from_sorted(sorted_values, 0.05),
+            'p25': p25,
+            'p75': p75,
+            'p95': cls._quantile_from_sorted(sorted_values, 0.95),
+            'max': sorted_values[-1],
+        }
+
+    @classmethod
+    def _collect_distribution_stats_rows(cls, step_results):
+        alternatives = step_results.get('alternative_names') if isinstance(step_results, dict) else None
+        by_elicitation = step_results.get('results_by_elicitation') if isinstance(step_results, dict) else None
+        if not isinstance(alternatives, list) or not alternatives or not isinstance(by_elicitation, dict):
+            return []
+
+        def _sort_key(item):
+            key = str(item[0])
+            try:
+                return (0, float(key))
+            except (TypeError, ValueError):
+                return (1, key)
+
+        rows = []
+        sorted_entries = sorted(by_elicitation.items(), key=_sort_key)
+        for alt_index, alt_name in enumerate(alternatives):
+            for idx, (elicitation_key, iteration_rows) in enumerate(sorted_entries):
+                values = []
+                if isinstance(iteration_rows, list):
+                    for score_row in iteration_rows:
+                        if isinstance(score_row, list) and alt_index < len(score_row):
+                            values.append(score_row[alt_index])
+
+                stats = cls._compute_distribution_stats(values)
+                rows.append({
+                    'expert': f'{alt_name} - E{idx + 1} ({elicitation_key})',
+                    **stats,
+                })
+
+        return rows
+
+    def _write_distribution_stats_csv(self, zf, path, step_results, title):
+        rows = self._collect_distribution_stats_rows(step_results)
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter=';')
+        writer.writerow(['title', title])
+        headers = ['expert', 'n', 'mean', 'median', 'stdDev', 'iqr', 'skewness', 'kurtosis', 'min', 'p5', 'p25', 'p75', 'p95', 'max']
+        writer.writerow(headers)
+        if not rows:
+            writer.writerow(['note', 'Distribution stats are not available yet.'])
+        else:
+            for row in rows:
+                writer.writerow([
+                    row['expert'],
+                    row['n'],
+                    self._format_export_number(row.get('average'), 6),
+                    self._format_export_number(row.get('median'), 6),
+                    self._format_export_number(row.get('stdDev'), 6),
+                    self._format_export_number(row.get('iqr'), 6),
+                    self._format_export_number(row.get('skewness'), 6),
+                    self._format_export_number(row.get('kurtosis'), 6),
+                    self._format_export_number(row.get('min'), 6),
+                    self._format_export_number(row.get('p5'), 6),
+                    self._format_export_number(row.get('p25'), 6),
+                    self._format_export_number(row.get('p75'), 6),
+                    self._format_export_number(row.get('p95'), 6),
+                    self._format_export_number(row.get('max'), 6),
+                ])
+
+        zf.writestr(path, ExportService._csv_bytes(output.getvalue()))
+
+    @staticmethod
+    def _workflow_step_export_prefix(step_number):
+        mapping = {
+            2: 'step_4_consensus_analysis',
+            4: 'step_2_choose_aggregation_method',
+            5: 'step_3_uncertainty_analysis',
+            6: 'step_5_final_results',
+        }
+        return mapping.get(step_number, f'step_{step_number}')
+
+    @staticmethod
     def _repo_root():
         return Path(__file__).resolve().parents[3]
 
@@ -916,20 +1195,28 @@ class WorkflowService:
                 if not step_results:
                     continue
 
-                zf.writestr(f'steps/step_{step_number}_results.json', self._json_bytes(step_results))
+                export_prefix = self._workflow_step_export_prefix(step_number)
+                zf.writestr(f'steps/{export_prefix}_results.json', self._json_bytes(step_results))
 
                 if step_number in [2, 5]:
                     self._write_strict_results_long_csv(
                         zf,
-                        f'steps/step_{step_number}_strict_long.csv',
+                        f'steps/{export_prefix}_strict_long.csv',
                         step_results,
                     )
+                    if step_number == 5:
+                        self._write_distribution_stats_csv(
+                            zf,
+                            f'steps/{export_prefix}_distribution_stats.csv',
+                            step_results,
+                            'Step 3 uncertainty analysis stats',
+                        )
                 elif step_number in [3, 6]:
                     matrix = self._build_rank_probability_matrix(step_results)
                     if matrix:
                         self._write_rank_probability_csv(
                             zf,
-                            f'steps/step_{step_number}_rank_probabilities.csv',
+                            f'steps/{export_prefix}_rank_probabilities.csv',
                             matrix,
                         )
                 elif step_number == 4 and isinstance(step_results.get('results_by_aggregation'), dict):
@@ -939,7 +1226,7 @@ class WorkflowService:
                             safe_agg = self._safe_filename(agg_name)
                             self._write_rank_probability_csv(
                                 zf,
-                                f'steps/step_4_rank_probabilities_{safe_agg}.csv',
+                                f'steps/{export_prefix}_rank_probabilities_{safe_agg}.csv',
                                 matrix,
                             )
 

@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   buildRankProbabilityMatrix,
   buildRankProbabilityCsv,
+  computeConsensusQuantification,
+  buildConsensusQuantificationCsv,
   buildSimulationRowsCsv,
   buildSimulationCsvExports,
   buildRankingHeatmapSvg,
@@ -157,6 +159,42 @@ describe('RunUpMavtPage export helpers', () => {
     ])
   })
 
+  it('computes consensus quantification from normalized distributions', () => {
+    const identical = computeConsensusQuantification(
+      [
+        { x: 0.25, E1: 0.4, E2: 0.4 },
+        { x: 0.75, E1: 0.6, E2: 0.6 },
+      ],
+      ['E1', 'E2']
+    )
+    const disjoint = computeConsensusQuantification(
+      [
+        { x: 0.25, E1: 1, E2: 0 },
+        { x: 0.75, E1: 0, E2: 1 },
+      ],
+      ['E1', 'E2']
+    )
+
+    expect(identical.consensusPercent).toBeCloseTo(100, 6)
+    expect(disjoint.consensusPercent).toBeCloseTo(0, 6)
+  })
+
+  it('builds consensus quantification CSV for step 2 exports', () => {
+    const csv = buildConsensusQuantificationCsv([
+      {
+        alternative: 'Alt A',
+        elicitationCount: 3,
+        differenceArea: 1.234567,
+        consensusRatio: 0.6172835,
+        consensusPercent: 61.72835,
+      },
+    ])
+
+    expect(csv).toContain('title;Step 2 consensus quantification')
+    expect(csv).toContain('alternative;elicitation_count;difference_area;consensus_ratio;consensus_percent')
+    expect(csv).toContain('Alt A;3;1.234567;0.617284;61.73')
+  })
+
   it('includes weight-space target when available', () => {
     const targets = buildPipelineChartExportTargets({ hasWeightSpacePlot: true })
     expect(targets.map((target) => target.filenameBase)).toContain('step1_weight_space_plot')
@@ -164,7 +202,6 @@ describe('RunUpMavtPage export helpers', () => {
 
   it('builds heatmap export descriptors for available steps only', () => {
     const targets = buildPipelineHeatmapExports({
-      step3Results: { alternative_names: ['A'], aggregated_results: [[1]] },
       step4Results: {
         results_by_aggregation: {
           weighted_sum: { alternative_names: ['A'], aggregated_results: [[1]] },
@@ -175,8 +212,7 @@ describe('RunUpMavtPage export helpers', () => {
     })
 
     expect(targets.map((target) => target.filenameBase)).toEqual([
-      'step3_dominance_heatmap',
-      'step4_sum_aggregation_heatmap',
+      'step4_wam_aggregation_heatmap',
       'step4_har_aggregation_heatmap',
     ])
   })

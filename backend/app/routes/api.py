@@ -462,6 +462,16 @@ def update_session_friendly_name(session_id):
     return jsonify(updated), 200
 
 
+@bp.route('/session/<session_id>/practitioner-settings', methods=['PUT'])
+def update_session_practitioner_settings(session_id):
+    data = request.json or {}
+    updated = SessionService(current_app.db).update_practitioner_settings(
+        session_id,
+        data.get('practitioner_settings'),
+    )
+    return jsonify(updated), 200
+
+
 @bp.route('/session/<session_id>/qualitative', methods=['PUT'])
 def update_qualitative(session_id):
     data = request.json
@@ -851,6 +861,9 @@ def run_step_endpoint(study_session_id):
         selected_session_ids=data.get('selected_session_ids', []),
         mc_iterations=data.get('mc_iterations', 10000 if step_number == 6 else 1000),
         aggregation_method=data.get('aggregation_method', 'weighted_sum'),
+        aggregation_alpha=data.get('aggregation_alpha', 0.0),
+        aggregation_methods=data.get('aggregation_methods'),
+        aggregation_alphas=data.get('aggregation_alphas'),
         mc_mode=data.get('mc_mode', 'non_strict'),
         use_random_weights=data.get('use_random_weights', False),
     )
@@ -910,6 +923,7 @@ def update_run_page_preferences(study_session_id):
         study_session_id,
         use_non_linear_model=data.get('use_non_linear_model'),
         selected_session_ids=data.get('selected_session_ids'),
+        confidence_adjustments_by_session=data.get('confidence_adjustments_by_session'),
     )
     return jsonify(result), 200
 

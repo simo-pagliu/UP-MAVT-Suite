@@ -31,6 +31,10 @@ import {
   NumberInputStepper,
   NumberIncrementStepper,
   NumberDecrementStepper,
+  Slider,
+  SliderTrack,
+  SliderFilledTrack,
+  SliderThumb,
   Modal,
   ModalOverlay,
   ModalContent,
@@ -38,11 +42,21 @@ import {
   ModalCloseButton,
   ModalBody,
   ModalFooter,
+  Collapse,
+  TableContainer,
+  Table,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
 } from '@chakra-ui/react'
-import { DownloadIcon, ExternalLinkIcon } from '@chakra-ui/icons'
+import { DownloadIcon, ExternalLinkIcon, InfoOutlineIcon, ChevronDownIcon, ChevronRightIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import JSZip from 'jszip'
 import PdfModal from '../components/PdfModal'
+import { InlineMath, BlockMath } from 'react-katex'
+import 'katex/dist/katex.min.css'
 
 import {
   AreaChart,
@@ -64,6 +78,17 @@ import {
   isPileBwtComplete,
   isSessionComplete,
 } from '../utils/sessionUtils'
+import {
+  formatPerElicitationDistributionSummary,
+  buildDistributionStatsCsv,
+  buildDistributionStatsRows,
+  DISTRIBUTION_STAT_COLUMNS,
+} from '../utils/distributionStats'
+import { downloadCSVFile } from '../utils/csvExport'
+import {
+  normalizeConfidenceAdjustment,
+  normalizePractitionerSettings,
+} from '../utils/practitionerSettings'
 
 const STEP2_COLORS = ['#3182CE', '#E57373', '#C77DFF', '#4DD0E1', '#38A169', '#D69E2E']
 const PNG_SCALE_FACTOR = 2
@@ -85,6 +110,182 @@ const SVG_INLINE_STYLE_PROPS = [
   'font-size',
   'font-weight',
 ]
+
+const AGGREGATION_METHODS = [
+  {
+    id: 'WAM',
+    label: 'WAM',
+    fullName: 'Weighted Arithmetic Mean',
+    backendMethod: 'weighted_sum',
+    usesAlpha: false,
+    formula: String.raw`V_{WAM} = \sum_{i=1}^{n} w_i v_i`,
+  },
+  {
+    id: 'GEO',
+    label: 'GEO',
+    fullName: 'Geometric Mean',
+    backendMethod: 'geometric_mean',
+    usesAlpha: false,
+    formula: String.raw`V_{GEO} = \prod_{i=1}^{n} v_i^{w_i}`,
+  },
+  {
+    id: 'HAR',
+    label: 'HAR',
+    fullName: 'Harmonic Mean',
+    backendMethod: 'harmonic_mean',
+    usesAlpha: false,
+    formula: String.raw`V_{HAR} = \left(\sum_{i=1}^{n} \frac{w_i}{v_i}\right)^{-1}`,
+  },
+  {
+    id: 'GEO_OFFSET',
+    label: 'GEO+offset',
+    fullName: 'Geometric Mean with Offset',
+    backendMethod: 'geometric_mean_offset',
+    usesAlpha: true,
+    formula: String.raw`V_{GEO+offset} = \left( \prod_{i=1}^{n} (v_i - \log(\alpha))^{w_i} \right) + \log(\alpha)`,
+  },
+  {
+    id: 'WAM_MIN',
+    label: 'WAM+MIN',
+    fullName: 'Mixture of Weighted Arithmetic Mean and Minimum',
+    backendMethod: 'weighted_sum_min_mix',
+    usesAlpha: true,
+    formula: String.raw`V_{WAM+MIN} = (1 - \alpha) \cdot \sum_{i=1}^{n} w_i v_i + \alpha \cdot \min(\mathbf{v})`,
+  },
+  {
+    id: 'WPM',
+    label: 'WPM',
+    fullName: 'Weighted Power Mean',
+    backendMethod: 'weighted_power_mean',
+    usesAlpha: true,
+    formula: String.raw`V_{WPM} =
+\begin{cases}
+\left( \sum_{i=1}^{n} w_i v_i^{\ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1} \right)^{\frac{1}{\ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1}} & \text{if } \ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1 \neq 0 \\
+\prod_{i=1}^{n} v_i^{w_i} & \text{if } \ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1 = 0 \\
+\min(\mathbf{v}) & \text{if } \ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1 = -\infty \\
+\max(\mathbf{v}) & \text{if } \ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1 = \infty
+\end{cases}`,
+  },
+  {
+    id: 'WEM',
+    label: 'WEM',
+    fullName: 'Weighted Exponential Mean',
+    backendMethod: 'weighted_exponential_mean',
+    usesAlpha: true,
+    formula: String.raw`V_{WEM} =
+\begin{cases}
+\log_{\left( - \frac{\ln\left(\frac{\alpha + 1}{2}\right)}{\ln(2)}\right)} \left( \sum_{i=1}^{n} w_i \cdot \left( - \frac{\ln\left(\frac{\alpha + 1}{2}\right)}{\ln(2)}\right)^{v_i} \right) & \text{if } - \frac{\ln\left(\frac{\alpha + 1}{2}\right)}{\ln(2)} \neq 1 \\
+\sum_{i=1}^{n} w_i v_i & \text{if } - \frac{\ln\left(\frac{\alpha + 1}{2}\right)}{\ln(2)} = 1
+\end{cases}`,
+  },
+]
+const DEFAULT_AGGREGATION_STEP_METHODS = ['WAM', 'GEO', 'HAR']
+const DISTRIBUTION_STAT_TOOLTIPS = {
+  average: 'Arithmetic mean; useful as a central tendency indicator but sensitive to extreme values.',
+  median: 'Robust central tendency (50th percentile); less sensitive to outliers than the mean.',
+  stdDev: 'Spread around the mean; larger values indicate higher overall variability.',
+  iqr: 'Interquartile Range (P75 - P25); robust spread measure focused on the middle 50% of values.',
+  skewness: 'Asymmetry indicator: positive means a longer right tail, negative means a longer left tail.',
+  kurtosis: 'Tail heaviness relative to a normal distribution; higher values indicate more extreme tails.',
+  min: 'Smallest observed value in the sampled distribution.',
+  p5: 'Lower-tail quantile: 5% of sampled values are below this point.',
+  p25: 'First quartile: 25% of sampled values are below this point.',
+  p75: 'Third quartile: 75% of sampled values are below this point.',
+  p95: 'Upper-tail quantile: 95% of sampled values are below this point.',
+  max: 'Largest observed value in the sampled distribution.',
+}
+function toConfidenceNumber(value, fallback = null) {
+  const numericValue = Number(value)
+  if (!Number.isFinite(numericValue)) return fallback
+  return Math.max(0, Math.min(4, numericValue))
+}
+
+function formatConfidenceValue(value) {
+  const numericValue = toConfidenceNumber(value)
+  if (numericValue === null) return 'N/A'
+  return Number.isInteger(numericValue) ? `${numericValue}` : numericValue.toFixed(1)
+}
+
+function averageConfidence(values) {
+  if (!Array.isArray(values) || values.length === 0) return null
+  const total = values.reduce((sum, value) => sum + value, 0)
+  return total / values.length
+}
+
+function formatSignedAdjustment(value) {
+  const numericValue = normalizeConfidenceAdjustment(value, 0)
+  return `${numericValue > 0 ? '+' : ''}${numericValue.toFixed(1)}`
+}
+
+function applyConfidenceAdjustment(value, ...adjustments) {
+  const confidence = toConfidenceNumber(value)
+  if (confidence === null) return null
+  const totalAdjustment = adjustments.reduce(
+    (sum, adjustment) => sum + normalizeConfidenceAdjustment(adjustment, 0),
+    0
+  )
+  return toConfidenceNumber(confidence + totalAdjustment, 0)
+}
+
+function getQualitativeDeclaredConfidences(session, criterionName) {
+  const criterionData = session?.qualitative_indicators?.[criterionName]
+  const confidences = criterionData?.confidences
+  if (!confidences || typeof confidences !== 'object') return []
+  return Object.values(confidences)
+    .map((value) => toConfidenceNumber(value))
+    .filter((value) => value !== null)
+}
+
+function getValueFunctionDeclaredConfidence(session, criterionName) {
+  return toConfidenceNumber(session?.value_functions?.criteria?.[criterionName]?.confidence)
+}
+
+function getSessionDeclaredConfidenceValues(session, criteria, scope = 'all') {
+  const values = []
+  ;(criteria || []).forEach((criterion) => {
+    const criterionName = criterion?.criterion_name
+    if (!criterionName) return
+    if (criterion?.is_qualitative) {
+      if (scope === 'vf') return
+      values.push(...getQualitativeDeclaredConfidences(session, criterionName))
+      return
+    }
+    if (scope === 'qi') return
+    const confidence = getValueFunctionDeclaredConfidence(session, criterionName)
+    if (confidence !== null) values.push(confidence)
+  })
+  return values
+}
+
+function getAggregationMeta(methodId) {
+  const token = String(methodId || '').trim().toUpperCase()
+  return AGGREGATION_METHODS.find((entry) => entry.id === token) || AGGREGATION_METHODS[0]
+}
+
+function toBackendAggregationMethod(methodId) {
+  return getAggregationMeta(methodId).backendMethod
+}
+
+function formatAlphaValue(alphaValue) {
+  const numericValue = Number(alphaValue)
+  if (!Number.isFinite(numericValue)) return null
+  const clamped = Math.max(-1, Math.min(1, numericValue))
+  return Number(clamped.toFixed(2)).toString()
+}
+
+function getAggregationPlotLabel(backendMethod, alphaMap = null, fallbackAlpha = null) {
+  const meta = AGGREGATION_METHODS.find((entry) => entry.backendMethod === backendMethod)
+  const label = meta?.label || backendMethod
+  if (!meta?.usesAlpha) return label
+
+  let alpha = fallbackAlpha
+  if (alphaMap && typeof alphaMap === 'object' && Object.prototype.hasOwnProperty.call(alphaMap, backendMethod)) {
+    alpha = alphaMap[backendMethod]
+  }
+  const formattedAlpha = formatAlphaValue(alpha)
+  if (formattedAlpha === null) return `${label} (alpha = 0)`
+  return `${label} (alpha = ${formattedAlpha})`
+}
 
 function inlineSvgComputedStyles(sourceNode, cloneNode) {
   if (
@@ -123,6 +324,9 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [sessions, setSessions] = useState([])
   const [criteria, setCriteria] = useState([])
   const [selectedSessions, setSelectedSessions] = useState([])
+  const [practitionerSettingsById, setPractitionerSettingsById] = useState({})
+  const [savingPractitionerSettingsById, setSavingPractitionerSettingsById] = useState({})
+  const [practitionerSettingsSaveStateById, setPractitionerSettingsSaveStateById] = useState({})
   const [loadingStudy, setLoadingStudy] = useState(true)
 
   // Workflow status from DB
@@ -134,6 +338,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [consoleOutput, setConsoleOutput] = useState('')
   const [showConsole, setShowConsole] = useState(false)
   const pollRef = useRef(null)
+  const practitionerSettingsSaveTimersRef = useRef({})
 
   // Active tab
   const [activeStep, setActiveStep] = useState(0)
@@ -144,14 +349,20 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   })
 
   // Aggregation method per step
-  const [consensusAggregation, setConsensusAggregation] = useState('SUM')
-  const [dominanceAggregation, setDominanceAggregation] = useState('SUM')
-  const [uncertaintyAggregation, setUncertaintyAggregation] = useState('')
-  const [resultsAggregation, setResultsAggregation] = useState('')
+  const [consensusAggregation, setConsensusAggregation] = useState('WAM')
+  const [aggregationStepMethods, setAggregationStepMethods] = useState(DEFAULT_AGGREGATION_STEP_METHODS)
+  const [uncertaintyAggregation, setUncertaintyAggregation] = useState('WAM')
+  const [resultsAggregation, setResultsAggregation] = useState('WAM')
+  const [aggregationStepAlphas, setAggregationStepAlphas] = useState({})
+  const [uncertaintyAggregationAlpha, setUncertaintyAggregationAlpha] = useState(0)
+  const [consensusAggregationAlpha, setConsensusAggregationAlpha] = useState(0)
+  const [resultsAggregationAlpha, setResultsAggregationAlpha] = useState(0)
 
   // Weight space plot state
   const [selectedWeightSession, setSelectedWeightSession] = useState('')
   const [weightSpaceData, setWeightSpaceData] = useState(null)
+  const [showDeclaredVsComputed, setShowDeclaredVsComputed] = useState(false)
+  const [expandedConfidenceSections, setExpandedConfidenceSections] = useState({})
   const [useNonLinearModel, setUseNonLinearModel] = useState(true)
   const [runPrefsHydrated, setRunPrefsHydrated] = useState(false)
   const [phase3TolerancePct, setPhase3TolerancePct] = useState(1)
@@ -169,7 +380,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   // Step 2 results state
   const [step2Results, setStep2Results] = useState(null)
   const [step5Results, setStep5Results] = useState(null)
-  const [step3Results, setStep3Results] = useState(null)
   const [step4Results, setStep4Results] = useState(null)
   const [step6Results, setStep6Results] = useState(null)
   const [exportingDataZip, setExportingDataZip] = useState(false)
@@ -177,6 +387,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [exportIncludeResultsCsv, setExportIncludeResultsCsv] = useState(true)
   const [exportIncludeSimulationCsvs, setExportIncludeSimulationCsvs] = useState(true)
   const [exportIncludePlotImages, setExportIncludePlotImages] = useState(true)
+  const [exportIncludeStep2ConsensusQuantificationCsv, setExportIncludeStep2ConsensusQuantificationCsv] = useState(true)
+  const [exportIncludeStep5UncertaintyStatsCsv, setExportIncludeStep5UncertaintyStatsCsv] = useState(true)
   const [exportIncludeFullData, setExportIncludeFullData] = useState(false)
   // PDF Modal states
   const { isOpen: isUncertaintiesOpen, onOpen: onUncertaintiesOpen, onClose: onUncertaintiesClose } = useDisclosure()
@@ -232,16 +444,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     }
   }, [studySessionId])
 
-  const fetchStep3Results = useCallback(async () => {
-    if (!studySessionId) return
-    try {
-      const response = await axios.get(`${API_URL}/study-session/${studySessionId}/step-results/3`)
-      setStep3Results(response.data)
-    } catch (error) {
-      console.error('Error fetching step 3 results:', error)
-    }
-  }, [studySessionId])
-
   const fetchStep4Results = useCallback(async () => {
     if (!studySessionId) return
     try {
@@ -289,6 +491,12 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
         setSessions(allSessions)
         setCriteria(allCriteria)
+        setPractitionerSettingsById(
+          allSessions.reduce((acc, session) => {
+            acc[session._id] = normalizePractitionerSettings(allCriteria, session.practitioner_settings)
+            return acc
+          }, {})
+        )
 
         const completedAndLocked = allSessions.filter((s) =>
           isSessionComplete(s, allCriteria) && s.session_locked === true
@@ -368,12 +576,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   }, [workflowStatus?.steps?.['5']?.completed, fetchStep5Results])
 
   useEffect(() => {
-    if (workflowStatus?.steps?.['3']?.completed) {
-      fetchStep3Results()
-    }
-  }, [workflowStatus?.steps?.['3']?.completed, fetchStep3Results])
-
-  useEffect(() => {
     if (workflowStatus?.steps?.['4']?.completed) {
       fetchStep4Results()
     }
@@ -409,8 +611,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           // Then fetch the step results for the completed step
           if (stepNumber === 2) {
             await fetchStep2Results()
-          } else if (stepNumber === 3) {
-            await fetchStep3Results()
           } else if (stepNumber === 4) {
             await fetchStep4Results()
           } else if (stepNumber === 5) {
@@ -447,7 +647,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         console.error('Polling error:', error)
       }
     }, 2000)
-  }, [fetchWorkflowStatus, fetchStep2Results, fetchStep3Results, fetchStep4Results, fetchStep5Results, fetchStep6Results, fetchWeightSpace, selectedWeightSession, toast])
+  }, [fetchWorkflowStatus, fetchStep2Results, fetchStep4Results, fetchStep5Results, fetchStep6Results, fetchWeightSpace, selectedWeightSession, toast])
 
   // Check for active/running tasks on mount (called after startPolling is defined)
   const checkForActiveTask = useCallback(async () => {
@@ -491,6 +691,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
+      Object.values(practitionerSettingsSaveTimersRef.current).forEach((timeoutId) => clearTimeout(timeoutId))
     }
   }, [])
 
@@ -518,6 +719,85 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     const friendly = String(session.friendly_name || '').trim()
     if (friendly) return friendly
     return session._id || fallbackLabel || 'Unknown session'
+  }
+
+  const handlePractitionerSettingsChange = (sessionId, updater) => {
+    let nextSettings = null
+    setPractitionerSettingsById((prev) => {
+      const session = sessions.find((entry) => entry._id === sessionId)
+      const current = normalizePractitionerSettings(
+        criteria,
+        prev[sessionId] || session?.practitioner_settings
+      )
+      nextSettings = normalizePractitionerSettings(
+        criteria,
+        typeof updater === 'function' ? updater(current) : updater
+      )
+      return {
+        ...prev,
+        [sessionId]: nextSettings,
+      }
+    });
+    if (nextSettings) {
+      const existingTimeout = practitionerSettingsSaveTimersRef.current[sessionId]
+      if (existingTimeout) clearTimeout(existingTimeout)
+      setPractitionerSettingsSaveStateById((prev) => ({ ...prev, [sessionId]: 'pending' }))
+      practitionerSettingsSaveTimersRef.current[sessionId] = setTimeout(() => {
+        handleSavePractitionerSettings(sessionId, nextSettings)
+      }, 500)
+    }
+  }
+
+  const handleSavePractitionerSettings = async (sessionId, settingsOverride = null) => {
+    const session = sessions.find((entry) => entry._id === sessionId)
+    if (!session) return
+
+    const existingTimeout = practitionerSettingsSaveTimersRef.current[sessionId]
+    if (existingTimeout) {
+      clearTimeout(existingTimeout)
+      delete practitionerSettingsSaveTimersRef.current[sessionId]
+    }
+
+    const settings = normalizePractitionerSettings(
+      criteria,
+      settingsOverride || practitionerSettingsById[sessionId] || session.practitioner_settings
+    )
+
+    setSavingPractitionerSettingsById((prev) => ({ ...prev, [sessionId]: true }))
+    setPractitionerSettingsSaveStateById((prev) => ({ ...prev, [sessionId]: 'saving' }))
+    try {
+      const response = await axios.put(`${API_URL}/session/${sessionId}/practitioner-settings`, {
+        practitioner_settings: settings,
+      })
+      const updatedSettings = normalizePractitionerSettings(criteria, response.data?.practitioner_settings)
+      setPractitionerSettingsById((prev) => ({ ...prev, [sessionId]: updatedSettings }))
+      setSessions((prev) => prev.map((entry) => (
+        entry._id === sessionId
+          ? { ...entry, practitioner_settings: updatedSettings }
+          : entry
+      )))
+      setPractitionerSettingsSaveStateById((prev) => ({ ...prev, [sessionId]: 'saved' }))
+    } catch (error) {
+      setPractitionerSettingsSaveStateById((prev) => ({ ...prev, [sessionId]: 'error' }))
+      toast({
+        title: 'Failed to save session settings',
+        description: error.response?.data?.error || error.message,
+        status: 'error',
+        duration: 4000,
+      })
+    } finally {
+      setSavingPractitionerSettingsById((prev) => ({ ...prev, [sessionId]: false }))
+    }
+  }
+
+  const handleToggleConfidenceSection = (sessionId, sectionKey) => {
+    setExpandedConfidenceSections((prev) => ({
+      ...prev,
+      [sessionId]: {
+        ...prev[sessionId],
+        [sectionKey]: !prev[sessionId]?.[sectionKey],
+      },
+    }))
   }
 
   // ============================================================================
@@ -595,14 +875,51 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       toast({ title: 'Select at least one session', status: 'warning', duration: 3000 })
       return
     }
+    if (stepNumber === 4 && aggregationStepMethods.length === 0) {
+      toast({ title: 'Select at least one aggregation method', status: 'warning', duration: 3000 })
+      return
+    }
+
+    const selectedAggregationMethodIds = aggregationStepMethods.length > 0
+      ? aggregationStepMethods
+      : DEFAULT_AGGREGATION_STEP_METHODS
+    const selectedBackendMethods = [...new Set(selectedAggregationMethodIds.map((id) => toBackendAggregationMethod(id)))]
+    const selectedBackendAlphas = {}
+    selectedAggregationMethodIds.forEach((methodId) => {
+      const meta = getAggregationMeta(methodId)
+      const value = Number(aggregationStepAlphas[methodId])
+      const alpha = Number.isFinite(value) ? Math.max(-1, Math.min(1, value)) : 0
+      selectedBackendAlphas[meta.backendMethod] = meta.usesAlpha ? alpha : 0
+    })
 
     // Build step-specific params
     const stepConfigs = {
-      2: { mc_mode: 'strict', aggregation_method: consensusAggregation, use_random_weights: false },
-      3: { mc_mode: 'non_strict', aggregation_method: dominanceAggregation, use_random_weights: true },
-      4: { mc_mode: 'non_strict', aggregation_method: 'weighted_sum', use_random_weights: false },
-      5: { mc_mode: 'strict', aggregation_method: uncertaintyAggregation, use_random_weights: false },
-      6: { mc_mode: 'non_strict', aggregation_method: resultsAggregation, use_random_weights: false },
+      2: {
+        mc_mode: 'strict',
+        aggregation_method: toBackendAggregationMethod(consensusAggregation),
+        aggregation_alpha: consensusAggregationAlpha,
+        use_random_weights: false,
+      },
+      4: {
+        mc_mode: 'non_strict',
+        aggregation_method: selectedBackendMethods[0] || 'weighted_sum',
+        aggregation_alpha: selectedBackendAlphas[selectedBackendMethods[0]] ?? 0,
+        aggregation_methods: selectedBackendMethods,
+        aggregation_alphas: selectedBackendAlphas,
+        use_random_weights: false,
+      },
+      5: {
+        mc_mode: 'strict',
+        aggregation_method: toBackendAggregationMethod(uncertaintyAggregation),
+        aggregation_alpha: uncertaintyAggregationAlpha,
+        use_random_weights: false,
+      },
+      6: {
+        mc_mode: 'non_strict',
+        aggregation_method: toBackendAggregationMethod(resultsAggregation),
+        aggregation_alpha: resultsAggregationAlpha,
+        use_random_weights: false,
+      },
     }
 
     const config = { ...stepConfigs[stepNumber], ...overrides }
@@ -610,7 +927,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     // Clear previous results for this step so they don't linger during the new run
     const stepResultClearers = {
       2: () => setStep2Results(null),
-      3: () => setStep3Results(null),
       4: () => setStep4Results(null),
       5: () => setStep5Results(null),
       6: () => setStep6Results(null),
@@ -618,7 +934,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     stepResultClearers[stepNumber]?.()
 
     setRunningStep(stepName)
-    setConsoleOutput(`Submitting Step ${stepNumber} task...\n`)
+    setConsoleOutput(`Submitting ${stepName} task...\n`)
 
     try {
       const response = await axios.post(
@@ -628,6 +944,9 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           selected_session_ids: selectedSessions,
           mc_iterations: mcIterations[stepNumber] || (stepNumber === 6 ? 10000 : 1000),
           aggregation_method: config.aggregation_method,
+          aggregation_alpha: config.aggregation_alpha ?? 0,
+          aggregation_methods: config.aggregation_methods,
+          aggregation_alphas: config.aggregation_alphas,
           mc_mode: config.mc_mode,
           use_random_weights: config.use_random_weights,
         }
@@ -713,21 +1032,184 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     setMcIterations((prev) => ({ ...prev, [step]: v }))
   }
 
+  const renderAggregationSelector = ({
+    selectedMethod,
+    setSelectedMethod,
+    alphaValue,
+    setAlphaValue,
+  }) => {
+    const meta = getAggregationMeta(selectedMethod)
+
+    return (
+      <VStack spacing={3} align="stretch">
+        <HStack spacing={3} align="center" flexWrap="wrap">
+          <Text fontWeight="bold">Aggregation:</Text>
+          <Select
+            value={selectedMethod}
+            onChange={(e) => setSelectedMethod(e.target.value)}
+            width="220px"
+            isDisabled={runningStep !== null}
+          >
+            {AGGREGATION_METHODS.map((method) => (
+              <option key={method.id} value={method.id}>{method.label}</option>
+            ))}
+          </Select>
+          {meta.usesAlpha && (
+            <HStack spacing={2} minW="340px" flex={1}>
+              <Text fontWeight="medium">α:</Text>
+              <Slider
+                value={alphaValue}
+                min={-1}
+                max={1}
+                step={0.01}
+                isDisabled={runningStep !== null}
+                onChange={(value) => setAlphaValue(Number(value))}
+                flex={1}
+              >
+                <SliderTrack>
+                  <SliderFilledTrack />
+                </SliderTrack>
+                <SliderThumb />
+              </Slider>
+              <NumberInput
+                value={alphaValue}
+                min={-1}
+                max={1}
+                step={0.01}
+                precision={2}
+                width="100px"
+                isDisabled={runningStep !== null}
+                onChange={(_, valueAsNumber) => {
+                  if (!Number.isFinite(valueAsNumber)) return
+                  setAlphaValue(Math.max(-1, Math.min(1, valueAsNumber)))
+                }}
+              >
+                <NumberInputField />
+                <NumberInputStepper>
+                  <NumberIncrementStepper />
+                  <NumberDecrementStepper />
+                </NumberInputStepper>
+              </NumberInput>
+            </HStack>
+          )}
+        </HStack>
+        <VStack spacing={1} align="stretch">
+          <Text fontSize="sm" color="gray.700">
+            <strong>{meta.label}</strong> = {meta.fullName}
+          </Text>
+          <Box bg="white" borderWidth={1} borderColor="gray.200" borderRadius="md" p={3} overflowX="auto">
+            <BlockMath math={meta.formula} />
+          </Box>
+          {meta.usesAlpha && (
+            <Text fontSize="xs" color="gray.600">
+              α ∈ [-1, 1]. At α = 0 the aggregation is fully compensatory; values toward 1 emphasize poor performance, while values toward -1 emphasize strong performance.
+            </Text>
+          )}
+        </VStack>
+      </VStack>
+    )
+  }
+
+  const renderAggregationChecklist = () => (
+    <VStack spacing={3} align="stretch">
+      <Text fontWeight="bold">Aggregation methods (select one or more):</Text>
+      {AGGREGATION_METHODS.map((method) => {
+        const isSelected = aggregationStepMethods.includes(method.id)
+        const alphaValue = Number(aggregationStepAlphas[method.id] ?? 0)
+        return (
+          <Box key={method.id} bg="white" borderWidth={1} borderColor="gray.200" borderRadius="md" p={3}>
+            <VStack spacing={2} align="stretch">
+              <HStack spacing={3} align="center" flexWrap="wrap">
+                <Checkbox
+                  isChecked={isSelected}
+                  isDisabled={runningStep !== null}
+                  onChange={(e) => {
+                    const checked = e.target.checked
+                    setAggregationStepMethods((prev) => {
+                      if (checked) {
+                        return prev.includes(method.id) ? prev : [...prev, method.id]
+                      }
+                      return prev.filter((id) => id !== method.id)
+                    })
+                  }}
+                >
+                  <Text fontWeight="semibold">{method.label}</Text>
+                </Checkbox>
+                <Text fontSize="sm" color="gray.700">
+                  {method.fullName}
+                </Text>
+              </HStack>
+              <Box borderWidth={1} borderColor="gray.200" borderRadius="md" p={3} overflowX="auto">
+                <BlockMath math={method.formula} />
+              </Box>
+              {method.usesAlpha && isSelected && (
+                <HStack spacing={2} align="center" flexWrap="wrap">
+                  <Text fontWeight="medium">α:</Text>
+                  <Slider
+                    value={alphaValue}
+                    min={-1}
+                    max={1}
+                    step={0.01}
+                    isDisabled={runningStep !== null}
+                    onChange={(value) => setAggregationStepAlphas((prev) => ({ ...prev, [method.id]: Number(value) }))}
+                    flex={1}
+                  >
+                    <SliderTrack>
+                      <SliderFilledTrack />
+                    </SliderTrack>
+                    <SliderThumb />
+                  </Slider>
+                  <NumberInput
+                    value={alphaValue}
+                    min={-1}
+                    max={1}
+                    step={0.01}
+                    precision={2}
+                    width="100px"
+                    isDisabled={runningStep !== null}
+                    onChange={(_, valueAsNumber) => {
+                      if (!Number.isFinite(valueAsNumber)) return
+                      const clamped = Math.max(-1, Math.min(1, valueAsNumber))
+                      setAggregationStepAlphas((prev) => ({ ...prev, [method.id]: clamped }))
+                    }}
+                  >
+                    <NumberInputField />
+                    <NumberInputStepper>
+                      <NumberIncrementStepper />
+                      <NumberDecrementStepper />
+                    </NumberInputStepper>
+                  </NumberInput>
+                </HStack>
+              )}
+            </VStack>
+          </Box>
+        )
+      })}
+      <Text fontSize="xs" color="gray.600">
+        α ∈ [-1, 1]. At α = 0 the aggregation is fully compensatory; values toward 1 emphasize poor performance, while values toward -1 emphasize strong performance.
+      </Text>
+    </VStack>
+  )
+
   // ============================================================================
   // STEP 2: DISTRIBUTION PLOT HELPERS
   // ============================================================================
   const getDistributionDataForAlternative = (stepResults, altIndex) => {
     if (!stepResults?.results_by_elicitation || !stepResults?.alternative_names) return null
 
-    const expertValues = {}
+    const expertSeries = []
     const allValues = []
     const sortedElicitations = Object.entries(stepResults.results_by_elicitation)
       .sort((a, b) => Number(a[0]) - Number(b[0]))
 
-    sortedElicitations.forEach(([expertIdx, iterations]) => {
+    sortedElicitations.forEach(([expertIdx, iterations], idx) => {
       const expertName = getSessionLabel(sessions[parseInt(expertIdx)], `Expert ${parseInt(expertIdx) + 1}`)
       const values = iterations.map((row) => Number(row[altIndex])).filter((v) => Number.isFinite(v))
-      expertValues[expertName] = values
+      expertSeries.push({
+        label: `E${idx + 1}`,
+        expertName,
+        values,
+      })
       allValues.push(...values)
     })
 
@@ -759,7 +1241,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     }
 
     const densityByExpert = {}
-    Object.entries(expertValues).forEach(([expertName, values]) => {
+    expertSeries.forEach(({ expertName, values }) => {
       const bins = new Array(numBins).fill(0)
       values.forEach((value) => {
         const clamped = Math.max(0, Math.min(1, value))
@@ -777,18 +1259,24 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     const densityData = Array.from({ length: numBins }, (_, i) => {
       const x = (i + 0.5) / numBins
       const row = { x }
-      Object.keys(densityByExpert).forEach((expertName) => {
+      expertSeries.forEach(({ expertName }) => {
         row[expertName] = densityByExpert[expertName][i] || 0
       })
       return row
     })
 
+    const distributionSummary = formatPerElicitationDistributionSummary(expertSeries)
+    const expertNames = expertSeries.map((entry) => entry.expertName)
+    const consensus = computeConsensusQuantification(densityData, expertNames)
+
     return {
       altName: stepResults.alternative_names[altIndex],
       densityData,
-      expertNames: sortedElicitations.map(([expertIdx]) => (
-        getSessionLabel(sessions[parseInt(expertIdx)], `Expert ${parseInt(expertIdx) + 1}`)
-      )),
+      expertNames,
+      expertSeries,
+      summaryText: distributionSummary.text,
+      summaryLines: distributionSummary.lines,
+      consensus,
     }
   }
 
@@ -863,6 +1351,105 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   })
 
   const weightSpaceSolutionCount = normalizeWeightSamples(weightSpaceData).length
+
+  // UI: toggles for showing per-distribution stats (collapsed by default)
+  const [showDistributionStats, setShowDistributionStats] = useState({})
+
+  const toggleDistributionStats = (key) => {
+    setShowDistributionStats((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const formatDistributionStatValue = (value) => {
+    const numericValue = Number(value)
+    if (!Number.isFinite(numericValue)) return 'n/a'
+    return numericValue.toFixed(4)
+  }
+
+  const handleDownloadDistributionStatsCsv = (expertSeries, title, filenameBase) => {
+    const csvContent = buildDistributionStatsCsv(expertSeries, {
+      title,
+      placeholderMessage: 'Distribution stats are not available yet.',
+    })
+    downloadCSVFile(csvContent, `${sanitizeFilename(filenameBase)}.csv`)
+  }
+
+  const renderDistributionStatsTable = ({ stepPrefix, altIndex, distData, title, filenameBase }) => {
+    const statsKey = `${stepPrefix}_${altIndex}`
+    const isOpen = Boolean(showDistributionStats[statsKey])
+    const statsRows = buildDistributionStatsRows(distData?.expertSeries || [])
+
+    return (
+      <>
+        <HStack justify="space-between" align="center" mb={2} pr={12}>
+          <Text fontWeight="semibold" fontSize="sm">{`Distribution of Values for ${distData?.altName || 'Alternative'}`}</Text>
+          <Button
+            size="sm"
+            variant="link"
+            rightIcon={(
+              <ChevronDownIcon
+                transform={isOpen ? 'rotate(180deg)' : 'rotate(0deg)'}
+                transition="transform 0.2s ease"
+              />
+            )}
+            onClick={() => toggleDistributionStats(statsKey)}
+          >
+            Distribution stats
+          </Button>
+        </HStack>
+        <Collapse in={isOpen} animateOpacity>
+          <Box mb={3} bg="white" borderWidth={1} borderColor="gray.200" borderRadius="md" p={3}>
+            <HStack justify="space-between" mb={3}>
+              <Text fontSize="sm" color="gray.700" fontWeight="medium">
+                Per-expert uncertainty statistics
+              </Text>
+              <Tooltip label="Download stats table as CSV" hasArrow>
+                <IconButton
+                  aria-label={`Download distribution stats table for ${distData?.altName || 'alternative'}`}
+                  icon={<DownloadIcon />}
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleDownloadDistributionStatsCsv(distData?.expertSeries || [], title, filenameBase)}
+                />
+              </Tooltip>
+            </HStack>
+            <TableContainer overflowX="auto">
+              <Table size="sm" variant="simple">
+                <Thead>
+                  <Tr>
+                    <Th>Expert</Th>
+                    {DISTRIBUTION_STAT_COLUMNS.map((column) => (
+                      <Th key={column.key}>
+                        <HStack spacing={1}>
+                          <Text as="span">{column.label}</Text>
+                          <Tooltip label={DISTRIBUTION_STAT_TOOLTIPS[column.key] || column.label} hasArrow>
+                            <Box as="span" display="inline-flex" alignItems="center">
+                              <InfoOutlineIcon color="gray.500" boxSize={3} />
+                            </Box>
+                          </Tooltip>
+                        </HStack>
+                      </Th>
+                    ))}
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {statsRows.map((row) => (
+                    <Tr key={`${row.label}-${row.expertName}`}>
+                      <Td>{`${row.label} (${row.expertName})`}</Td>
+                      {DISTRIBUTION_STAT_COLUMNS.map((column) => (
+                        <Td key={`${row.label}-${row.expertName}-${column.key}`}>
+                          {formatDistributionStatValue(row[column.key])}
+                        </Td>
+                      ))}
+                    </Tr>
+                  ))}
+                </Tbody>
+              </Table>
+            </TableContainer>
+          </Box>
+        </Collapse>
+      </>
+    )
+  }
 
   const getConsistencyPlotData = () => {
     const sessionDoc = sessions.find((session) => session?._id === selectedWeightSession)
@@ -1017,9 +1604,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     image.src = svgUrl
   })
 
-  const createPolylinePath = (points) => points.length > 0
-    ? `M ${points.map((point) => `${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' L ')}`
-    : ''
+  const createPolylinePath = (points) => {
+    if (!Array.isArray(points) || points.length === 0) return ''
+    return `M ${points.map((point) => `${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' L ')}`
+  }
 
   const createClosedAreaPath = (points, baselineY) => {
     if (points.length === 0) return ''
@@ -1056,7 +1644,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     const declaredPoints = data.filter((point) => point?.type === 'declared')
     const computedPoints = data.filter((point) => point?.type === 'computed')
 
-    return `
+    const svgMarkup = `
       <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
         <rect width="100%" height="100%" fill="#ffffff" />
         <text x="${left}" y="26" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#1f2937">${escapeSvgText(title)}</text>
@@ -1099,17 +1687,33 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     `.replace(/\n\s+/g, '\n').trim()
   }
 
-  const buildDistributionPlotSvg = ({ title, altName, densityData, expertNames }) => {
+  const buildDistributionPlotSvg = ({ title, altName, densityData, expertNames, summaryLines = [] }) => {
     if (!Array.isArray(densityData) || densityData.length === 0 || !Array.isArray(expertNames) || expertNames.length === 0) return null
 
     const width = 980
     const top = 82
     const right = 30
-    const bottom = 55
+    const summaryLineHeight = 14
+    const normalizedSummaryLines = Array.isArray(summaryLines)
+      ? summaryLines.filter((line) => typeof line === 'string')
+      : []
+    const printableSummaryLines = normalizedSummaryLines.length > 0
+      ? ['Distribution Summary (per elicitation)', '', ...normalizedSummaryLines]
+      : []
+
+    const summaryBoxPadding = 12
+    const summaryBoxHeight = printableSummaryLines.length > 0
+      ? Math.max(62, (printableSummaryLines.length * summaryLineHeight) + (summaryBoxPadding * 2))
+      : 0
+
+    const bottom = printableSummaryLines.length > 0
+      ? (summaryBoxHeight + 70)
+      : 55
     const left = 70
     const plotWidth = width - left - right
     const plotHeight = 250
     const height = top + plotHeight + bottom
+    const summaryBoxY = top + plotHeight + 44
 
     const maxDensity = Math.max(0.001, ...densityData.flatMap((row) => expertNames.map((name) => Number(row?.[name]) || 0)))
     const scaleX = (value) => left + Math.max(0, Math.min(1, value)) * plotWidth
@@ -1149,7 +1753,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
         <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" stroke="#9ca3af" stroke-width="1.2" />
         <line x1="${left}" y1="${top + plotHeight}" x2="${left + plotWidth}" y2="${top + plotHeight}" stroke="#9ca3af" stroke-width="1.2" />
-        <text x="${left + plotWidth / 2}" y="${height - 16}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#4b5563">Value</text>
+        <text x="${left + plotWidth / 2}" y="${top + plotHeight + 36}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#4b5563">Value</text>
 
         ${fillPolygons.map((entry, idx) => `
           <polygon points="${entry.polygonPoints}" fill="${entry.color}" fill-opacity="0.22" stroke="none" />
@@ -1160,8 +1764,31 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         ${series.map((entry) => `
           <path d="${createPolylinePath(entry.points)}" fill="none" stroke="${entry.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
         `).join('')}
+
+        ${printableSummaryLines.length > 0 ? `
+          <rect
+            x="${left}"
+            y="${summaryBoxY}"
+            width="${plotWidth}"
+            height="${summaryBoxHeight}"
+            rx="6"
+            fill="#f8fafc"
+            stroke="#e2e8f0"
+          />
+          ${printableSummaryLines.map((line, idx) => {
+    const y = summaryBoxY + summaryBoxPadding + 12 + (idx * summaryLineHeight)
+    const fontWeight = idx === 0 ? '700' : '400'
+    return `<text x="${left + summaryBoxPadding}" y="${y}" font-family="Arial, sans-serif" font-size="11" font-weight="${fontWeight}" fill="#334155">${escapeSvgText(line)}</text>`
+  }).join('')}
+        ` : ''}
       </svg>
     `.replace(/\n\s+/g, '\n').trim()
+
+    return {
+      svgMarkup,
+      width,
+      height,
+    }
   }
 
   const handleDownloadChartPng = async (exportId, filenameBase) => {
@@ -1301,7 +1928,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   }
 
   const handleExportFinalResults = async () => {
-    if (!exportIncludeResultsCsv && !exportIncludeSimulationCsvs && !exportIncludePlotImages && !exportIncludeFullData) {
+    if (!exportIncludeResultsCsv && !exportIncludeSimulationCsvs && !exportIncludePlotImages && !exportIncludeStep2ConsensusQuantificationCsv && !exportIncludeStep5UncertaintyStatsCsv && !exportIncludeFullData) {
       toast({
         title: 'Choose at least one export item',
         status: 'warning',
@@ -1318,7 +1945,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       if (exportIncludeResultsCsv) {
         const resultsCsv = buildRankProbabilityCsv(step6Results)
         if (resultsCsv) {
-          exportZip.file('results/final_results_rank_probabilities.csv', resultsCsv)
+          exportZip.file('results/step5_final_results_rank_probabilities.csv', resultsCsv)
           exportedArtifacts += 1
         }
       }
@@ -1326,15 +1953,53 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       if (exportIncludeSimulationCsvs) {
         const simulationExports = [
           ...buildSimulationCsvExports(2, step2Results),
-          ...buildSimulationCsvExports(3, step3Results),
           ...buildSimulationCsvExports(4, step4Results),
           ...buildSimulationCsvExports(5, step5Results),
           ...buildSimulationCsvExports(6, step6Results),
         ]
         simulationExports.forEach((entry) => {
-          exportZip.file(`results/simulation_csvs/${sanitizeFilename(entry.filenameBase)}.csv`, entry.csvText)
+          const workflowNamedBase = toWorkflowStepFilenameBase(entry.filenameBase)
+          exportZip.file(`results/simulation_csvs/${sanitizeFilename(workflowNamedBase)}.csv`, entry.csvText)
         })
         if (simulationExports.length > 0) {
+          exportedArtifacts += 1
+        }
+      }
+
+      if (exportIncludeStep2ConsensusQuantificationCsv || exportIncludeStep5UncertaintyStatsCsv) {
+        if (exportIncludeStep2ConsensusQuantificationCsv) {
+          const step2ConsensusRows = (step2Results?.alternative_names || []).map((altName, altIndex) => {
+            const distData = getDistributionDataForAlternative(step2Results, altIndex)
+            if (!distData?.consensus) return null
+            return {
+              alternative: altName,
+              ...distData.consensus,
+            }
+          }).filter(Boolean)
+
+          const step2StatsCsv = buildConsensusQuantificationCsv(step2ConsensusRows, {
+            title: 'Step 4 consensus analysis quantification',
+            placeholderMessage: 'Consensus quantification is not available yet.',
+          })
+          exportZip.file('results/step4_consensus_analysis_quantification.csv', step2StatsCsv)
+          exportedArtifacts += 1
+        }
+
+        if (exportIncludeStep5UncertaintyStatsCsv) {
+          const step5Stats = (step5Results?.alternative_names || []).flatMap((altName, altIndex) => {
+            const distData = getDistributionDataForAlternative(step5Results, altIndex)
+            if (!distData) return []
+            return distData.expertSeries.map((entry) => ({
+              label: `${altName} - ${entry.label}`,
+              expertName: entry.expertName,
+              values: entry.values,
+            }))
+          })
+          const step5StatsCsv = buildDistributionStatsCsv(step5Stats, {
+            title: 'Step 3 uncertainty analysis stats',
+            placeholderMessage: 'Uncertainty stats are not available yet.',
+          })
+          exportZip.file('results/step3_uncertainty_analysis_stats.csv', step5StatsCsv)
           exportedArtifacts += 1
         }
       }
@@ -1346,14 +2011,14 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         })
         if (finalHeatmapSvg) {
           const { width, height } = getRankingHeatmapDimensions(step6Results)
-          exportZip.file('results/final_ranking_heatmap.svg', finalHeatmapSvg)
+          exportZip.file('results/step5_final_results_ranking_heatmap.svg', finalHeatmapSvg)
           try {
             const finalHeatmapPng = await renderSvgMarkupToPngBlob(
               finalHeatmapSvg,
               width * PNG_SCALE_FACTOR,
               height * PNG_SCALE_FACTOR
             )
-            exportZip.file('results/final_ranking_heatmap.png', finalHeatmapPng)
+            exportZip.file('results/step5_final_results_ranking_heatmap.png', finalHeatmapPng)
           } catch (error) {
             console.error('Unable to export final ranking heatmap as PNG', error)
           }
@@ -1418,20 +2083,20 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         const appendDistributionTargets = (stepResults, stepPrefix) => {
           if (!stepResults?.alternative_names) return
           stepResults.alternative_names.forEach((altName, altIndex) => {
-            const distData = getDistributionDataForAlternative(stepResults, altIndex)
-            if (!distData) return
-            const svgMarkup = buildDistributionPlotSvg({
-              title: `${stepPrefix === 'step2' ? 'Distribution of Values' : 'Distribution of Values'}`,
-              altName,
-              densityData: distData.densityData,
-              expertNames: distData.expertNames,
-            })
+            const container = document.querySelector(`[data-export-id="${stepPrefix}_distribution_${altIndex}"]`)
+            const svgElement = getPlotSvgElement(container)
+            const svgMarkup = buildSvgMarkupFromElement(svgElement)
             if (!svgMarkup) return
+
+            const bounds = svgElement.getBoundingClientRect()
+            const width = Math.max(1, Math.round(bounds.width || DEFAULT_PNG_WIDTH))
+            const height = Math.max(1, Math.round(bounds.height || DEFAULT_PNG_HEIGHT))
+
             imageTargets.push({
               filenameBase: `${stepPrefix}_distribution_${altIndex}`,
               svgMarkup,
-              width: 980,
-              height: 387,
+              width,
+              height,
             })
           })
         }
@@ -1440,7 +2105,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         appendDistributionTargets(step5Results, 'step5')
 
         const heatmapTargets = buildPipelineHeatmapExports({
-          step3Results,
           step4Results,
           step6Results,
         })
@@ -1457,7 +2121,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         }
 
         for (const image of imageTargets) {
-          exportZip.file(`images/${sanitizeFilename(image.filenameBase)}.svg`, image.svgMarkup)
+          const workflowNamedBase = toWorkflowStepFilenameBase(image.filenameBase)
+          exportZip.file(`images/${sanitizeFilename(workflowNamedBase)}.svg`, image.svgMarkup)
 
           try {
             const pngBlob = await renderSvgMarkupToPngBlob(
@@ -1465,7 +2130,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
               image.width * PNG_SCALE_FACTOR,
               image.height * PNG_SCALE_FACTOR
             )
-            exportZip.file(`images/${sanitizeFilename(image.filenameBase)}.png`, pngBlob)
+            exportZip.file(`images/${sanitizeFilename(workflowNamedBase)}.png`, pngBlob)
           } catch (error) {
             console.error(`Unable to export ${image.filenameBase} as PNG`, error)
           }
@@ -1538,7 +2203,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
             </Link>
           </Text>
           <Text color="gray.700">
-            The workflow is designed to examine all aspects of the framework, including consensus among multiple opinions, dominance patterns,
+            The workflow is designed to examine all aspects of the framework, including consensus among multiple opinions,
             compensatory dynamics for selecting the aggregation model, overall uncertainty assessment, and the final results.
             The UP-MAVT code implements two Monte Carlo approaches with distinct roles: Strict Monte Carlo (SMC) and Non-Strict Monte Carlo (NSMC).
             {' '}SMC is used to produce per-decision-maker results, generating a value distribution for each alternative and for each decision maker; these outputs support the analysis phase.
@@ -1669,22 +2334,19 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           <Tabs index={activeStep} onChange={setActiveStep} variant="soft-rounded" colorScheme="blue">
             <TabList overflowX="auto" pb={2}>
               <Tab isDisabled={isStepDisabled(0)}>
-                Step 1: Weights {weightsComputed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 1: Finalize Elicited data {weightsComputed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
               <Tab isDisabled={isStepDisabled(1)}>
-                Step 2: Consensus {getStepStatus(2)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 2: Choose Aggregation Method {getStepStatus(4)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
               <Tab isDisabled={isStepDisabled(2)}>
-                Step 3: Dominance {getStepStatus(3)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 3: Uncertainty Analysis {getStepStatus(5)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
               <Tab isDisabled={isStepDisabled(3)}>
-                Step 4: Compensation {getStepStatus(4)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 4: Consensus Analysis {getStepStatus(2)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
               <Tab isDisabled={isStepDisabled(4)}>
-                Step 5: Uncertainty {getStepStatus(5)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
-              </Tab>
-              <Tab isDisabled={isStepDisabled(5)}>
-                Step 6: Results {getStepStatus(6)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 5: Final Results {getStepStatus(6)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
             </TabList>
 
@@ -2070,7 +2732,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   }
                   statusInfo={null}
                 >
-                  {weightsComputed && (
+                  <VStack spacing={6} align="stretch">
+                    {weightsComputed && (
                     <VStack spacing={3} align="stretch">
                       <HStack spacing={3}>
                         <Text fontWeight="bold">View weight space for:</Text>
@@ -2101,408 +2764,590 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                           .filter((name) => typeof name === 'string' && name.length > 0)}
                       />
 
-                      <Text mt={4}>Declared vs Computed Ratios</Text>
-                      {step1ConsistencyData.length > 0 ? (
-                        <Box borderWidth={1} borderRadius="md" p={3} bg="white" position="relative" data-export-id="step1_declared_computed_ratios">
-                          <Tooltip label="Download image as PNG" hasArrow>
-                            <IconButton
-                              aria-label="Download declared vs computed ratios image"
-                              icon={<DownloadIcon />}
-                              size="sm"
-                              variant="ghost"
-                              position="absolute"
-                              top={2}
-                              right={2}
-                              zIndex={2}
-                              onClick={() => handleDownloadChartPng('step1_declared_computed_ratios', 'declared_computed_ratios')}
-                            />
-                          </Tooltip>
-                          <ResponsiveContainer width="100%" height={Math.max(300, step1ConsistencyComparisons.length * 28 + 100)}>
-                            <ScatterChart
-                              margin={{ top: 35, right: 20, left: 10, bottom: 5 }}
-                            >
-                              <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
-                              <XAxis 
-                                type="number" 
-                                dataKey="value"
-                                name="Ratio"
-                                label={{ value: 'Ratio Value', position: 'insideBottom', offset: -3, fontSize: 11 }}
-                                tick={{ fontSize: 10 }}
+                      <Button
+                        mt={4}
+                        variant="ghost"
+                        justifyContent="flex-start"
+                        leftIcon={showDeclaredVsComputed ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                        onClick={() => setShowDeclaredVsComputed((prev) => !prev)}
+                      >
+                        Declared vs Computed Ratios
+                      </Button>
+                      <Collapse in={showDeclaredVsComputed} animateOpacity>
+                        {step1ConsistencyData.length > 0 ? (
+                          <Box borderWidth={1} borderRadius="md" p={3} bg="white" position="relative" data-export-id="step1_declared_computed_ratios">
+                            <Tooltip label="Download image as PNG" hasArrow>
+                              <IconButton
+                                aria-label="Download declared vs computed ratios image"
+                                icon={<DownloadIcon />}
+                                size="sm"
+                                variant="ghost"
+                                position="absolute"
+                                top={2}
+                                right={2}
+                                zIndex={2}
+                                onClick={() => handleDownloadChartPng('step1_declared_computed_ratios', 'declared_computed_ratios')}
                               />
-                              <YAxis
-                                type="number"
-                                dataKey="yPlot"
-                                name="Comparison"
-                                width={240}
-                                tick={{ fontSize: 10 }}
-                                interval={0}
-                                domain={[
-                                  -0.5,
-                                  Math.max(0, step1ConsistencyComparisons.length - 1) + 0.5,
-                                ]}
-                                ticks={step1ConsistencyComparisons.map((_, idx) => idx)}
-                                tickFormatter={(value) => step1ConsistencyComparisons[Math.round(value)] || ''}
-                              />
-                              <RechartsTooltip
-                                cursor={{ strokeDasharray: '3 3' }}
-                                wrapperStyle={{ pointerEvents: 'auto' }}
-                                isAnimationActive={false}
-                                content={({ active, payload }) => {
-                                  if (!active || !payload || payload.length === 0) return null
-                                  const data = payload[0].payload
-                                  return (
-                                    <Box bg="white" p={2} borderWidth={1} borderRadius="md" boxShadow="md">
-                                      <Text fontSize="xs" fontWeight="bold" mb={1}>{data.comparison}</Text>
-                                      <Text fontSize="xs" color={payload[0].color}>
-                                        {payload[0].name}: {Number(data.value).toFixed(4)}
-                                      </Text>
-                                      {data.type === 'computed' && Number.isInteger(data.solutionIndex) && (
-                                        <Text fontSize="xs" color="gray.600">
-                                          Solution #{data.solutionIndex + 1}
+                            </Tooltip>
+                            <ResponsiveContainer width="100%" height={Math.max(300, step1ConsistencyComparisons.length * 28 + 100)}>
+                              <ScatterChart
+                                margin={{ top: 35, right: 20, left: 10, bottom: 5 }}
+                              >
+                                <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
+                                <XAxis 
+                                  type="number" 
+                                  dataKey="value"
+                                  name="Ratio"
+                                  label={{ value: 'Ratio Value', position: 'insideBottom', offset: -3, fontSize: 11 }}
+                                  tick={{ fontSize: 10 }}
+                                />
+                                <YAxis
+                                  type="number"
+                                  dataKey="yPlot"
+                                  name="Comparison"
+                                  width={240}
+                                  tick={{ fontSize: 10 }}
+                                  interval={0}
+                                  domain={[
+                                    -0.5,
+                                    Math.max(0, step1ConsistencyComparisons.length - 1) + 0.5,
+                                  ]}
+                                  ticks={step1ConsistencyComparisons.map((_, idx) => idx)}
+                                  tickFormatter={(value) => step1ConsistencyComparisons[Math.round(value)] || ''}
+                                />
+                                <RechartsTooltip
+                                  cursor={{ strokeDasharray: '3 3' }}
+                                  wrapperStyle={{ pointerEvents: 'auto' }}
+                                  isAnimationActive={false}
+                                  content={({ active, payload }) => {
+                                    if (!active || !payload || payload.length === 0) return null
+                                    const data = payload[0].payload
+                                    return (
+                                      <Box bg="white" p={2} borderWidth={1} borderRadius="md" boxShadow="md">
+                                        <Text fontSize="xs" fontWeight="bold" mb={1}>{data.comparison}</Text>
+                                        <Text fontSize="xs" color={payload[0].color}>
+                                          {payload[0].name}: {Number(data.value).toFixed(4)}
                                         </Text>
-                                      )}
-                                    </Box>
-                                  )
-                                }}
-                              />
-                              <RechartsLegend 
-                                verticalAlign="top"
-                                height={30}
-                                iconSize={10}
-                              />
-                              <Scatter 
-                                name="Computed (w_adj / w_ref)" 
-                                data={step1ConsistencyData.filter(d => d.type === 'computed')}
-                                fill="#48BB78"
-                                fillOpacity={0.6}
-                                shape="circle"
-                              />
-                              <Scatter 
-                                name="Declared (1 / vf(value))" 
-                                data={step1ConsistencyData.filter(d => d.type === 'declared')}
-                                fill="#DD6B20"
-                                shape={(props) => {
-                                  const { cx, cy } = props;
-                                  const size = 6;
-                                  return (
-                                    <polygon
-                                      points={`${cx},${cy-size} ${cx+size},${cy} ${cx},${cy+size} ${cx-size},${cy}`}
-                                      fill="#DD6B20"
-                                      stroke="#DD6B20"
-                                      strokeWidth={1}
-                                    />
-                                  );
-                                }}
-                              />
-                            </ScatterChart>
-                          </ResponsiveContainer>
+                                        {data.type === 'computed' && Number.isInteger(data.solutionIndex) && (
+                                          <Text fontSize="xs" color="gray.600">
+                                            Solution #{data.solutionIndex + 1}
+                                          </Text>
+                                        )}
+                                      </Box>
+                                    )
+                                  }}
+                                />
+                                <RechartsLegend 
+                                  verticalAlign="top"
+                                  height={30}
+                                  iconSize={10}
+                                />
+                                <Scatter 
+                                  name="Computed (w_adj / w_ref)" 
+                                  data={step1ConsistencyData.filter(d => d.type === 'computed')}
+                                  fill="#48BB78"
+                                  fillOpacity={0.6}
+                                  shape="circle"
+                                />
+                                <Scatter 
+                                  name="Declared (1 / vf(value))" 
+                                  data={step1ConsistencyData.filter(d => d.type === 'declared')}
+                                  fill="#DD6B20"
+                                  shape={(props) => {
+                                    const { cx, cy } = props
+                                    const size = 6
+                                    return (
+                                      <polygon
+                                        points={`${cx},${cy-size} ${cx+size},${cy} ${cx},${cy+size} ${cx-size},${cy}`}
+                                        fill="#DD6B20"
+                                        stroke="#DD6B20"
+                                        strokeWidth={1}
+                                      />
+                                    )
+                                  }}
+                                />
+                              </ScatterChart>
+                            </ResponsiveContainer>
+                          </Box>
+                        ) : (
+                          <Box bg="gray.100" h={200} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
+                            <Text color="gray.500">No comparable declared/computed ratio data available for this elicitation.</Text>
+                          </Box>
+                        )}
+                      </Collapse>
+                    </VStack>
+                    )}
+
+                    <VStack align="stretch" spacing={4}>
+                      <VStack spacing={1} align="stretch">
+                        <Heading as="h3" size="md">
+                          Confidence Review
+                        </Heading>
+                        <Box color="gray.600">
+                          Review the self-declared confidence reported by each expert and apply practitioner-side corrections for underestimation or overestimation. Adjustments are applied hierarchically, the resulting confidence values are clipped to the 0-4 range, and these corrections are not shown in the expert-facing interface.
                         </Box>
+                      </VStack>
+
+                      {selectedSessions.length > 0 ? (
+                        <VStack align="stretch" spacing={4}>
+                          {selectedSessions.map((sessionId) => {
+                            const session = sessions.find((entry) => entry._id === sessionId)
+                            if (!session) return null
+
+                            const practitionerSettings = normalizePractitionerSettings(
+                              criteria,
+                              practitionerSettingsById[sessionId] || session.practitioner_settings
+                            )
+                            const adjustments = practitionerSettings.confidence_adjustments
+                            const qiCriteriaEntries = Object.entries(adjustments.qi_criteria)
+                            const vfCriteriaEntries = Object.entries(adjustments.vf_criteria)
+                            const overallDeclaredAverage = averageConfidence(getSessionDeclaredConfidenceValues(session, criteria, 'all'))
+                            const qiDeclaredAverage = averageConfidence(getSessionDeclaredConfidenceValues(session, criteria, 'qi'))
+                            const vfDeclaredAverage = averageConfidence(getSessionDeclaredConfidenceValues(session, criteria, 'vf'))
+                            const showQiDetails = Boolean(expandedConfidenceSections[sessionId]?.qi)
+                            const showVfDetails = Boolean(expandedConfidenceSections[sessionId]?.vf)
+                            const saveState = practitionerSettingsSaveStateById[sessionId]
+                            const expertDescription = String(practitionerSettings.notes || '').trim()
+
+                            return (
+                              <Box key={sessionId} borderWidth={1} borderRadius="md" p={3} bg="white">
+                                <VStack align="stretch" spacing={3}>
+                                  <HStack justify="space-between" align="center" spacing={3}>
+                                    <Text fontWeight="semibold">
+                                      {getSessionLabel(session, sessionId)}
+                                      {expertDescription ? (
+                                        <Text as="span" fontWeight="normal" color="gray.600">
+                                          {' - '}{expertDescription}
+                                        </Text>
+                                      ) : null}
+                                    </Text>
+                                    <HStack spacing={2}>
+                                      {Boolean(savingPractitionerSettingsById[sessionId]) && <Spinner size="sm" />}
+                                      <Text fontSize="xs" color="gray.500">
+                                        {saveState === 'saving'
+                                          ? 'Saving changes...'
+                                          : saveState === 'error'
+                                              ? 'Save failed'
+                                              : ''}
+                                      </Text>
+                                    </HStack>
+                                  </HStack>
+
+                                  <VStack align="stretch" spacing={3}>
+                                    <SimpleGrid columns={{ base: 1, lg: 3 }} spacing={3} alignItems="center">
+                                      <Box>
+                                        <Text fontSize="sm" fontWeight="semibold">Overall adjustment</Text>
+                                      </Box>
+                                      <Text fontSize="sm" color="gray.600">
+                                        Declared {formatConfidenceValue(overallDeclaredAverage)} / 4 {'→'} Effective {formatConfidenceValue(
+                                          applyConfidenceAdjustment(overallDeclaredAverage, adjustments.overall)
+                                        )} / 4
+                                      </Text>
+                                      <HStack justify={{ base: 'flex-start', lg: 'flex-end' }} spacing={2}>
+                                        <Text fontSize="xs" color="gray.500" minW="52px">Adjustment</Text>
+                                        <NumberInput
+                                          size="sm"
+                                          step={0.1}
+                                          min={-4}
+                                          max={4}
+                                          precision={1}
+                                          value={adjustments.overall.toFixed(1)}
+                                          onChange={(_, valueAsNumber) => {
+                                            if (!Number.isFinite(valueAsNumber)) return
+                                            handlePractitionerSettingsChange(sessionId, (current) => ({
+                                              ...current,
+                                              confidence_adjustments: {
+                                                ...current.confidence_adjustments,
+                                                overall: normalizeConfidenceAdjustment(
+                                                  valueAsNumber,
+                                                  current.confidence_adjustments.overall
+                                                ),
+                                              },
+                                            }))
+                                          }}
+                                          maxW="120px"
+                                        >
+                                          <NumberInputField />
+                                          <NumberInputStepper>
+                                            <NumberIncrementStepper />
+                                            <NumberDecrementStepper />
+                                          </NumberInputStepper>
+                                        </NumberInput>
+                                        <Text fontSize="xs" color="gray.500" minW="40px" textAlign="right">
+                                          {formatSignedAdjustment(adjustments.overall)}
+                                        </Text>
+                                      </HStack>
+                                    </SimpleGrid>
+
+                                    <Divider />
+
+                                    <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
+                                      <VStack align="stretch" spacing={2}>
+                                        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3} alignItems="center">
+                                          <Box>
+                                            <Text fontSize="sm" fontWeight="semibold">Qualitative indicators (QI)</Text>
+                                          </Box>
+                                          <Text fontSize="sm" color="gray.600">
+                                            Declared {formatConfidenceValue(qiDeclaredAverage)} / 4 {'→'} Effective {formatConfidenceValue(
+                                              applyConfidenceAdjustment(qiDeclaredAverage, adjustments.overall, adjustments.qi)
+                                            )} / 4
+                                          </Text>
+                                          <HStack justify={{ base: 'flex-start', md: 'flex-end' }} spacing={2}>
+                                            <Text fontSize="xs" color="gray.500" minW="52px">Adjustment</Text>
+                                            <NumberInput
+                                              size="sm"
+                                              step={0.1}
+                                              min={-4}
+                                              max={4}
+                                              precision={1}
+                                              value={adjustments.qi.toFixed(1)}
+                                              onChange={(_, valueAsNumber) => {
+                                                if (!Number.isFinite(valueAsNumber)) return
+                                                handlePractitionerSettingsChange(sessionId, (current) => ({
+                                                  ...current,
+                                                  confidence_adjustments: {
+                                                    ...current.confidence_adjustments,
+                                                    qi: normalizeConfidenceAdjustment(
+                                                      valueAsNumber,
+                                                      current.confidence_adjustments.qi
+                                                    ),
+                                                  },
+                                                }))
+                                              }}
+                                              maxW="120px"
+                                            >
+                                              <NumberInputField />
+                                              <NumberInputStepper>
+                                                <NumberIncrementStepper />
+                                                <NumberDecrementStepper />
+                                              </NumberInputStepper>
+                                            </NumberInput>
+                                            <Text fontSize="xs" color="gray.500" minW="40px" textAlign="right">
+                                              {formatSignedAdjustment(adjustments.qi)}
+                                            </Text>
+                                          </HStack>
+                                        </SimpleGrid>
+
+                                        {qiCriteriaEntries.length > 0 && (
+                                          <>
+                                            <Button
+                                              size="sm"
+                                              variant="ghost"
+                                              justifyContent="flex-start"
+                                              leftIcon={showQiDetails ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                                              onClick={() => handleToggleConfidenceSection(sessionId, 'qi')}
+                                            >
+                                              Refine QI adjustments by criterion
+                                            </Button>
+                                            <Collapse in={showQiDetails} animateOpacity>
+                                              <VStack align="stretch" spacing={2} pl={{ base: 0, md: 4 }}>
+                                                {qiCriteriaEntries.map(([criterionName, value]) => {
+                                                  const declaredValues = getQualitativeDeclaredConfidences(session, criterionName)
+                                                  const declaredAverage = averageConfidence(declaredValues)
+                                                  const effectiveAverage = applyConfidenceAdjustment(
+                                                    declaredAverage,
+                                                    adjustments.overall,
+                                                    adjustments.qi,
+                                                    value
+                                                  )
+                                                  return (
+                                                    <SimpleGrid key={criterionName} columns={{ base: 1, md: 3 }} spacing={3} alignItems="center">
+                                                      <Box minW={0}>
+                                                        <Text fontSize="sm" noOfLines={1}>{criterionName}</Text>
+                                                      </Box>
+                                                      <Text fontSize="sm" color="gray.600">
+                                                        {formatConfidenceValue(declaredAverage)} / 4 {'→'} {formatConfidenceValue(effectiveAverage)} / 4
+                                                      </Text>
+                                                      <HStack justify={{ base: 'flex-start', md: 'flex-end' }} spacing={2}>
+                                                        <Text fontSize="xs" color="gray.500" minW="52px">Adjustment</Text>
+                                                        <NumberInput
+                                                          size="sm"
+                                                          step={0.1}
+                                                          min={-4}
+                                                          max={4}
+                                                          precision={1}
+                                                          value={Number(value).toFixed(1)}
+                                                          onChange={(_, valueAsNumber) => {
+                                                            if (!Number.isFinite(valueAsNumber)) return
+                                                            handlePractitionerSettingsChange(sessionId, (current) => ({
+                                                              ...current,
+                                                              confidence_adjustments: {
+                                                                ...current.confidence_adjustments,
+                                                                qi_criteria: {
+                                                                  ...current.confidence_adjustments.qi_criteria,
+                                                                  [criterionName]: normalizeConfidenceAdjustment(
+                                                                    valueAsNumber,
+                                                                    current.confidence_adjustments.qi_criteria[criterionName]
+                                                                  ),
+                                                                },
+                                                              },
+                                                            }))
+                                                          }}
+                                                          maxW="120px"
+                                                        >
+                                                          <NumberInputField />
+                                                          <NumberInputStepper>
+                                                            <NumberIncrementStepper />
+                                                            <NumberDecrementStepper />
+                                                          </NumberInputStepper>
+                                                        </NumberInput>
+                                                        <Text fontSize="xs" color="gray.500" minW="40px" textAlign="right">
+                                                          {formatSignedAdjustment(value)}
+                                                        </Text>
+                                                      </HStack>
+                                                    </SimpleGrid>
+                                                  )
+                                                })}
+                                              </VStack>
+                                            </Collapse>
+                                          </>
+                                        )}
+                                      </VStack>
+
+                                      <VStack align="stretch" spacing={2}>
+                                        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3} alignItems="center">
+                                          <Box>
+                                            <Text fontSize="sm" fontWeight="semibold">Value functions (VF)</Text>
+                                          </Box>
+                                          <Text fontSize="sm" color="gray.600">
+                                            Declared {formatConfidenceValue(vfDeclaredAverage)} / 4 {'→'} Effective {formatConfidenceValue(
+                                              applyConfidenceAdjustment(vfDeclaredAverage, adjustments.overall, adjustments.vf)
+                                            )} / 4
+                                          </Text>
+                                          <HStack justify={{ base: 'flex-start', md: 'flex-end' }} spacing={2}>
+                                            <Text fontSize="xs" color="gray.500" minW="52px">Adjustment</Text>
+                                            <NumberInput
+                                              size="sm"
+                                              step={0.1}
+                                              min={-4}
+                                              max={4}
+                                              precision={1}
+                                              value={adjustments.vf.toFixed(1)}
+                                              onChange={(_, valueAsNumber) => {
+                                                if (!Number.isFinite(valueAsNumber)) return
+                                                handlePractitionerSettingsChange(sessionId, (current) => ({
+                                                  ...current,
+                                                  confidence_adjustments: {
+                                                    ...current.confidence_adjustments,
+                                                    vf: normalizeConfidenceAdjustment(
+                                                      valueAsNumber,
+                                                      current.confidence_adjustments.vf
+                                                    ),
+                                                  },
+                                                }))
+                                              }}
+                                              maxW="120px"
+                                            >
+                                              <NumberInputField />
+                                              <NumberInputStepper>
+                                                <NumberIncrementStepper />
+                                                <NumberDecrementStepper />
+                                              </NumberInputStepper>
+                                            </NumberInput>
+                                            <Text fontSize="xs" color="gray.500" minW="40px" textAlign="right">
+                                              {formatSignedAdjustment(adjustments.vf)}
+                                            </Text>
+                                          </HStack>
+                                        </SimpleGrid>
+
+                                        {vfCriteriaEntries.length > 0 && (
+                                          <>
+                                            <Button
+                                              size="sm"
+                                              variant="ghost"
+                                              justifyContent="flex-start"
+                                              leftIcon={showVfDetails ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                                              onClick={() => handleToggleConfidenceSection(sessionId, 'vf')}
+                                            >
+                                              Refine VF adjustments by criterion
+                                            </Button>
+                                            <Collapse in={showVfDetails} animateOpacity>
+                                              <VStack align="stretch" spacing={2} pl={{ base: 0, md: 4 }}>
+                                                {vfCriteriaEntries.map(([criterionName, value]) => {
+                                                  const declaredConfidence = getValueFunctionDeclaredConfidence(session, criterionName)
+                                                  const effectiveConfidence = applyConfidenceAdjustment(
+                                                    declaredConfidence,
+                                                    adjustments.overall,
+                                                    adjustments.vf,
+                                                    value
+                                                  )
+                                                  return (
+                                                    <SimpleGrid key={criterionName} columns={{ base: 1, md: 3 }} spacing={3} alignItems="center">
+                                                      <Box minW={0}>
+                                                        <Text fontSize="sm" noOfLines={1}>{criterionName}</Text>
+                                                      </Box>
+                                                      <Text fontSize="sm" color="gray.600">
+                                                        {formatConfidenceValue(declaredConfidence)} / 4 {'→'} {formatConfidenceValue(effectiveConfidence)} / 4
+                                                      </Text>
+                                                      <HStack justify={{ base: 'flex-start', md: 'flex-end' }} spacing={2}>
+                                                        <Text fontSize="xs" color="gray.500" minW="52px">Adjustment</Text>
+                                                        <NumberInput
+                                                          size="sm"
+                                                          step={0.1}
+                                                          min={-4}
+                                                          max={4}
+                                                          precision={1}
+                                                          value={Number(value).toFixed(1)}
+                                                          onChange={(_, valueAsNumber) => {
+                                                            if (!Number.isFinite(valueAsNumber)) return
+                                                            handlePractitionerSettingsChange(sessionId, (current) => ({
+                                                              ...current,
+                                                              confidence_adjustments: {
+                                                                ...current.confidence_adjustments,
+                                                                vf_criteria: {
+                                                                  ...current.confidence_adjustments.vf_criteria,
+                                                                  [criterionName]: normalizeConfidenceAdjustment(
+                                                                    valueAsNumber,
+                                                                    current.confidence_adjustments.vf_criteria[criterionName]
+                                                                  ),
+                                                                },
+                                                              },
+                                                            }))
+                                                          }}
+                                                          maxW="120px"
+                                                        >
+                                                          <NumberInputField />
+                                                          <NumberInputStepper>
+                                                            <NumberIncrementStepper />
+                                                            <NumberDecrementStepper />
+                                                          </NumberInputStepper>
+                                                        </NumberInput>
+                                                        <Text fontSize="xs" color="gray.500" minW="40px" textAlign="right">
+                                                          {formatSignedAdjustment(value)}
+                                                        </Text>
+                                                      </HStack>
+                                                    </SimpleGrid>
+                                                  )
+                                                })}
+                                              </VStack>
+                                            </Collapse>
+                                          </>
+                                        )}
+                                      </VStack>
+                                    </SimpleGrid>
+                                  </VStack>
+                                </VStack>
+                              </Box>
+                            )
+                          })}
+                        </VStack>
                       ) : (
-                        <Box bg="gray.100" h={200} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                          <Text color="gray.500">No comparable declared/computed ratio data available for this elicitation.</Text>
-                        </Box>
+                        <Text fontSize="sm" color="gray.500">
+                          Select at least one completed and locked session to edit confidence adjustments here.
+                        </Text>
                       )}
                     </VStack>
-                  )}
+                  </VStack>
                 </StepSection>
               </TabPanel>
 
-              {/* Step 2: Consensus (SMC, strict) */}
+              {/* Step 2: Aggregation */}
               <TabPanel>
                 <StepSection
-                  title="Consensus Analysis"
-                  description="The output of the SMC can be used to assess the consensus or agreement among experts. If the distributions largely overlap, consensus can be considered reached. Otherwise, it is important to reflect on the implications of aggregating divergent opinions."
-                  onRun={() => handleRunStep(2, 'Consensus')}
+                  title="Aggregation Analysis"
+                  description="Select one or more aggregation methods and run NSMC to compare ranking behavior. For methods with α, α = 0 is fully compensatory; moving α toward 1 penalizes poor criterion performance more, while moving α toward -1 rewards strong criterion performance more."
+                  onRun={() => handleRunStep(4, 'Aggregation')}
                   onStop={handleStopExecution}
-                  isRunning={runningStep === 'Consensus'}
-                  isDisabled={isButtonDisabled(1) || selectedSessions.length === 0}
-                  showConsole={showConsole}
-                  consoleOutput={consoleOutput}
-                  onToggleConsole={() => setShowConsole(!showConsole)}
-                  statusInfo={
-                    getStepStatus(2)?.completed ? (
-                      <HStack spacing={3}>
-                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 2 completed</Badge>
-                        <Text fontSize="sm" color="gray.500">{formatTimestamp(getStepStatus(2)?.timestamp)}</Text>
-                      </HStack>
-                    ) : null
-                  }
-                  parameters={
-                    <HStack spacing={6} flexWrap="wrap">
-                      <HStack spacing={3}>
-                        <Text fontWeight="bold">Aggregation:</Text>
-                        <Select
-                          value={consensusAggregation}
-                          onChange={(e) => setConsensusAggregation(e.target.value)}
-                          width="150px"
-                          isDisabled={runningStep !== null}
-                        >
-                          <option value="SUM">SUM (default)</option>
-                          <option value="GEO">GEO</option>
-                          <option value="HAR">HAR</option>
-                        </Select>
-                      </HStack>
-                      <HStack spacing={3}>
-                        <Text fontWeight="bold">MC Iterations:</Text>
-                        <NumberInput
-                          value={mcIterations[2]}
-                          min={100}
-                          max={5000}
-                          step={100}
-                          onChange={(_, val) => updateMcIterations(2, val)}
-                          isDisabled={runningStep !== null}
-                          width="120px"
-                        >
-                          <NumberInputField />
-                          <NumberInputStepper>
-                            <NumberIncrementStepper />
-                            <NumberDecrementStepper />
-                          </NumberInputStepper>
-                        </NumberInput>
-                      </HStack>
-                    </HStack>
-                  }
-                >
-                  {step2Results ? (
-                    <VStack spacing={8} align="stretch">
-                      {(() => {
-                        const legendItems = getLegendItems(step2Results)
-                        return (
-                          <HStack spacing={4} flexWrap="wrap">
-                            <Text fontSize="sm" fontWeight="semibold">Elicitation:</Text>
-                            {legendItems.map((item, idx) => (
-                              <HStack key={`${item.label}-${idx}`} spacing={2}>
-                                <Box
-                                  w={3}
-                                  h={3}
-                                  bg={STEP2_COLORS[idx % STEP2_COLORS.length]}
-                                  opacity={0.45}
-                                  borderRadius="sm"
-                                />
-                                <Text fontSize="sm">{item.label}</Text>
-                              </HStack>
-                            ))}
-                          </HStack>
-                        )
-                      })()}
-                      <Text fontSize="sm" color="gray.600">
-                        One plot per alternative with smooth overlapping distributions for each elicitation.
-                      </Text>
-                      <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={5}>
-                        {step2Results.alternative_names?.map((altName, altIndex) => {
-                          const distData = getDistributionDataForAlternative(step2Results, altIndex)
-                          if (!distData) return null
-                          const legendItems = getLegendItems(step2Results)
-                          const legendLabelByExpert = Object.fromEntries(
-                            legendItems.map((item) => [item.expertName, item.label])
-                          )
-                          return (
-                            <Box key={`${altName}-${altIndex}`} borderWidth={1} borderRadius="md" p={3} bg="gray.50" position="relative" data-export-id={`step2_distribution_${altIndex}`}>
-                              <Tooltip label="Download image as PNG" hasArrow>
-                                <IconButton
-                                  aria-label={`Download distribution image for ${altName}`}
-                                  icon={<DownloadIcon />}
-                                  size="sm"
-                                  variant="ghost"
-                                  position="absolute"
-                                  top={2}
-                                  right={2}
-                                  zIndex={2}
-                                  onClick={() => handleDownloadChartPng(`step2_distribution_${altIndex}`, `step2_distribution_${altName}`)}
-                                />
-                              </Tooltip>
-                              <Text fontWeight="semibold" fontSize="sm" mb={2}>{`Distribution of Values for ${altName}`}</Text>
-                              <ResponsiveContainer width="100%" height={250}>
-                                <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 0, bottom: 24 }}>
-                                  <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
-                                  <XAxis
-                                    type="number"
-                                    dataKey="x"
-                                    domain={[0, 1]}
-                                    ticks={[0, 0.2, 0.4, 0.6, 0.8, 1]}
-                                    tickFormatter={(v) => Number(v).toFixed(1)}
-                                    tick={{ fontSize: 11 }}
-                                    label={{ value: 'Value', position: 'insideBottom', offset: -10 }}
-                                  />
-                                  <YAxis
-                                    tickFormatter={(v) => `${(Number(v) * 100).toFixed(1)}%`}
-                                    tick={{ fontSize: 11 }}
-                                    label={{ value: 'Probability', angle: -90, position: 'insideLeft' }}
-                                  />
-                                  <RechartsTooltip
-                                    wrapperStyle={{ pointerEvents: 'auto' }}
-                                    isAnimationActive={false}
-                                    formatter={(value, name) => [`${(Number(value) * 100).toFixed(2)}%`, String(name)]}
-                                    labelFormatter={(v) => `Value ${Number(v).toFixed(3)}`}
-                                  />
-                                  {distData.expertNames.map((expertName, idx) => (
-                                    <Area
-                                      key={`${expertName}-${idx}`}
-                                      dataKey={expertName}
-                                      fill={STEP2_COLORS[idx % STEP2_COLORS.length]}
-                                      fillOpacity={0.22}
-                                      stroke={STEP2_COLORS[idx % STEP2_COLORS.length]}
-                                      strokeWidth={2}
-                                      type="monotone"
-                                      dot={false}
-                                      isAnimationActive={false}
-                                      name={legendLabelByExpert[expertName] || expertName}
-                                    />
-                                  ))}
-                                </AreaChart>
-                              </ResponsiveContainer>
-                            </Box>
-                          )
-                        })}
-                      </SimpleGrid>
-                    </VStack>
-                  ) : (
-                    <VStack spacing={3} align="stretch">
-                      <Text color="gray.600" fontSize="sm">Run Step 2 to display one distribution plot per alternative.</Text>
-                    </VStack>
-                  )}
-                </StepSection>
-              </TabPanel>
-
-              {/* Step 3: Dominance (NSMC, random weights) */}
-              <TabPanel>
-                <StepSection
-                  title="Dominance Analysis"
-                  description="Dominance patterns can be observed in the NSMC heatmaps when using random weights. If an alternative consistently dominates others regardless of the weights assigned to its criteria, this should prompt reflection: while it is possible that the alternative is genuinely superior across all preferences, such behavior may also suggest a bias in the indicator definitions."
-                  onRun={() => handleRunStep(3, 'Dominance')}
-                  onStop={handleStopExecution}
-                  isRunning={runningStep === 'Dominance'}
-                  isDisabled={isButtonDisabled(2) || selectedSessions.length === 0}
-                  showConsole={showConsole}
-                  consoleOutput={consoleOutput}
-                  onToggleConsole={() => setShowConsole(!showConsole)}
-                  statusInfo={
-                    getStepStatus(3)?.completed ? (
-                      <HStack spacing={3}>
-                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 3 completed</Badge>
-                        <Text fontSize="sm" color="gray.500">{formatTimestamp(getStepStatus(3)?.timestamp)}</Text>
-                      </HStack>
-                    ) : null
-                  }
-                  parameters={
-                    <HStack spacing={6} flexWrap="wrap">
-                      <HStack spacing={3}>
-                        <Text fontWeight="bold">Aggregation:</Text>
-                        <Select
-                          value={dominanceAggregation}
-                          onChange={(e) => setDominanceAggregation(e.target.value)}
-                          width="150px"
-                          isDisabled={runningStep !== null}
-                        >
-                          <option value="SUM">SUM (default)</option>
-                          <option value="GEO">GEO</option>
-                          <option value="HAR">HAR</option>
-                        </Select>
-                      </HStack>
-                      <HStack spacing={3}>
-                        <Text fontWeight="bold">MC Iterations:</Text>
-                        <NumberInput
-                          value={mcIterations[3]}
-                          min={100}
-                          max={5000}
-                          step={100}
-                          onChange={(_, val) => updateMcIterations(3, val)}
-                          isDisabled={runningStep !== null}
-                          width="120px"
-                        >
-                          <NumberInputField />
-                          <NumberInputStepper>
-                            <NumberIncrementStepper />
-                            <NumberDecrementStepper />
-                          </NumberInputStepper>
-                        </NumberInput>
-                      </HStack>
-                    </HStack>
-                  }
-                >
-                  {step3Results ? (
-                    <RankingHeatmap
-                      title="Dominance Heatmap"
-                      results={step3Results}
-                      onDownloadPng={() => handleDownloadHeatmapPng(step3Results, 'Dominance Heatmap', 'dominance_heatmap')}
-                    />
-                  ) : (
-                    <Box bg="gray.100" h={220} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                      <Text color="gray.500">Run Step 3 to display the dominance ranking heatmap.</Text>
-                    </Box>
-                  )}
-                </StepSection>
-              </TabPanel>
-
-              {/* Step 4: Compensation (NSMC, all 3 aggregation methods, random weights) */}
-              <TabPanel>
-                <StepSection
-                  title="Compensation Analysis"
-                  description="The code offers a choice of three aggregation methods: SUM (weighted sum), which is fully compensatory, and GEO (geometric mean) and HAR (harmonic mean), which are partially compensatory. By comparing the differences in the NSMC heatmaps, the practitioner can determine which aggregation method is most appropriate for their study."
-                  onRun={() => handleRunStep(4, 'Compensation')}
-                  onStop={handleStopExecution}
-                  isRunning={runningStep === 'Compensation'}
-                  isDisabled={isButtonDisabled(3) || selectedSessions.length === 0}
+                  isRunning={runningStep === 'Aggregation'}
+                  isDisabled={isButtonDisabled(1) || selectedSessions.length === 0 || aggregationStepMethods.length === 0}
                   showConsole={showConsole}
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
                   statusInfo={
                     getStepStatus(4)?.completed ? (
                       <HStack spacing={3}>
-                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 4 completed</Badge>
+                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 2 completed</Badge>
                         <Text fontSize="sm" color="gray.500">{formatTimestamp(getStepStatus(4)?.timestamp)}</Text>
                       </HStack>
                     ) : null
                   }
                   parameters={
-                    <HStack spacing={3}>
-                      <Text fontWeight="bold">MC Iterations (per method):</Text>
-                      <NumberInput
-                        value={mcIterations[4]}
-                        min={100}
-                        max={5000}
-                        step={100}
-                        onChange={(_, val) => updateMcIterations(4, val)}
-                        isDisabled={runningStep !== null}
-                        width="120px"
-                      >
-                        <NumberInputField />
-                        <NumberInputStepper>
-                          <NumberIncrementStepper />
-                          <NumberDecrementStepper />
-                        </NumberInputStepper>
-                      </NumberInput>
-                      <Text fontSize="sm" color="gray.500">(runs 3x, once per aggregation method)</Text>
-                    </HStack>
+                    <VStack spacing={3} align="stretch">
+                      {renderAggregationChecklist()}
+                      <HStack spacing={3}>
+                        <Text fontWeight="bold">MC Iterations:</Text>
+                        <NumberInput
+                          value={mcIterations[4]}
+                          min={100}
+                          max={5000}
+                          step={100}
+                          onChange={(_, val) => updateMcIterations(4, val)}
+                          isDisabled={runningStep !== null}
+                          width="120px"
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                      </HStack>
+                    </VStack>
                   }
                 >
-                  {step4Results?.results_by_aggregation ? (
-                    <VStack spacing={4} align="stretch">
-                      <RankingHeatmap
-                        title="SUM Aggregation Heatmap"
-                        results={step4Results.results_by_aggregation.weighted_sum}
-                        onDownloadPng={() => handleDownloadHeatmapPng(step4Results.results_by_aggregation.weighted_sum, 'SUM Aggregation Heatmap', 'sum_aggregation_heatmap')}
-                      />
-                      <RankingHeatmap
-                        title="GEO Aggregation Heatmap"
-                        results={step4Results.results_by_aggregation.geometric_mean}
-                        onDownloadPng={() => handleDownloadHeatmapPng(step4Results.results_by_aggregation.geometric_mean, 'GEO Aggregation Heatmap', 'geo_aggregation_heatmap')}
-                      />
-                      <RankingHeatmap
-                        title="HAR Aggregation Heatmap"
-                        results={step4Results.results_by_aggregation.harmonic_mean}
-                        onDownloadPng={() => handleDownloadHeatmapPng(step4Results.results_by_aggregation.harmonic_mean, 'HAR Aggregation Heatmap', 'har_aggregation_heatmap')}
-                      />
-                    </VStack>
-                  ) : (
-                    <Box bg="gray.100" h={220} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                      <Text color="gray.500">Run Step 4 to display compensation ranking heatmaps.</Text>
-                    </Box>
-                  )}
+                  {(() => {
+                    const byAggregation = step4Results?.results_by_aggregation
+                    if (byAggregation && typeof byAggregation === 'object') {
+                      const methodOrder = AGGREGATION_METHODS.map((entry) => entry.backendMethod)
+                      const orderedEntries = Object.entries(byAggregation).sort((a, b) => {
+                        const aIdx = methodOrder.indexOf(a[0])
+                        const bIdx = methodOrder.indexOf(b[0])
+                        if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx
+                        if (aIdx >= 0) return -1
+                        if (bIdx >= 0) return 1
+                        return String(a[0]).localeCompare(String(b[0]))
+                      })
+                      return (
+                        <VStack spacing={4} align="stretch">
+                          {orderedEntries.map(([backendMethod, result]) => {
+                            const plotLabel = getAggregationPlotLabel(
+                              backendMethod,
+                              step4Results?.aggregation_alphas,
+                              step4Results?.aggregation_alpha
+                            )
+                            const fileBase = `step4_${sanitizeFilename(backendMethod)}_aggregation_heatmap`
+                            return (
+                              <RankingHeatmap
+                                key={backendMethod}
+                                title={`${plotLabel} Aggregation Heatmap`}
+                                results={result}
+                                onDownloadPng={() => handleDownloadHeatmapPng(result, `${plotLabel} Aggregation Heatmap`, fileBase)}
+                              />
+                            )
+                          })}
+                        </VStack>
+                      )
+                    }
+
+                    if (step4Results?.aggregated_results) {
+                      const plotLabel = getAggregationPlotLabel(
+                        step4Results?.aggregation_method,
+                        step4Results?.aggregation_alphas,
+                        step4Results?.aggregation_alpha
+                      ) || 'Aggregation'
+                      return (
+                        <VStack spacing={4} align="stretch">
+                          <RankingHeatmap
+                            title={`${plotLabel} Aggregation Heatmap`}
+                            results={step4Results}
+                            onDownloadPng={() => handleDownloadHeatmapPng(step4Results, `${plotLabel} Aggregation Heatmap`, `step4_${sanitizeFilename(plotLabel)}_aggregation_heatmap`)}
+                          />
+                        </VStack>
+                      )
+                    }
+
+                    return (
+                      <VStack spacing={4} align="stretch">
+                        <Box bg="gray.100" h={220} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
+                          <Text color="gray.500">Run Step 2 to display aggregation ranking heatmaps.</Text>
+                        </Box>
+                      </VStack>
+                    )
+                  })()}
                 </StepSection>
               </TabPanel>
 
-              {/* Step 5: Uncertainty (SMC, strict) */}
+              {/* Step 3: Uncertainty (SMC, strict) */}
               <TabPanel>
                 <StepSection
                   title="Uncertainty Analysis"
@@ -2510,38 +3355,29 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onRun={() => handleRunStep(5, 'Uncertainty')}
                   onStop={handleStopExecution}
                   isRunning={runningStep === 'Uncertainty'}
-                  isDisabled={isButtonDisabled(4) || !uncertaintyAggregation || selectedSessions.length === 0}
+                  isDisabled={isButtonDisabled(2) || !uncertaintyAggregation || selectedSessions.length === 0}
                   showConsole={showConsole}
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
                   statusInfo={
                     getStepStatus(5)?.completed ? (
                       <HStack spacing={3}>
-                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 5 completed</Badge>
+                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 3 completed</Badge>
                         <Text fontSize="sm" color="gray.500">{formatTimestamp(getStepStatus(5)?.timestamp)}</Text>
                       </HStack>
                     ) : null
                   }
                   parameters={
-                    <HStack spacing={6} flexWrap="wrap">
-                      <HStack spacing={3}>
-                        <Text fontWeight="bold">Aggregation:</Text>
-                        <Select
-                          placeholder="Select aggregation method"
-                          value={uncertaintyAggregation}
-                          onChange={(e) => {
-                            setUncertaintyAggregation(e.target.value)
-                            if (!resultsAggregation) setResultsAggregation(e.target.value)
-                          }}
-                          width="200px"
-                          isDisabled={runningStep !== null}
-                        >
-                          <option value="SUM">SUM</option>
-                          <option value="GEO">GEO</option>
-                          <option value="HAR">HAR</option>
-                        </Select>
-                        {!uncertaintyAggregation && <Text color="red.500" fontSize="sm">Required</Text>}
-                      </HStack>
+                    <VStack spacing={3} align="stretch">
+                      {renderAggregationSelector({
+                        selectedMethod: uncertaintyAggregation,
+                        setSelectedMethod: (methodId) => {
+                          setUncertaintyAggregation(methodId)
+                          if (!resultsAggregation) setResultsAggregation(methodId)
+                        },
+                        alphaValue: uncertaintyAggregationAlpha,
+                        setAlphaValue: setUncertaintyAggregationAlpha,
+                      })}
                       <HStack spacing={3}>
                         <Text fontWeight="bold">MC Iterations:</Text>
                         <NumberInput
@@ -2560,7 +3396,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                           </NumberInputStepper>
                         </NumberInput>
                       </HStack>
-                    </HStack>
+                    </VStack>
                   }
                 >
                   {step5Results ? (
@@ -2585,9 +3421,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                           </HStack>
                         )
                       })()}
-                      <Text fontSize="sm" color="gray.600">
-                        One plot per alternative with smooth overlapping distributions for each elicitation.
-                      </Text>
                       <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={5}>
                         {step5Results.alternative_names?.map((altName, altIndex) => {
                           const distData = getDistributionDataForAlternative(step5Results, altIndex)
@@ -2608,10 +3441,16 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   top={2}
                                   right={2}
                                   zIndex={2}
-                                  onClick={() => handleDownloadChartPng(`step5_distribution_${altIndex}`, `step5_distribution_${altName}`)}
+                                  onClick={() => handleDownloadChartPng(`step5_distribution_${altIndex}`, `step3_uncertainty_analysis_distribution_${altName}`)}
                                 />
                               </Tooltip>
-                              <Text fontWeight="semibold" fontSize="sm" mb={2}>{`Distribution of Values for ${altName}`}</Text>
+                              {renderDistributionStatsTable({
+                                stepPrefix: 'step5',
+                                altIndex,
+                                distData,
+                                title: `Step 3 uncertainty analysis stats - ${altName}`,
+                                filenameBase: `step3_uncertainty_analysis_stats_${altName}`,
+                              })}
                               <ResponsiveContainer width="100%" height={250}>
                                 <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 0, bottom: 24 }}>
                                   <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
@@ -2658,13 +3497,175 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     </VStack>
                   ) : (
                     <VStack spacing={3} align="stretch">
-                      <Text color="gray.600" fontSize="sm">Run Step 5 to display uncertainty distributions for each alternative.</Text>
+                      <Text color="gray.600" fontSize="sm">Run Step 3 to display uncertainty distributions for each alternative.</Text>
                     </VStack>
                   )}
                 </StepSection>
               </TabPanel>
 
-              {/* Step 6: Results (NSMC, non-strict) */}
+              {/* Step 4: Consensus (SMC, strict) */}
+              <TabPanel>
+                <StepSection
+                  title="Consensus Analysis"
+                  description={(
+                    <Text>
+                      The output of the SMC can be used to assess the consensus or agreement among experts. Consensus is quantified as{' '}
+                      <InlineMath math={'C = \\frac{A}{N-1}'} />
+                      , with{' '}
+                      <InlineMath math={'A = \\sum_x \\left|\\max_i p_i(x) - \\sum_i p_i(x)\\right|'} />
+                      . If distributions overlap strongly, consensus is high; otherwise, aggregating divergent opinions requires caution.
+                    </Text>
+                  )}
+                  onRun={() => handleRunStep(2, 'Consensus')}
+                  onStop={handleStopExecution}
+                  isRunning={runningStep === 'Consensus'}
+                  isDisabled={isButtonDisabled(3) || selectedSessions.length === 0}
+                  showConsole={showConsole}
+                  consoleOutput={consoleOutput}
+                  onToggleConsole={() => setShowConsole(!showConsole)}
+                  statusInfo={
+                    getStepStatus(2)?.completed ? (
+                      <HStack spacing={3}>
+                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 4 completed</Badge>
+                        <Text fontSize="sm" color="gray.500">{formatTimestamp(getStepStatus(2)?.timestamp)}</Text>
+                      </HStack>
+                    ) : null
+                  }
+                  parameters={
+                    <VStack spacing={3} align="stretch">
+                      {renderAggregationSelector({
+                        selectedMethod: consensusAggregation,
+                        setSelectedMethod: setConsensusAggregation,
+                        alphaValue: consensusAggregationAlpha,
+                        setAlphaValue: setConsensusAggregationAlpha,
+                      })}
+                      <HStack spacing={3}>
+                        <Text fontWeight="bold">MC Iterations:</Text>
+                        <NumberInput
+                          value={mcIterations[2]}
+                          min={100}
+                          max={5000}
+                          step={100}
+                          onChange={(_, val) => updateMcIterations(2, val)}
+                          isDisabled={runningStep !== null}
+                          width="120px"
+                        >
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                      </HStack>
+                    </VStack>
+                  }
+                >
+                  {step2Results ? (
+                    <VStack spacing={8} align="stretch">
+                      {(() => {
+                        const legendItems = getLegendItems(step2Results)
+                        return (
+                          <HStack spacing={4} flexWrap="wrap">
+                            <Text fontSize="sm" fontWeight="semibold">Elicitation:</Text>
+                            {legendItems.map((item, idx) => (
+                              <HStack key={`${item.label}-${idx}`} spacing={2}>
+                                <Box
+                                  w={3}
+                                  h={3}
+                                  bg={STEP2_COLORS[idx % STEP2_COLORS.length]}
+                                  opacity={0.45}
+                                  borderRadius="sm"
+                                />
+                                <Text fontSize="sm">{item.label}</Text>
+                              </HStack>
+                            ))}
+                          </HStack>
+                        )
+                      })()}
+                      <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={5}>
+                        {step2Results.alternative_names?.map((altName, altIndex) => {
+                          const distData = getDistributionDataForAlternative(step2Results, altIndex)
+                          if (!distData) return null
+                          const legendItems = getLegendItems(step2Results)
+                          const legendLabelByExpert = Object.fromEntries(
+                            legendItems.map((item) => [item.expertName, item.label])
+                          )
+                          return (
+                            <Box key={`${altName}-${altIndex}`} borderWidth={1} borderRadius="md" p={3} bg="gray.50" position="relative" data-export-id={`step2_distribution_${altIndex}`}>
+                              <Tooltip label="Download image as PNG" hasArrow>
+                                <IconButton
+                                  aria-label={`Download distribution image for ${altName}`}
+                                  icon={<DownloadIcon />}
+                                  size="sm"
+                                  variant="ghost"
+                                  position="absolute"
+                                  top={2}
+                                  right={2}
+                                  zIndex={2}
+                                  onClick={() => handleDownloadChartPng(`step2_distribution_${altIndex}`, `step4_consensus_analysis_distribution_${altName}`)}
+                                />
+                              </Tooltip>
+                              <HStack justify="space-between" align="center" mb={2} pr={12}>
+                                <HStack spacing={3}>
+                                  <Text fontWeight="semibold" fontSize="sm">{`Distribution of Values for ${altName}`}</Text>
+                                  <Badge colorScheme="blue" variant="subtle">
+                                    {`Consensus = ${Number(distData.consensus?.consensusPercent || 0).toFixed(2)}%`}
+                                  </Badge>
+                                </HStack>
+                              </HStack>
+                              <ResponsiveContainer width="100%" height={250}>
+                                <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 0, bottom: 24 }}>
+                                  <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
+                                  <XAxis
+                                    type="number"
+                                    dataKey="x"
+                                    domain={[0, 1]}
+                                    ticks={[0, 0.2, 0.4, 0.6, 0.8, 1]}
+                                    tickFormatter={(v) => Number(v).toFixed(1)}
+                                    tick={{ fontSize: 11 }}
+                                    label={{ value: 'Value', position: 'insideBottom', offset: -10 }}
+                                  />
+                                  <YAxis
+                                    tickFormatter={(v) => `${(Number(v) * 100).toFixed(1)}%`}
+                                    tick={{ fontSize: 11 }}
+                                    label={{ value: 'Probability', angle: -90, position: 'insideLeft' }}
+                                  />
+                                  <RechartsTooltip
+                                    wrapperStyle={{ pointerEvents: 'auto' }}
+                                    isAnimationActive={false}
+                                    formatter={(value, name) => [`${(Number(value) * 100).toFixed(2)}%`, String(name)]}
+                                    labelFormatter={(v) => `Value ${Number(v).toFixed(3)}`}
+                                  />
+                                  {distData.expertNames.map((expertName, idx) => (
+                                    <Area
+                                      key={`${expertName}-${idx}`}
+                                      dataKey={expertName}
+                                      fill={STEP2_COLORS[idx % STEP2_COLORS.length]}
+                                      fillOpacity={0.22}
+                                      stroke={STEP2_COLORS[idx % STEP2_COLORS.length]}
+                                      strokeWidth={2}
+                                      type="monotone"
+                                      dot={false}
+                                      isAnimationActive={false}
+                                      name={legendLabelByExpert[expertName] || expertName}
+                                    />
+                                  ))}
+                                </AreaChart>
+                              </ResponsiveContainer>
+                            </Box>
+                          )
+                        })}
+                      </SimpleGrid>
+                    </VStack>
+                  ) : (
+                    <VStack spacing={3} align="stretch">
+                      <Text color="gray.600" fontSize="sm">Run Step 4 to display one distribution plot per alternative.</Text>
+                    </VStack>
+                  )}
+                </StepSection>
+              </TabPanel>
+
+              {/* Step 5: Results (NSMC, non-strict) */}
               <TabPanel>
                 <StepSection
                   title="Results"
@@ -2672,35 +3673,26 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onRun={() => handleRunStep(6, 'Results')}
                   onStop={handleStopExecution}
                   isRunning={runningStep === 'Results'}
-                  isDisabled={isButtonDisabled(5) || !resultsAggregation || selectedSessions.length === 0}
+                  isDisabled={isButtonDisabled(4) || !resultsAggregation || selectedSessions.length === 0}
                   showConsole={showConsole}
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
                   statusInfo={
                     getStepStatus(6)?.completed ? (
                       <HStack spacing={3}>
-                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 6 completed</Badge>
+                        <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 5 completed</Badge>
                         <Text fontSize="sm" color="gray.500">{formatTimestamp(getStepStatus(6)?.timestamp)}</Text>
                       </HStack>
                     ) : null
                   }
                   parameters={
-                    <HStack spacing={6} flexWrap="wrap">
-                      <HStack spacing={3}>
-                        <Text fontWeight="bold">Aggregation:</Text>
-                        <Select
-                          placeholder="Select aggregation method"
-                          value={resultsAggregation}
-                          onChange={(e) => setResultsAggregation(e.target.value)}
-                          width="200px"
-                          isDisabled={runningStep !== null}
-                        >
-                          <option value="SUM">SUM</option>
-                          <option value="GEO">GEO</option>
-                          <option value="HAR">HAR</option>
-                        </Select>
-                        {!resultsAggregation && <Text color="red.500" fontSize="sm">Required</Text>}
-                      </HStack>
+                    <VStack spacing={3} align="stretch">
+                      {renderAggregationSelector({
+                        selectedMethod: resultsAggregation,
+                        setSelectedMethod: setResultsAggregation,
+                        alphaValue: resultsAggregationAlpha,
+                        setAlphaValue: setResultsAggregationAlpha,
+                      })}
                       <HStack spacing={3}>
                         <Text fontWeight="bold">MC Iterations:</Text>
                         <NumberInput
@@ -2719,7 +3711,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                           </NumberInputStepper>
                         </NumberInput>
                       </HStack>
-                    </HStack>
+                    </VStack>
                   }
                 >
                   {step6Results ? (
@@ -2730,7 +3722,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     />
                   ) : (
                     <Box bg="gray.100" h={220} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                      <Text color="gray.500">Run Step 6 to display the final ranking heatmap.</Text>
+                      <Text color="gray.500">Run Step 5 to display the final ranking heatmap.</Text>
                     </Box>
                   )}
 
@@ -2791,13 +3783,25 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   isChecked={exportIncludeSimulationCsvs}
                   onChange={(e) => setExportIncludeSimulationCsvs(e.target.checked)}
                 >
-                  Raw simulation CSVs for steps 2-6
+                  Raw simulation CSVs for workflow steps
                 </Checkbox>
                 <Checkbox
                   isChecked={exportIncludePlotImages}
                   onChange={(e) => setExportIncludePlotImages(e.target.checked)}
                 >
                   Plot Images (PNG and SVG)
+                </Checkbox>
+                <Checkbox
+                  isChecked={exportIncludeStep2ConsensusQuantificationCsv}
+                  onChange={(e) => setExportIncludeStep2ConsensusQuantificationCsv(e.target.checked)}
+                >
+                  Step 4 consensus quantification
+                </Checkbox>
+                <Checkbox
+                  isChecked={exportIncludeStep5UncertaintyStatsCsv}
+                  onChange={(e) => setExportIncludeStep5UncertaintyStatsCsv(e.target.checked)}
+                >
+                  Step 3 uncertainty stats
                 </Checkbox>
                 <Checkbox
                   isChecked={exportIncludeFullData}
@@ -2911,6 +3915,16 @@ function sanitizeFilename(value) {
     .replace(/^_+|_+$/g, '') || 'export'
 }
 
+function toWorkflowStepFilenameBase(filenameBase) {
+  const base = String(filenameBase || '')
+  if (base.startsWith('step_1_')) return base.replace('step_1_', 'step_1_finalize_elicited_data_')
+  if (base.startsWith('step_2_')) return base.replace('step_2_', 'step_4_consensus_analysis_')
+  if (base.startsWith('step_4_')) return base.replace('step_4_', 'step_2_choose_aggregation_method_')
+  if (base.startsWith('step_5_')) return base.replace('step_5_', 'step_3_uncertainty_analysis_')
+  if (base.startsWith('step_6_')) return base.replace('step_6_', 'step_5_final_results_')
+  return base
+}
+
 function getRankingHeatmapDimensions(results) {
   const matrix = buildRankProbabilityMatrix(results)
   if (!matrix) {
@@ -2926,6 +3940,79 @@ function getRankingHeatmapDimensions(results) {
   const height = 90 + alternatives.length * (cellSize + cellGap) + 24
 
   return { width, height }
+}
+
+function computeConsensusQuantification(densityData, expertNames) {
+  if (!Array.isArray(densityData) || densityData.length === 0 || !Array.isArray(expertNames) || expertNames.length === 0) {
+    return null
+  }
+
+  const normalizedExpertNames = expertNames
+    .map((name) => String(name || '').trim())
+    .filter((name) => name.length > 0)
+
+  if (normalizedExpertNames.length === 0) return null
+
+  let differenceArea = 0
+  densityData.forEach((row) => {
+    let distributionSum = 0
+    let profile = 0
+
+    normalizedExpertNames.forEach((expertName) => {
+      const density = Number(row?.[expertName])
+      const value = Number.isFinite(density) ? density : 0
+      distributionSum += value
+      if (value > profile) profile = value
+    })
+
+    differenceArea += Math.abs(profile - distributionSum)
+  })
+
+  const elicitationCount = normalizedExpertNames.length
+  const rawConsensus = elicitationCount > 1 ? (differenceArea / (elicitationCount - 1)) : 1
+  const consensusRatio = Math.max(0, Math.min(1, rawConsensus))
+
+  return {
+    differenceArea,
+    elicitationCount,
+    consensusRatio,
+    consensusPercent: consensusRatio * 100,
+  }
+}
+
+function buildConsensusQuantificationCsv(consensusRows, options = {}) {
+  const title = String(options.title || 'Step 4 consensus analysis quantification').trim()
+  const placeholderMessage = String(
+    options.placeholderMessage || 'Consensus quantification is not available yet.'
+  ).trim()
+
+  const lines = [
+    `title;${title}`,
+    'alternative;elicitation_count;difference_area;consensus_ratio;consensus_percent',
+  ]
+
+  if (!Array.isArray(consensusRows) || consensusRows.length === 0) {
+    lines.push(`;note;${placeholderMessage}`)
+    return `${lines.join('\n')}\n`
+  }
+
+  consensusRows.forEach((row) => {
+    const altName = String(row?.alternative || '').replace(/;/g, ',')
+    const elicitationCount = Number(row?.elicitationCount)
+    const differenceArea = Number(row?.differenceArea)
+    const consensusRatio = Number(row?.consensusRatio)
+    const consensusPercent = Number(row?.consensusPercent)
+
+    lines.push([
+      altName,
+      Number.isFinite(elicitationCount) ? String(elicitationCount) : '',
+      Number.isFinite(differenceArea) ? differenceArea.toFixed(6) : '',
+      Number.isFinite(consensusRatio) ? consensusRatio.toFixed(6) : '',
+      Number.isFinite(consensusPercent) ? consensusPercent.toFixed(2) : '',
+    ].join(';'))
+  })
+
+  return `${lines.join('\n')}\n`
 }
 
 function buildRankProbabilityCsv(results) {
@@ -2995,22 +4082,30 @@ function buildSimulationCsvExports(stepNumber, stepResults) {
 
   if (stepNumber === 4) {
     const byAggregation = stepResults?.results_by_aggregation
-    if (!byAggregation || typeof byAggregation !== 'object') {
+    if (byAggregation && typeof byAggregation === 'object') {
+      Object.entries(byAggregation)
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+        .forEach(([aggregationName, aggregationResults]) => {
+          const csvText = buildSimulationRowsCsv(aggregationResults)
+          if (!csvText) return
+
+          exports.push({
+            filenameBase: `step_4_aggregation_${sanitizeFilename(aggregationName)}`,
+            csvText,
+          })
+        })
+
       return exports
     }
 
-    Object.entries(byAggregation)
-      .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
-      .forEach(([aggregationName, aggregationResults]) => {
-        const csvText = buildSimulationRowsCsv(aggregationResults)
-        if (!csvText) return
-
-        exports.push({
-          filenameBase: `step_4_aggregation_${sanitizeFilename(aggregationName)}`,
-          csvText,
-        })
+    const csvText = buildSimulationRowsCsv(stepResults)
+    if (csvText) {
+      const stepAggregation = sanitizeFilename(stepResults?.aggregation_method || 'selected')
+      exports.push({
+        filenameBase: `step_4_aggregation_${stepAggregation}`,
+        csvText,
       })
-
+    }
     return exports
   }
 
@@ -3113,36 +4208,40 @@ function buildPipelineChartExportTargets({
   return targets
 }
 
-function buildPipelineHeatmapExports({ step3Results, step4Results, step6Results }) {
+function buildPipelineHeatmapExports({ step4Results, step6Results }) {
   const targets = []
-
-  if (step3Results) {
-    targets.push({
-      title: 'Dominance Heatmap',
-      filenameBase: 'step3_dominance_heatmap',
-      results: step3Results,
+  const byAggregation = step4Results?.results_by_aggregation
+  if (byAggregation && typeof byAggregation === 'object') {
+    const methodOrder = AGGREGATION_METHODS.map((entry) => entry.backendMethod)
+    const orderedEntries = Object.entries(byAggregation).sort((a, b) => {
+      const aIdx = methodOrder.indexOf(a[0])
+      const bIdx = methodOrder.indexOf(b[0])
+      if (aIdx >= 0 && bIdx >= 0) return aIdx - bIdx
+      if (aIdx >= 0) return -1
+      if (bIdx >= 0) return 1
+      return String(a[0]).localeCompare(String(b[0]))
+    })
+    orderedEntries.forEach(([backendMethod, result]) => {
+      const label = getAggregationPlotLabel(
+        backendMethod,
+        step4Results?.aggregation_alphas,
+        step4Results?.aggregation_alpha
+      )
+      targets.push({
+        title: `${label} Aggregation Heatmap`,
+        filenameBase: `step4_${sanitizeFilename(label)}_aggregation_heatmap`,
+        results: result,
+      })
     })
   }
 
-  if (step4Results?.results_by_aggregation?.weighted_sum) {
+  if (targets.length === 0 && step4Results?.aggregated_results) {
+    const method = step4Results?.aggregation_method
+    const label = getAggregationPlotLabel(method, step4Results?.aggregation_alphas, step4Results?.aggregation_alpha) || 'Aggregation'
     targets.push({
-      title: 'SUM Aggregation Heatmap',
-      filenameBase: 'step4_sum_aggregation_heatmap',
-      results: step4Results.results_by_aggregation.weighted_sum,
-    })
-  }
-  if (step4Results?.results_by_aggregation?.geometric_mean) {
-    targets.push({
-      title: 'GEO Aggregation Heatmap',
-      filenameBase: 'step4_geo_aggregation_heatmap',
-      results: step4Results.results_by_aggregation.geometric_mean,
-    })
-  }
-  if (step4Results?.results_by_aggregation?.harmonic_mean) {
-    targets.push({
-      title: 'HAR Aggregation Heatmap',
-      filenameBase: 'step4_har_aggregation_heatmap',
-      results: step4Results.results_by_aggregation.harmonic_mean,
+      title: `${label} Aggregation Heatmap`,
+      filenameBase: `step4_${sanitizeFilename(label)}_aggregation_heatmap`,
+      results: step4Results,
     })
   }
 
@@ -3678,6 +4777,8 @@ function StepSection({
 export {
   buildRankProbabilityMatrix,
   buildRankProbabilityCsv,
+  computeConsensusQuantification,
+  buildConsensusQuantificationCsv,
   buildSimulationRowsCsv,
   buildSimulationCsvExports,
   buildRankingHeatmapSvg,

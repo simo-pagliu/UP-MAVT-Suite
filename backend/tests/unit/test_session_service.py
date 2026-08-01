@@ -274,6 +274,31 @@ class TestUpdateFields:
         with pytest.raises(LockedError):
             svc.update_bwt(sid, {})
 
+    def test_update_practitioner_settings_ok(self, svc):
+        sid = svc.create('PRAC', QUALITATIVE_CRITERIA + VALID_CRITERIA)
+        updated = svc.update_practitioner_settings(sid, {
+            'notes': 'Important expert context',
+            'overall_weight': 2.5,
+            'confidence_adjustments': {
+                'overall': -0.4,
+                'qi': 0.7,
+                'vf': -0.2,
+                'qi_criteria': {'Quality': 0.6},
+                'vf_criteria': {'Cost': -0.5},
+            },
+        })
+        settings = updated['practitioner_settings']
+        assert settings['notes'] == 'Important expert context'
+        assert settings['overall_weight'] == 2.5
+        assert settings['confidence_adjustments']['overall'] == -0.4
+        assert settings['confidence_adjustments']['qi_criteria']['Quality'] == 0.6
+        assert settings['confidence_adjustments']['vf_criteria']['Cost'] == -0.5
+
+    def test_update_practitioner_settings_invalid_payload_raises(self, svc):
+        sid = svc.create('PRAC-INVALID', VALID_CRITERIA)
+        with pytest.raises(ValidationError, match='practitioner_settings must be an object'):
+            svc.update_practitioner_settings(sid, 'bad')
+
 
 # ---------------------------------------------------------------------------
 # Completeness checks

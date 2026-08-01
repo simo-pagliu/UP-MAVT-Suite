@@ -1,6 +1,7 @@
 """Unit tests for WorkflowService."""
 import csv
 import io
+import zipfile
 
 import pytest
 from bson.objectid import ObjectId
@@ -105,6 +106,7 @@ class TestCreateRunStepTask:
             selected_session_ids=[session_id],
             mc_iterations=500,
             aggregation_method='weighted_sum',
+            aggregation_alpha=0.0,
             mc_mode='non_strict',
             use_random_weights=False,
         )
@@ -116,6 +118,7 @@ class TestCreateRunStepTask:
                 study_with_weights, step_number=99,
                 selected_session_ids=[session_id],
                 mc_iterations=500, aggregation_method='weighted_sum',
+                aggregation_alpha=0.0,
                 mc_mode='non_strict', use_random_weights=False,
             )
 
@@ -125,6 +128,7 @@ class TestCreateRunStepTask:
                 study_with_weights, step_number=2,
                 selected_session_ids=[],
                 mc_iterations=500, aggregation_method='weighted_sum',
+                aggregation_alpha=0.0,
                 mc_mode='non_strict', use_random_weights=False,
             )
 
@@ -134,6 +138,7 @@ class TestCreateRunStepTask:
                 study_id, step_number=2,
                 selected_session_ids=[session_id],
                 mc_iterations=500, aggregation_method='weighted_sum',
+                aggregation_alpha=0.0,
                 mc_mode='non_strict', use_random_weights=False,
             )
 
@@ -144,6 +149,7 @@ class TestCreateRunStepTask:
             selected_session_ids=[session_id],
             mc_iterations=1,
             aggregation_method='weighted_sum',
+            aggregation_alpha=0.0,
             mc_mode='non_strict', use_random_weights=False,
         )
         task = wf_svc.get_task_status(task_id)
@@ -155,10 +161,47 @@ class TestCreateRunStepTask:
             study_with_weights, step_number=3,
             selected_session_ids=[session_id],
             mc_iterations=200, aggregation_method='GEO',
+            aggregation_alpha=0.0,
             mc_mode='non_strict', use_random_weights=False,
         )
         task = mock_db.tasks.find_one({'_id': ObjectId(task_id)})
         assert task['params']['aggregation_method'] == 'geometric_mean'
+
+    def test_uses_practitioner_opinion_weights(self, mock_db, wf_svc, study_with_weights, session_id):
+        second_session_id = StudySessionService(mock_db).create_elicitation_session(study_with_weights, 'EXP-02')
+        mock_db.study_sessions.update_one(
+            {'_id': ObjectId(study_with_weights)},
+            {'$set': {'computed_weights.weight_solutions': {
+                session_id: [{'Cost': 1.0}],
+                second_session_id: [{'Cost': 1.0}],
+            }}}
+        )
+        # Set VF confidence: session 1 avg = 3.0, session 2 avg = 1.0 → normalized [0.75, 0.25]
+        mock_db.sessions.update_one(
+            {'_id': ObjectId(session_id)},
+            {'$set': {'value_functions': {'criteria': {'Cost': {'confidence': 3}}}}}
+        )
+        mock_db.sessions.update_one(
+            {'_id': ObjectId(second_session_id)},
+            {'$set': {'value_functions': {'criteria': {'Cost': {'confidence': 1}}}}}
+        )
+
+        task_id = wf_svc.create_run_step_task(
+            study_with_weights,
+            step_number=2,
+            selected_session_ids=[session_id, second_session_id],
+            mc_iterations=500,
+            aggregation_method='weighted_sum',
+            aggregation_alpha=0.0,
+            mc_mode='non_strict',
+            use_random_weights=False,
+        )
+
+        task = mock_db.tasks.find_one({'_id': ObjectId(task_id)})
+        weights = task['params']['opinion_weights']
+        assert len(weights) == 2
+        assert abs(weights[0] - 0.75) < 1e-9
+        assert abs(weights[1] - 0.25) < 1e-9
 
     def test_study_not_found_raises(self, wf_svc, session_id):
         with pytest.raises(NotFoundError):
@@ -166,6 +209,7 @@ class TestCreateRunStepTask:
                 str(ObjectId()), step_number=2,
                 selected_session_ids=[session_id],
                 mc_iterations=500, aggregation_method='weighted_sum',
+                aggregation_alpha=0.0,
                 mc_mode='non_strict', use_random_weights=False,
             )
 
@@ -356,3 +400,49 @@ class TestExportWeightSolutionCsv:
         assert rows[0] == ['SESSION_ID', 'SOLUTION_INDEX', 'Cost', 'ERROR']
         assert rows[1][-1] == '0.25'
         assert rows[2][-1] == '0.5'
+
+
+class TestDistributionStatsExports:
+    def test_collects_distribution_stats_rows(self, wf_svc):
+        step_results = {
+            'alternative_names': ['Alt A'],
+            'results_by_elicitation': {
+                '0': [[0.10], [0.20], [0.90]],
+                '1': [[0.40], [0.60], [0.80]],
+            },
+        }
+
+        rows = wf_svc._collect_distribution_stats_rows(step_results)
+
+        assert len(rows) == 2
+        assert rows[0]['expert'] == 'Alt A - E1 (0)'
+        assert rows[1]['expert'] == 'Alt A - E2 (1)'
+        assert rows[0]['average'] == pytest.approx(0.4)
+        assert rows[0]['median'] == pytest.approx(0.2)
+        assert rows[0]['p5'] == pytest.approx(0.11)
+        assert rows[0]['p95'] == pytest.approx(0.83)
+
+    def test_writes_distribution_stats_csv_into_zip(self, wf_svc):
+        step_results = {
+            'alternative_names': ['Alt A'],
+            'results_by_elicitation': {
+                '0': [[0.10], [0.20], [0.90]],
+            },
+        }
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            wf_svc._write_distribution_stats_csv(
+                zf,
+                'steps/step_5_distribution_stats.csv',
+                step_results,
+                'Step 5 distribution stats',
+            )
+
+        buf.seek(0)
+        with zipfile.ZipFile(buf, 'r') as zf:
+            payload = zf.read('steps/step_5_distribution_stats.csv').decode('utf-8-sig')
+
+        assert 'title;Step 5 distribution stats' in payload
+        assert 'expert;n;mean;median;stdDev;iqr;skewness;kurtosis;min;p5;p25;p75;p95;max' in payload
+        assert 'Alt A - E1 (0);3;0.4;0.2;' in payload
