@@ -1,6 +1,7 @@
 """Unit tests for WorkflowService."""
 import csv
 import io
+import zipfile
 
 import pytest
 from bson.objectid import ObjectId
@@ -363,3 +364,49 @@ class TestExportWeightSolutionCsv:
         assert rows[0] == ['SESSION_ID', 'SOLUTION_INDEX', 'Cost', 'ERROR']
         assert rows[1][-1] == '0.25'
         assert rows[2][-1] == '0.5'
+
+
+class TestDistributionStatsExports:
+    def test_collects_distribution_stats_rows(self, wf_svc):
+        step_results = {
+            'alternative_names': ['Alt A'],
+            'results_by_elicitation': {
+                '0': [[0.10], [0.20], [0.90]],
+                '1': [[0.40], [0.60], [0.80]],
+            },
+        }
+
+        rows = wf_svc._collect_distribution_stats_rows(step_results)
+
+        assert len(rows) == 2
+        assert rows[0]['expert'] == 'Alt A - E1 (0)'
+        assert rows[1]['expert'] == 'Alt A - E2 (1)'
+        assert rows[0]['average'] == pytest.approx(0.4)
+        assert rows[0]['median'] == pytest.approx(0.2)
+        assert rows[0]['p5'] == pytest.approx(0.11)
+        assert rows[0]['p95'] == pytest.approx(0.83)
+
+    def test_writes_distribution_stats_csv_into_zip(self, wf_svc):
+        step_results = {
+            'alternative_names': ['Alt A'],
+            'results_by_elicitation': {
+                '0': [[0.10], [0.20], [0.90]],
+            },
+        }
+
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+            wf_svc._write_distribution_stats_csv(
+                zf,
+                'steps/step_5_distribution_stats.csv',
+                step_results,
+                'Step 5 distribution stats',
+            )
+
+        buf.seek(0)
+        with zipfile.ZipFile(buf, 'r') as zf:
+            payload = zf.read('steps/step_5_distribution_stats.csv').decode('utf-8-sig')
+
+        assert 'title;Step 5 distribution stats' in payload
+        assert 'expert;n;mean;median;stdDev;iqr;skewness;kurtosis;min;p5;p25;p75;p95;max' in payload
+        assert 'Alt A - E1 (0);3;0.4;0.2;' in payload

@@ -23,6 +23,21 @@ function quantileFromSorted(sortedValues, quantile) {
   return sortedValues[lowIndex] + (sortedValues[highIndex] - sortedValues[lowIndex]) * weight
 }
 
+export const DISTRIBUTION_STAT_COLUMNS = [
+  { key: 'average', label: 'Mean' },
+  { key: 'median', label: 'Median' },
+  { key: 'stdDev', label: 'Std. Dev.' },
+  { key: 'iqr', label: 'IQR' },
+  { key: 'skewness', label: 'Skewness' },
+  { key: 'kurtosis', label: 'Kurtosis' },
+  { key: 'min', label: 'Min' },
+  { key: 'p5', label: 'P5' },
+  { key: 'p25', label: 'P25' },
+  { key: 'p75', label: 'P75' },
+  { key: 'p95', label: 'P95' },
+  { key: 'max', label: 'Max' },
+]
+
 function deriveHistogramProperties(values, minValue, maxValue) {
   const n = values.length
   if (n === 0) {
@@ -89,10 +104,12 @@ export function computeDistributionIndicators(values) {
       skewness: null,
       kurtosis: null,
       p10: null,
+      p5: null,
       p25: null,
       p50: null,
       p75: null,
       p90: null,
+      p95: null,
       iqr: null,
       min: null,
       max: null,
@@ -128,11 +145,13 @@ export function computeDistributionIndicators(values) {
     }, 0) / n) - 3
     : 0
 
+  const p5 = quantileFromSorted(sortedValues, 0.05)
   const p10 = quantileFromSorted(sortedValues, 0.1)
   const p25 = quantileFromSorted(sortedValues, 0.25)
   const p50 = quantileFromSorted(sortedValues, 0.5)
   const p75 = quantileFromSorted(sortedValues, 0.75)
   const p90 = quantileFromSorted(sortedValues, 0.9)
+  const p95 = quantileFromSorted(sortedValues, 0.95)
   const iqr = p75 !== null && p25 !== null ? (p75 - p25) : null
   const min = sortedValues[0]
   const max = sortedValues[sortedValues.length - 1]
@@ -147,11 +166,13 @@ export function computeDistributionIndicators(values) {
     stdDev,
     skewness,
     kurtosis,
+    p5,
     p10,
     p25,
     p50,
     p75,
     p90,
+    p95,
     iqr,
     min,
     max,
@@ -199,7 +220,7 @@ export function formatPerElicitationDistributionSummary(expertSeries, options = 
       `skew=${formatNumber(stats.skewness, decimals)}; kurt=${formatNumber(stats.kurtosis, decimals)}; cv=${formatPercent(stats.cv)}; entropy=${formatNumber(stats.entropyBits, 3)}b (norm=${formatNumber(stats.normalizedEntropy, 3)})`
     )
     lines.push(
-      `P10=${formatNumber(stats.p10, decimals)}; P25=${formatNumber(stats.p25, decimals)}; P50=${formatNumber(stats.p50, decimals)}; P75=${formatNumber(stats.p75, decimals)}; P90=${formatNumber(stats.p90, decimals)}; IQR=${formatNumber(stats.iqr, decimals)}`
+      `P5=${formatNumber(stats.p5, decimals)}; P25=${formatNumber(stats.p25, decimals)}; P50=${formatNumber(stats.p50, decimals)}; P75=${formatNumber(stats.p75, decimals)}; P95=${formatNumber(stats.p95, decimals)}; IQR=${formatNumber(stats.iqr, decimals)}`
     )
     lines.push(
       `min=${formatNumber(stats.min, decimals)}; max=${formatNumber(stats.max, decimals)}; mode~=${formatNumber(stats.modeApprox, decimals)}; peak~=${formatPercent(stats.peakProbability)}; ESS~=${stats.effectiveSampleSize}`
@@ -216,58 +237,48 @@ export function formatPerElicitationDistributionSummary(expertSeries, options = 
   }
 }
 
+export function buildDistributionStatsRows(expertSeries) {
+  if (!Array.isArray(expertSeries) || expertSeries.length === 0) return []
+
+  return expertSeries.map((entry, idx) => {
+    const stats = computeDistributionIndicators(entry?.values || [])
+    return {
+      label: String(entry?.label || `E${idx + 1}`),
+      expertName: String(entry?.expertName || entry?.label || `E${idx + 1}`),
+      n: stats.n,
+      ...Object.fromEntries(DISTRIBUTION_STAT_COLUMNS.map((column) => [column.key, stats[column.key]])),
+    }
+  })
+}
+
 export function buildDistributionStatsCsv(expertSeries, options = {}) {
   const title = String(options.title || 'Distribution stats').trim()
   const placeholderMessage = String(
     options.placeholderMessage || 'No distribution stats available yet.'
   ).trim()
 
-  const lines = [
-    `title;${title}`,
-    'elicitation;metric;value',
+  const headers = [
+    'expert',
+    'n',
+    ...DISTRIBUTION_STAT_COLUMNS.map((column) => column.key),
   ]
+  const lines = [`title;${title}`, headers.join(';')]
 
-  if (!Array.isArray(expertSeries) || expertSeries.length === 0) {
+  const rows = buildDistributionStatsRows(expertSeries)
+  if (rows.length === 0) {
     lines.push(`;note;${placeholderMessage}`)
     return `${lines.join('\n')}\n`
   }
 
-  expertSeries.forEach((entry, idx) => {
-    const stats = computeDistributionIndicators(entry?.values || [])
-    const label = String(entry?.label || `E${idx + 1}`)
-    const expertName = String(entry?.expertName || label).replace(/;/g, ',')
-    const rows = [
-      ['n', stats.n],
-      ['average', stats.average],
-      ['median', stats.median],
-      ['stdDev', stats.stdDev],
-      ['variance', stats.variance],
-      ['skewness', stats.skewness],
-      ['kurtosis', stats.kurtosis],
-      ['p10', stats.p10],
-      ['p25', stats.p25],
-      ['p50', stats.p50],
-      ['p75', stats.p75],
-      ['p90', stats.p90],
-      ['iqr', stats.iqr],
-      ['min', stats.min],
-      ['max', stats.max],
-      ['cv', stats.cv],
-      ['entropyBits', stats.entropyBits],
-      ['normalizedEntropy', stats.normalizedEntropy],
-      ['modeApprox', stats.modeApprox],
-      ['peakProbability', stats.peakProbability],
-      ['effectiveSampleSize', stats.effectiveSampleSize],
+  rows.forEach((row) => {
+    const values = [
+      String(`${row.label || ''} (${row.expertName || ''})`).replace(/;/g, ','),
+      Number.isFinite(row.n) ? String(row.n) : '',
+      ...DISTRIBUTION_STAT_COLUMNS.map((column) => (
+        Number.isFinite(row[column.key]) ? String(row[column.key]) : ''
+      )),
     ]
-
-    rows.forEach(([metric, value]) => {
-      const formatted = Number.isFinite(value) ? String(value) : ''
-      lines.push(`${label} (${expertName});${metric};${formatted}`)
-    })
-
-    if (idx < expertSeries.length - 1) {
-      lines.push('')
-    }
+    lines.push(values.join(';'))
   })
 
   return `${lines.join('\n')}\n`

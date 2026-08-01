@@ -8,6 +8,7 @@ task state and exporting results.
 import csv
 import io
 import json
+import math
 import re
 import zipfile
 from pathlib import Path
@@ -789,6 +790,154 @@ class WorkflowService:
             zf.writestr(path, self._rows_to_csv(headers, rows))
 
     @staticmethod
+    def _quantile_from_sorted(sorted_values, quantile):
+        if not isinstance(sorted_values, list) or not sorted_values:
+            return None
+        q = max(0.0, min(1.0, float(quantile)))
+        if len(sorted_values) == 1:
+            return float(sorted_values[0])
+
+        position = (len(sorted_values) - 1) * q
+        low_index = int(math.floor(position))
+        high_index = int(math.ceil(position))
+        weight = position - low_index
+        if low_index == high_index:
+            return float(sorted_values[low_index])
+        return float(sorted_values[low_index]) + (float(sorted_values[high_index]) - float(sorted_values[low_index])) * weight
+
+    @classmethod
+    def _compute_distribution_stats(cls, values):
+        numeric_values = []
+        for value in values if isinstance(values, list) else []:
+            try:
+                casted = float(value)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(casted):
+                numeric_values.append(casted)
+
+        n = len(numeric_values)
+        if n == 0:
+            return {
+                'n': 0,
+                'average': None,
+                'median': None,
+                'stdDev': None,
+                'iqr': None,
+                'skewness': None,
+                'kurtosis': None,
+                'min': None,
+                'p5': None,
+                'p25': None,
+                'p75': None,
+                'p95': None,
+                'max': None,
+            }
+
+        sorted_values = sorted(numeric_values)
+        avg = sum(numeric_values) / n
+        variance = sum(((value - avg) ** 2) for value in numeric_values) / n
+        std_dev = math.sqrt(variance)
+
+        if std_dev > 0:
+            skewness = sum((((value - avg) / std_dev) ** 3) for value in numeric_values) / n
+            kurtosis = (sum((((value - avg) / std_dev) ** 4) for value in numeric_values) / n) - 3
+        else:
+            skewness = 0.0
+            kurtosis = 0.0
+
+        p25 = cls._quantile_from_sorted(sorted_values, 0.25)
+        p75 = cls._quantile_from_sorted(sorted_values, 0.75)
+
+        return {
+            'n': n,
+            'average': avg,
+            'median': cls._quantile_from_sorted(sorted_values, 0.5),
+            'stdDev': std_dev,
+            'iqr': (p75 - p25) if p75 is not None and p25 is not None else None,
+            'skewness': skewness,
+            'kurtosis': kurtosis,
+            'min': sorted_values[0],
+            'p5': cls._quantile_from_sorted(sorted_values, 0.05),
+            'p25': p25,
+            'p75': p75,
+            'p95': cls._quantile_from_sorted(sorted_values, 0.95),
+            'max': sorted_values[-1],
+        }
+
+    @classmethod
+    def _collect_distribution_stats_rows(cls, step_results):
+        alternatives = step_results.get('alternative_names') if isinstance(step_results, dict) else None
+        by_elicitation = step_results.get('results_by_elicitation') if isinstance(step_results, dict) else None
+        if not isinstance(alternatives, list) or not alternatives or not isinstance(by_elicitation, dict):
+            return []
+
+        def _sort_key(item):
+            key = str(item[0])
+            try:
+                return (0, float(key))
+            except (TypeError, ValueError):
+                return (1, key)
+
+        rows = []
+        sorted_entries = sorted(by_elicitation.items(), key=_sort_key)
+        for alt_index, alt_name in enumerate(alternatives):
+            for idx, (elicitation_key, iteration_rows) in enumerate(sorted_entries):
+                values = []
+                if isinstance(iteration_rows, list):
+                    for score_row in iteration_rows:
+                        if isinstance(score_row, list) and alt_index < len(score_row):
+                            values.append(score_row[alt_index])
+
+                stats = cls._compute_distribution_stats(values)
+                rows.append({
+                    'expert': f'{alt_name} - E{idx + 1} ({elicitation_key})',
+                    **stats,
+                })
+
+        return rows
+
+    def _write_distribution_stats_csv(self, zf, path, step_results, title):
+        rows = self._collect_distribution_stats_rows(step_results)
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter=';')
+        writer.writerow(['title', title])
+        headers = ['expert', 'n', 'mean', 'median', 'stdDev', 'iqr', 'skewness', 'kurtosis', 'min', 'p5', 'p25', 'p75', 'p95', 'max']
+        writer.writerow(headers)
+        if not rows:
+            writer.writerow(['note', 'Distribution stats are not available yet.'])
+        else:
+            for row in rows:
+                writer.writerow([
+                    row['expert'],
+                    row['n'],
+                    self._format_export_number(row.get('average'), 6),
+                    self._format_export_number(row.get('median'), 6),
+                    self._format_export_number(row.get('stdDev'), 6),
+                    self._format_export_number(row.get('iqr'), 6),
+                    self._format_export_number(row.get('skewness'), 6),
+                    self._format_export_number(row.get('kurtosis'), 6),
+                    self._format_export_number(row.get('min'), 6),
+                    self._format_export_number(row.get('p5'), 6),
+                    self._format_export_number(row.get('p25'), 6),
+                    self._format_export_number(row.get('p75'), 6),
+                    self._format_export_number(row.get('p95'), 6),
+                    self._format_export_number(row.get('max'), 6),
+                ])
+
+        zf.writestr(path, ExportService._csv_bytes(output.getvalue()))
+
+    @staticmethod
+    def _workflow_step_export_prefix(step_number):
+        mapping = {
+            2: 'step_4_consensus_analysis',
+            4: 'step_2_choose_aggregation_method',
+            5: 'step_3_uncertainty_analysis',
+            6: 'step_5_final_results',
+        }
+        return mapping.get(step_number, f'step_{step_number}')
+
+    @staticmethod
     def _repo_root():
         return Path(__file__).resolve().parents[3]
 
@@ -969,20 +1118,28 @@ class WorkflowService:
                 if not step_results:
                     continue
 
-                zf.writestr(f'steps/step_{step_number}_results.json', self._json_bytes(step_results))
+                export_prefix = self._workflow_step_export_prefix(step_number)
+                zf.writestr(f'steps/{export_prefix}_results.json', self._json_bytes(step_results))
 
                 if step_number in [2, 5]:
                     self._write_strict_results_long_csv(
                         zf,
-                        f'steps/step_{step_number}_strict_long.csv',
+                        f'steps/{export_prefix}_strict_long.csv',
                         step_results,
                     )
+                    if step_number == 5:
+                        self._write_distribution_stats_csv(
+                            zf,
+                            f'steps/{export_prefix}_distribution_stats.csv',
+                            step_results,
+                            'Step 3 uncertainty analysis stats',
+                        )
                 elif step_number in [3, 6]:
                     matrix = self._build_rank_probability_matrix(step_results)
                     if matrix:
                         self._write_rank_probability_csv(
                             zf,
-                            f'steps/step_{step_number}_rank_probabilities.csv',
+                            f'steps/{export_prefix}_rank_probabilities.csv',
                             matrix,
                         )
                 elif step_number == 4 and isinstance(step_results.get('results_by_aggregation'), dict):
@@ -992,7 +1149,7 @@ class WorkflowService:
                             safe_agg = self._safe_filename(agg_name)
                             self._write_rank_probability_csv(
                                 zf,
-                                f'steps/step_4_rank_probabilities_{safe_agg}.csv',
+                                f'steps/{export_prefix}_rank_probabilities_{safe_agg}.csv',
                                 matrix,
                             )
 

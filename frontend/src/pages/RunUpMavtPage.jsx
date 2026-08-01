@@ -42,11 +42,16 @@ import {
   ModalCloseButton,
   ModalBody,
   ModalFooter,
-  Textarea,
   Collapse,
-  
+  TableContainer,
+  Table,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
 } from '@chakra-ui/react'
-import { DownloadIcon, ExternalLinkIcon } from '@chakra-ui/icons'
+import { DownloadIcon, ExternalLinkIcon, InfoOutlineIcon } from '@chakra-ui/icons'
 import { ChevronDownIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import JSZip from 'jszip'
@@ -74,7 +79,13 @@ import {
   isPileBwtComplete,
   isSessionComplete,
 } from '../utils/sessionUtils'
-import { formatPerElicitationDistributionSummary, buildDistributionStatsCsv } from '../utils/distributionStats'
+import {
+  formatPerElicitationDistributionSummary,
+  buildDistributionStatsCsv,
+  buildDistributionStatsRows,
+  DISTRIBUTION_STAT_COLUMNS,
+} from '../utils/distributionStats'
+import { downloadCSVFile } from '../utils/csvExport'
 
 const STEP2_COLORS = ['#3182CE', '#E57373', '#C77DFF', '#4DD0E1', '#38A169', '#D69E2E']
 const PNG_SCALE_FACTOR = 2
@@ -166,6 +177,20 @@ const AGGREGATION_METHODS = [
   },
 ]
 const DEFAULT_AGGREGATION_STEP_METHODS = ['WAM', 'GEO', 'HAR']
+const DISTRIBUTION_STAT_TOOLTIPS = {
+  average: 'Arithmetic mean; useful as a central tendency indicator but sensitive to extreme values.',
+  median: 'Robust central tendency (50th percentile); less sensitive to outliers than the mean.',
+  stdDev: 'Spread around the mean; larger values indicate higher overall variability.',
+  iqr: 'Interquartile Range (P75 - P25); robust spread measure focused on the middle 50% of values.',
+  skewness: 'Asymmetry indicator: positive means a longer right tail, negative means a longer left tail.',
+  kurtosis: 'Tail heaviness relative to a normal distribution; higher values indicate more extreme tails.',
+  min: 'Smallest observed value in the sampled distribution.',
+  p5: 'Lower-tail quantile: 5% of sampled values are below this point.',
+  p25: 'First quartile: 25% of sampled values are below this point.',
+  p75: 'Third quartile: 75% of sampled values are below this point.',
+  p95: 'Upper-tail quantile: 95% of sampled values are below this point.',
+  max: 'Largest observed value in the sampled distribution.',
+}
 
 function getAggregationMeta(methodId) {
   const token = String(methodId || '').trim().toUpperCase()
@@ -1177,6 +1202,98 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     setShowDistributionStats((prev) => ({ ...prev, [key]: !prev[key] }))
   }
 
+  const formatDistributionStatValue = (value) => {
+    const numericValue = Number(value)
+    if (!Number.isFinite(numericValue)) return 'n/a'
+    return numericValue.toFixed(4)
+  }
+
+  const handleDownloadDistributionStatsCsv = (expertSeries, title, filenameBase) => {
+    const csvContent = buildDistributionStatsCsv(expertSeries, {
+      title,
+      placeholderMessage: 'Distribution stats are not available yet.',
+    })
+    downloadCSVFile(csvContent, `${sanitizeFilename(filenameBase)}.csv`)
+  }
+
+  const renderDistributionStatsTable = ({ stepPrefix, altIndex, distData, title, filenameBase }) => {
+    const statsKey = `${stepPrefix}_${altIndex}`
+    const isOpen = Boolean(showDistributionStats[statsKey])
+    const statsRows = buildDistributionStatsRows(distData?.expertSeries || [])
+
+    return (
+      <>
+        <HStack justify="space-between" align="center" mb={2} pr={12}>
+          <Text fontWeight="semibold" fontSize="sm">{`Distribution of Values for ${distData?.altName || 'Alternative'}`}</Text>
+          <Button
+            size="sm"
+            variant="link"
+            rightIcon={(
+              <ChevronDownIcon
+                transform={isOpen ? 'rotate(180deg)' : 'rotate(0deg)'}
+                transition="transform 0.2s ease"
+              />
+            )}
+            onClick={() => toggleDistributionStats(statsKey)}
+          >
+            Distribution stats
+          </Button>
+        </HStack>
+        <Collapse in={isOpen} animateOpacity>
+          <Box mb={3} bg="white" borderWidth={1} borderColor="gray.200" borderRadius="md" p={3}>
+            <HStack justify="space-between" mb={3}>
+              <Text fontSize="sm" color="gray.700" fontWeight="medium">
+                Per-expert uncertainty statistics
+              </Text>
+              <Tooltip label="Download stats table as CSV" hasArrow>
+                <IconButton
+                  aria-label={`Download distribution stats table for ${distData?.altName || 'alternative'}`}
+                  icon={<DownloadIcon />}
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleDownloadDistributionStatsCsv(distData?.expertSeries || [], title, filenameBase)}
+                />
+              </Tooltip>
+            </HStack>
+            <TableContainer overflowX="auto">
+              <Table size="sm" variant="simple">
+                <Thead>
+                  <Tr>
+                    <Th>Expert</Th>
+                    {DISTRIBUTION_STAT_COLUMNS.map((column) => (
+                      <Th key={column.key}>
+                        <HStack spacing={1}>
+                          <Text as="span">{column.label}</Text>
+                          <Tooltip label={DISTRIBUTION_STAT_TOOLTIPS[column.key] || column.label} hasArrow>
+                            <Box as="span" display="inline-flex" alignItems="center">
+                              <InfoOutlineIcon color="gray.500" boxSize={3} />
+                            </Box>
+                          </Tooltip>
+                        </HStack>
+                      </Th>
+                    ))}
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {statsRows.map((row) => (
+                    <Tr key={`${row.label}-${row.expertName}`}>
+                      <Td>{`${row.label} (${row.expertName})`}</Td>
+                      {DISTRIBUTION_STAT_COLUMNS.map((column) => (
+                        <Td key={`${row.label}-${row.expertName}-${column.key}`}>
+                          {formatDistributionStatValue(row[column.key])}
+                        </Td>
+                      ))}
+                    </Tr>
+                  ))}
+                </Tbody>
+              </Table>
+            </TableContainer>
+          </Box>
+        </Collapse>
+      </>
+    )
+  }
+
   const getConsistencyPlotData = () => {
     const sessionDoc = sessions.find((session) => session?._id === selectedWeightSession)
     const comparisons = Array.isArray(sessionDoc?.bwt?.comparisons) ? sessionDoc.bwt.comparisons : []
@@ -1671,7 +1788,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       if (exportIncludeResultsCsv) {
         const resultsCsv = buildRankProbabilityCsv(step6Results)
         if (resultsCsv) {
-          exportZip.file('results/final_results_rank_probabilities.csv', resultsCsv)
+          exportZip.file('results/step5_final_results_rank_probabilities.csv', resultsCsv)
           exportedArtifacts += 1
         }
       }
@@ -1684,7 +1801,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           ...buildSimulationCsvExports(6, step6Results),
         ]
         simulationExports.forEach((entry) => {
-          exportZip.file(`results/simulation_csvs/${sanitizeFilename(entry.filenameBase)}.csv`, entry.csvText)
+          const workflowNamedBase = toWorkflowStepFilenameBase(entry.filenameBase)
+          exportZip.file(`results/simulation_csvs/${sanitizeFilename(workflowNamedBase)}.csv`, entry.csvText)
         })
         if (simulationExports.length > 0) {
           exportedArtifacts += 1
@@ -1703,10 +1821,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           }).filter(Boolean)
 
           const step2StatsCsv = buildConsensusQuantificationCsv(step2ConsensusRows, {
-            title: 'Step 2 consensus quantification',
+            title: 'Step 4 consensus analysis quantification',
             placeholderMessage: 'Consensus quantification is not available yet.',
           })
-          exportZip.file('results/step2_consensus_quantification.csv', step2StatsCsv)
+          exportZip.file('results/step4_consensus_analysis_quantification.csv', step2StatsCsv)
           exportedArtifacts += 1
         }
 
@@ -1721,10 +1839,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
             }))
           })
           const step5StatsCsv = buildDistributionStatsCsv(step5Stats, {
-            title: 'Step 5 uncertainty stats',
+            title: 'Step 3 uncertainty analysis stats',
             placeholderMessage: 'Uncertainty stats are not available yet.',
           })
-          exportZip.file('results/step5_uncertainty_stats.csv', step5StatsCsv)
+          exportZip.file('results/step3_uncertainty_analysis_stats.csv', step5StatsCsv)
           exportedArtifacts += 1
         }
       }
@@ -1736,14 +1854,14 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         })
         if (finalHeatmapSvg) {
           const { width, height } = getRankingHeatmapDimensions(step6Results)
-          exportZip.file('results/final_ranking_heatmap.svg', finalHeatmapSvg)
+          exportZip.file('results/step5_final_results_ranking_heatmap.svg', finalHeatmapSvg)
           try {
             const finalHeatmapPng = await renderSvgMarkupToPngBlob(
               finalHeatmapSvg,
               width * PNG_SCALE_FACTOR,
               height * PNG_SCALE_FACTOR
             )
-            exportZip.file('results/final_ranking_heatmap.png', finalHeatmapPng)
+            exportZip.file('results/step5_final_results_ranking_heatmap.png', finalHeatmapPng)
           } catch (error) {
             console.error('Unable to export final ranking heatmap as PNG', error)
           }
@@ -1846,7 +1964,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         }
 
         for (const image of imageTargets) {
-          exportZip.file(`images/${sanitizeFilename(image.filenameBase)}.svg`, image.svgMarkup)
+          const workflowNamedBase = toWorkflowStepFilenameBase(image.filenameBase)
+          exportZip.file(`images/${sanitizeFilename(workflowNamedBase)}.svg`, image.svgMarkup)
 
           try {
             const pngBlob = await renderSvgMarkupToPngBlob(
@@ -1854,7 +1973,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
               image.width * PNG_SCALE_FACTOR,
               image.height * PNG_SCALE_FACTOR
             )
-            exportZip.file(`images/${sanitizeFilename(image.filenameBase)}.png`, pngBlob)
+            exportZip.file(`images/${sanitizeFilename(workflowNamedBase)}.png`, pngBlob)
           } catch (error) {
             console.error(`Unable to export ${image.filenameBase} as PNG`, error)
           }
@@ -2793,31 +2912,16 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   top={2}
                                   right={2}
                                   zIndex={2}
-                                  onClick={() => handleDownloadChartPng(`step5_distribution_${altIndex}`, `step5_distribution_${altName}`)}
+                                  onClick={() => handleDownloadChartPng(`step5_distribution_${altIndex}`, `step3_uncertainty_analysis_distribution_${altName}`)}
                                 />
                               </Tooltip>
-                              <HStack justify="space-between" align="center" mb={2} pr={12}>
-                                <Text fontWeight="semibold" fontSize="sm">{`Distribution of Values for ${altName}`}</Text>
-                                <Button size="sm" variant="link" rightIcon={<ChevronDownIcon />} onClick={() => toggleDistributionStats(`step5_${altIndex}`)}>
-                                  Distribution stats
-                                </Button>
-                              </HStack>
-                              <Collapse in={Boolean(showDistributionStats[`step5_${altIndex}`])} animateOpacity>
-                                <Box mb={3}>
-                                  <Textarea
-                                    value={distData.summaryText}
-                                    isReadOnly
-                                    resize="vertical"
-                                    minH="110px"
-                                    maxH="260px"
-                                    mb={3}
-                                    fontFamily="mono"
-                                    fontSize="xs"
-                                    bg="white"
-                                    spellCheck={false}
-                                  />
-                                </Box>
-                              </Collapse>
+                              {renderDistributionStatsTable({
+                                stepPrefix: 'step5',
+                                altIndex,
+                                distData,
+                                title: `Step 3 uncertainty analysis stats - ${altName}`,
+                                filenameBase: `step3_uncertainty_analysis_stats_${altName}`,
+                              })}
                               <ResponsiveContainer width="100%" height={250}>
                                 <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 0, bottom: 24 }}>
                                   <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
@@ -2969,7 +3073,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   top={2}
                                   right={2}
                                   zIndex={2}
-                                  onClick={() => handleDownloadChartPng(`step2_distribution_${altIndex}`, `step2_distribution_${altName}`)}
+                                  onClick={() => handleDownloadChartPng(`step2_distribution_${altIndex}`, `step4_consensus_analysis_distribution_${altName}`)}
                                 />
                               </Tooltip>
                               <HStack justify="space-between" align="center" mb={2} pr={12}>
@@ -3162,13 +3266,13 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   isChecked={exportIncludeStep2ConsensusQuantificationCsv}
                   onChange={(e) => setExportIncludeStep2ConsensusQuantificationCsv(e.target.checked)}
                 >
-                  Step 2 consensus quantification
+                  Step 4 consensus quantification
                 </Checkbox>
                 <Checkbox
                   isChecked={exportIncludeStep5UncertaintyStatsCsv}
                   onChange={(e) => setExportIncludeStep5UncertaintyStatsCsv(e.target.checked)}
                 >
-                  Step 5 uncertainty stats
+                  Step 3 uncertainty stats
                 </Checkbox>
                 <Checkbox
                   isChecked={exportIncludeFullData}
@@ -3282,6 +3386,16 @@ function sanitizeFilename(value) {
     .replace(/^_+|_+$/g, '') || 'export'
 }
 
+function toWorkflowStepFilenameBase(filenameBase) {
+  const base = String(filenameBase || '')
+  if (base.startsWith('step_1_')) return base.replace('step_1_', 'step_1_finalize_elicited_data_')
+  if (base.startsWith('step_2_')) return base.replace('step_2_', 'step_4_consensus_analysis_')
+  if (base.startsWith('step_4_')) return base.replace('step_4_', 'step_2_choose_aggregation_method_')
+  if (base.startsWith('step_5_')) return base.replace('step_5_', 'step_3_uncertainty_analysis_')
+  if (base.startsWith('step_6_')) return base.replace('step_6_', 'step_5_final_results_')
+  return base
+}
+
 function getRankingHeatmapDimensions(results) {
   const matrix = buildRankProbabilityMatrix(results)
   if (!matrix) {
@@ -3338,7 +3452,7 @@ function computeConsensusQuantification(densityData, expertNames) {
 }
 
 function buildConsensusQuantificationCsv(consensusRows, options = {}) {
-  const title = String(options.title || 'Step 2 consensus quantification').trim()
+  const title = String(options.title || 'Step 4 consensus analysis quantification').trim()
   const placeholderMessage = String(
     options.placeholderMessage || 'Consensus quantification is not available yet.'
   ).trim()
