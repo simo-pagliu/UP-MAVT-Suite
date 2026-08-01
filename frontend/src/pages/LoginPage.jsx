@@ -529,43 +529,47 @@ function LoginPage({ onLogin, onDocumentation }) {
                 <Divider />
                 <VStack spacing={3} align="stretch">
                   <Heading size="sm">{isCreateFlow ? 'Create New Session' : 'Upload Case Study'}</Heading>
-                  <Text color="gray.600" fontSize="sm">
-                    Do you agree to share your email?
-                  </Text>
-                  <Text color="gray.600" fontSize="sm">
-                    Without your email, you may permanently lose access to this case study if you do not save your
-                    code. Your email also helps with session recovery, updates, and support. By providing your email,
-                    you agree to the{' '}
-                    <Link href={PSI_TERMS_OF_USE_URL} isExternal color="blue.700">
-                      PSI terms of use
-                    </Link>
-                    .
-                  </Text>
-                  <HStack spacing={3}>
-                    <Button
-                      variant={emailConsent === true ? 'solid' : 'outline'}
-                      colorScheme="blue"
-                      onClick={() => {
-                        setEmailConsent(true)
-                        setEmail('')
-                        resetEmailVerificationState()
-                      }}
-                    >
-                      Yes, share email
-                    </Button>
-                    <Button
-                      variant={emailConsent === false ? 'solid' : 'outline'}
-                      onClick={() => {
-                        setEmailConsent(false)
-                        setEmail('')
-                        resetEmailVerificationState()
-                      }}
-                    >
-                      No, continue without email
-                    </Button>
-                  </HStack>
+                  {emailEnabled && (
+                    <>
+                      <Text color="gray.600" fontSize="sm">
+                        Do you agree to share your email?
+                      </Text>
+                      <Text color="gray.600" fontSize="sm">
+                        Without your email, you may permanently lose access to this case study if you do not save your
+                        code. Your email also helps with session recovery, updates, and support. By providing your email,
+                        you agree to the{' '}
+                        <Link href={PSI_TERMS_OF_USE_URL} isExternal color="blue.700">
+                          PSI terms of use
+                        </Link>
+                        .
+                      </Text>
+                      <HStack spacing={3}>
+                        <Button
+                          variant={emailConsent === true ? 'solid' : 'outline'}
+                          colorScheme="blue"
+                          onClick={() => {
+                            setEmailConsent(true)
+                            setEmail('')
+                            resetEmailVerificationState()
+                          }}
+                        >
+                          Yes, share email
+                        </Button>
+                        <Button
+                          variant={emailConsent === false ? 'solid' : 'outline'}
+                          onClick={() => {
+                            setEmailConsent(false)
+                            setEmail('')
+                            resetEmailVerificationState()
+                          }}
+                        >
+                          No, continue without email
+                        </Button>
+                      </HStack>
+                    </>
+                  )}
 
-                  {emailConsent !== null && (
+                  {(emailEnabled ? emailConsent !== null : true) && (
                     <>
                       <Text color="gray.600" fontSize="sm">
                         {getPrimaryInstruction()}
@@ -600,11 +604,6 @@ function LoginPage({ onLogin, onDocumentation }) {
                       {requiresEmailVerification && verificationError && (
                         <Text color="red.600" fontSize="sm">
                           {verificationError}
-                        </Text>
-                      )}
-                      {!emailEnabled && emailConsent === true && (
-                        <Text color="gray.600" fontSize="sm">
-                          Email verification is currently unavailable, so you can continue without email.
                         </Text>
                       )}
                       <HStack spacing={3}>
