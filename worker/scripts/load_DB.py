@@ -360,10 +360,21 @@ def build_value_functions_from_session(session_doc, criteria, return_confidence=
     """
     vf_dict = {}
     confidence_dict = {}
-    
+
     value_functions_data = session_doc.get('value_functions', {})
     qualitative_indicators = session_doc.get('qualitative_indicators')
-    
+    practitioner_settings = session_doc.get('practitioner_settings')
+    confidence_adjustments = {}
+    if isinstance(practitioner_settings, dict):
+        confidence_adjustments = practitioner_settings.get('confidence_adjustments', {})
+    if not isinstance(confidence_adjustments, dict):
+        confidence_adjustments = {}
+    overall_adjustment = _normalize_confidence_adjustment(confidence_adjustments.get('overall'))
+    vf_group_adjustment = _normalize_confidence_adjustment(confidence_adjustments.get('vf'))
+    vf_criteria_adjustments = confidence_adjustments.get('vf_criteria', {})
+    if not isinstance(vf_criteria_adjustments, dict):
+        vf_criteria_adjustments = {}
+
     criteria_map = value_functions_data.get('criteria', {}) if isinstance(value_functions_data, dict) else {}
     
     for criterion in criteria:
@@ -389,7 +400,11 @@ def build_value_functions_from_session(session_doc, criteria, return_confidence=
                 points = cfg.get('points', [])
             if return_confidence:
                 confidence = cfg.get('confidence', 4) if isinstance(cfg, dict) else 4
-                confidence_dict[name] = int(confidence)
+                criterion_adjustment = _normalize_confidence_adjustment(vf_criteria_adjustments.get(name))
+                confidence_dict[name] = _apply_confidence_adjustment(
+                    confidence,
+                    overall_adjustment + vf_group_adjustment + criterion_adjustment,
+                )
         
         if not points or len(points) < 2:
             continue
@@ -439,7 +454,7 @@ def build_comparisons_from_session(session_doc):
     return comparisons
 
 
-def build_alternatives_with_qualitative(input_doc, qualitative_indicators=None):
+def build_alternatives_with_qualitative(input_doc, qualitative_indicators=None, practitioner_settings=None):
     """Build alternatives dict with qualitative substitution.
     
     Parameters
@@ -480,14 +495,16 @@ def build_alternatives_with_qualitative(input_doc, qualitative_indicators=None):
     
     # Substitute qualitative values with x-positions and encode uncertainty
     if qualitative_indicators and isinstance(qualitative_indicators, dict):
-        # Confidence to error percentage mapping
-        confidence_errors = {
-            0: 10.0,
-            1: 7.5,
-            2: 5.0,
-            3: 2.5,
-            4: 0.0,
-        }
+        confidence_adjustments = {}
+        if isinstance(practitioner_settings, dict):
+            confidence_adjustments = practitioner_settings.get('confidence_adjustments', {})
+        if not isinstance(confidence_adjustments, dict):
+            confidence_adjustments = {}
+        overall_adjustment = _normalize_confidence_adjustment(confidence_adjustments.get('overall'))
+        qi_group_adjustment = _normalize_confidence_adjustment(confidence_adjustments.get('qi'))
+        qi_criteria_adjustments = confidence_adjustments.get('qi_criteria', {})
+        if not isinstance(qi_criteria_adjustments, dict):
+            qi_criteria_adjustments = {}
         
         for criterion in criteria:
             if not criterion.get('is_qualitative'):
@@ -501,6 +518,7 @@ def build_alternatives_with_qualitative(input_doc, qualitative_indicators=None):
             ranking = qi_data.get('ranking', {})
             values = qi_data.get('values', {})
             confidences = qi_data.get('confidences', {})
+            criterion_adjustment = _normalize_confidence_adjustment(qi_criteria_adjustments.get(crit_name))
             
             if not ranking or not values:
                 continue
@@ -521,7 +539,11 @@ def build_alternatives_with_qualitative(input_doc, qualitative_indicators=None):
                     # Get confidence for this rank and encode uncertainty
                     conf_key = str(rank) if not isinstance(rank, str) else rank
                     confidence = confidences.get(conf_key, confidences.get(int(conf_key) if conf_key.isdigit() else conf_key, 4))
-                    error_pct = confidence_errors.get(int(confidence), 0.0)
+                    adjusted_confidence = _apply_confidence_adjustment(
+                        confidence,
+                        overall_adjustment + qi_group_adjustment + criterion_adjustment,
+                    )
+                    error_pct = _confidence_to_error_pct(adjusted_confidence, scale=10.0)
                     
                     if error_pct > 0:
                         # Format as "x_pos ± error_pct%"
@@ -531,3 +553,26 @@ def build_alternatives_with_qualitative(input_doc, qualitative_indicators=None):
                         alternatives[alt_name][crit_name] = x_pos
     
     return alternatives, criteria_names
+
+
+def _normalize_confidence_adjustment(value):
+    try:
+        adjustment = float(value)
+    except (TypeError, ValueError):
+        adjustment = 0.0
+    if adjustment < -4.0 or adjustment > 4.0:
+        return 0.0
+    return round(adjustment, 1)
+
+
+def _apply_confidence_adjustment(confidence, adjustment=0.0):
+    try:
+        normalized = float(confidence)
+    except (TypeError, ValueError):
+        normalized = 4.0
+    return max(0.0, min(4.0, normalized + adjustment))
+
+
+def _confidence_to_error_pct(confidence, scale=10.0):
+    normalized = _apply_confidence_adjustment(confidence, 0.0)
+    return scale * (4.0 - normalized) / 4.0

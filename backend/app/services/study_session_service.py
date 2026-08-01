@@ -502,6 +502,8 @@ class StudySessionService:
             'qualitative_indicators': None,
             'value_functions': None,
             'bwt': None,
+            'practitioner_settings': self._session_svc.normalize_practitioner_settings(criteria, None),
+            'practitioner_note': '',
             'locked': False,
             'session_locked': False,
             'created_at': datetime.now(timezone.utc),
@@ -535,12 +537,10 @@ class StudySessionService:
             if isinstance(input_doc, dict):
                 criteria = input_doc.get('criteria', [])
         sessions = self._sessions.find_by_study_session_id(study_session_id)
-        for s in sessions:
-            s['_id'] = str(s['_id'])
-            s['study_session_id'] = self._studies._str_id(s.get('study_session_id'))
-            s['input_id'] = self._studies._str_id(s.get('input_id'))
-            s['friendly_name'] = str(s.get('friendly_name') or '').strip()
+        for idx, session in enumerate(sessions):
+            s = self._session_svc._serialize_session(session)
             s['computed_weights'] = self._serialize_computed_weights(study)
+            sessions[idx] = s
         return {
             'study_session_id': str(study['_id']) if isinstance(study.get('_id'), ObjectId) else study.get('_id'),
             'study_code': study.get('code'),
@@ -584,6 +584,10 @@ class StudySessionService:
                 {
                     'name': s.get('name'),
                     'friendly_name': s.get('friendly_name', ''),
+                    'practitioner_settings': self._session_svc.normalize_practitioner_settings(
+                        criteria,
+                        s.get('practitioner_settings'),
+                    ),
                     'created_at': s.get('created_at').isoformat() if s.get('created_at') else None,
                 }
                 for s in sessions
@@ -617,6 +621,11 @@ class StudySessionService:
                 session_payload = {
                     'name': session_name,
                     'friendly_name': session.get('friendly_name', ''),
+                    'practitioner_settings': self._session_svc.normalize_practitioner_settings(
+                        criteria,
+                        session.get('practitioner_settings'),
+                    ),
+                    'practitioner_note': str(session.get('practitioner_note') or ''),
                     'qualitative_indicators': session.get('qualitative_indicators'),
                     'value_functions': session.get('value_functions'),
                     'bwt': session.get('bwt'),
@@ -718,6 +727,11 @@ class StudySessionService:
             created_session_id = self.create_elicitation_session(study_session_id, requested_name)
             self._sessions.update(created_session_id, {
                 'friendly_name': str(payload.get('friendly_name') or '').strip(),
+                'practitioner_settings': self._session_svc.normalize_practitioner_settings(
+                    imported_criteria,
+                    payload.get('practitioner_settings'),
+                ),
+                'practitioner_note': str(payload.get('practitioner_note') or ''),
                 'qualitative_indicators': payload.get('qualitative_indicators'),
                 'value_functions': payload.get('value_functions'),
                 'bwt': payload.get('bwt'),
