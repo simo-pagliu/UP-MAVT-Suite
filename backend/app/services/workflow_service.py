@@ -197,6 +197,15 @@ class WorkflowService:
             raise ValidationError('No valid session IDs selected')
 
         session_docs = self._sessions.find_by_ids(selected_session_ids)
+        session_docs_by_id = {
+            str(doc.get('_id')): doc
+            for doc in session_docs
+            if self._sessions._to_oid(doc.get('study_session_id')) == self._studies._to_oid(study_session_id)
+        }
+        selected_session_ids = [sid for sid in selected_session_ids if str(sid) in session_docs_by_id]
+        if not selected_session_ids:
+            raise ValidationError('No valid session IDs selected')
+        session_docs = [session_docs_by_id[str(sid)] for sid in selected_session_ids]
         confidence_adjustments = (
             (study.get('workflow_preferences') or {})
             .get('run_page', {})
