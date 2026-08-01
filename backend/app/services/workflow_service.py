@@ -217,7 +217,10 @@ class WorkflowService:
             sid = str(session_doc.get('_id', ''))
             session_ids_ordered.append(sid)
             base_confidence = self._compute_session_base_confidence(session_doc)
-            adjustment = float(confidence_adjustments.get(sid, 0.0))
+            try:
+                adjustment = float(confidence_adjustments.get(sid, 0.0))
+            except (TypeError, ValueError):
+                adjustment = 0.0
             adjusted = max(0.0, base_confidence + adjustment)
             raw_opinion_weights.append(adjusted)
 
