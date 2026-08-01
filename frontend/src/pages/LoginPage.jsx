@@ -506,7 +506,12 @@ function LoginPage({ onLogin, onDocumentation }) {
                       placeholder="Enter session code"
                       value={code}
                       onChange={(e) => setCode(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleDetectAndLogin()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          handleDetectAndLogin()
+                        }
+                      }}
                       isDisabled={loading}
                       bg="white"
                       w="50%"
@@ -573,14 +578,16 @@ function LoginPage({ onLogin, onDocumentation }) {
                             const nextValue = e.target.value
                             setEntryValue(nextValue)
                             setVerificationError('')
-
                             if (!verificationCodeSent) {
                               setEmail(nextValue)
-                              resetEmailVerificationState()
-                              setEntryValue(nextValue)
                             }
                           }}
-                          onKeyDown={(e) => e.key === 'Enter' && handlePrimaryAction()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              handlePrimaryAction()
+                            }
+                          }}
                           isDisabled={loading || verificationLoading}
                           bg="white"
                         />
