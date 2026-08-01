@@ -18,6 +18,18 @@ logger = logging.getLogger(__name__)
 class SessionService:
     """Service layer for elicitation session operations."""
 
+    DEFAULT_PRACTITIONER_SETTINGS = {
+        'notes': '',
+        'overall_weight': 1.0,
+        'confidence_adjustments': {
+            'overall': 0.0,
+            'qi': 0.0,
+            'vf': 0.0,
+            'qi_criteria': {},
+            'vf_criteria': {},
+        },
+    }
+
     def __init__(self, db):
         """Initialise the service with a database handle.
 
@@ -65,6 +77,28 @@ class SessionService:
         except (TypeError, ValueError):
             confidence = default
         return max(0, min(4, confidence))
+
+    @staticmethod
+    def _normalize_adjustment_value(value, default=0.0):
+        """Clamp a confidence adjustment to the valid range [-4.0, 4.0]."""
+        try:
+            adjustment = float(value)
+        except (TypeError, ValueError):
+            adjustment = default
+        if adjustment < -4.0 or adjustment > 4.0:
+            return float(default)
+        return round(adjustment, 1)
+
+    @staticmethod
+    def _normalize_weight_value(value, default=1.0):
+        """Normalize a practitioner opinion weight to a non-negative float."""
+        try:
+            weight = float(value)
+        except (TypeError, ValueError):
+            return float(default)
+        if weight < 0:
+            return float(default)
+        return weight
 
     @classmethod
     def _build_rank_confidences_from_alternatives(cls, ranking, confidences_alternatives):
@@ -312,7 +346,54 @@ class SessionService:
             session['study_session_id'] = self._sessions._str_id(session.get('study_session_id'))
         session['friendly_name'] = str(session.get('friendly_name') or '').strip()
         session['criteria'] = self.resolve_session_criteria(session)
+        session['practitioner_settings'] = self.normalize_practitioner_settings(
+            session['criteria'],
+            session.get('practitioner_settings'),
+        )
         return session
+
+    @classmethod
+    def normalize_practitioner_settings(cls, criteria, practitioner_settings):
+        """Normalize practitioner-side notes, weight, and confidence adjustments."""
+        settings = practitioner_settings if isinstance(practitioner_settings, dict) else {}
+        confidence = settings.get('confidence_adjustments')
+        confidence = confidence if isinstance(confidence, dict) else {}
+
+        qi_names = []
+        vf_names = []
+        for criterion in criteria if isinstance(criteria, list) else []:
+            if not isinstance(criterion, dict):
+                continue
+            name = criterion.get('criterion_name')
+            if not name:
+                continue
+            if criterion.get('is_qualitative'):
+                qi_names.append(name)
+            else:
+                vf_names.append(name)
+
+        raw_qi_criteria = confidence.get('qi_criteria')
+        raw_qi_criteria = raw_qi_criteria if isinstance(raw_qi_criteria, dict) else {}
+        raw_vf_criteria = confidence.get('vf_criteria')
+        raw_vf_criteria = raw_vf_criteria if isinstance(raw_vf_criteria, dict) else {}
+
+        return {
+            'notes': str(settings.get('notes') or '').strip(),
+            'overall_weight': cls._normalize_weight_value(settings.get('overall_weight'), default=1.0),
+            'confidence_adjustments': {
+                'overall': cls._normalize_adjustment_value(confidence.get('overall'), default=0.0),
+                'qi': cls._normalize_adjustment_value(confidence.get('qi'), default=0.0),
+                'vf': cls._normalize_adjustment_value(confidence.get('vf'), default=0.0),
+                'qi_criteria': {
+                    name: cls._normalize_adjustment_value(raw_qi_criteria.get(name), default=0.0)
+                    for name in qi_names
+                },
+                'vf_criteria': {
+                    name: cls._normalize_adjustment_value(raw_vf_criteria.get(name), default=0.0)
+                    for name in vf_names
+                },
+            },
+        }
 
     # ------------------------------------------------------------------ #
     # Completeness checks
@@ -410,6 +491,7 @@ class SessionService:
             'qualitative_indicators': None,
             'value_functions': None,
             'bwt': None,
+            'practitioner_settings': self.normalize_practitioner_settings(criteria, None),
             'locked': False,
             'session_locked': False,
             'created_at': datetime.now(timezone.utc),
@@ -608,6 +690,22 @@ class SessionService:
             raise ValidationError('Friendly name must be a string')
 
         self._sessions.update(session_id, {'friendly_name': friendly_name.strip()})
+        updated = self._sessions.find_by_id(session_id)
+        if not updated:
+            raise NotFoundError('Session not found')
+        return self._serialize_session(updated)
+
+    def update_practitioner_settings(self, session_id, practitioner_settings):
+        """Update practitioner-only notes, opinion weight, and confidence adjustments."""
+        session = self._sessions.find_by_id(session_id)
+        if not session:
+            raise NotFoundError('Session not found')
+        if not isinstance(practitioner_settings, dict):
+            raise ValidationError('practitioner_settings must be an object')
+
+        criteria = self.resolve_session_criteria(session)
+        normalized = self.normalize_practitioner_settings(criteria, practitioner_settings)
+        self._sessions.update(session_id, {'practitioner_settings': normalized})
         updated = self._sessions.find_by_id(session_id)
         if not updated:
             raise NotFoundError('Session not found')

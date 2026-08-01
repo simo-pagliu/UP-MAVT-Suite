@@ -247,6 +247,17 @@ class TestRunStep:
         assert resp.status_code == 400
 
 
+class TestRunPagePreferences:
+    def test_updates_confidence_adjustments(self, client):
+        study_id, session_id = setup_study_with_session(client)
+        resp = client.put(
+            f'/api/study-session/{study_id}/workflow-preferences/run-page',
+            json={'confidence_adjustments_by_session': {session_id: 1.5}},
+        )
+        assert resp.status_code == 200
+        assert resp.json['preferences']['run_page']['confidence_adjustments_by_session'][session_id] == pytest.approx(1.5)
+
+
 # ---------------------------------------------------------------------------
 # GET /api/study-session/<id>/weight-solutions/export
 # ---------------------------------------------------------------------------

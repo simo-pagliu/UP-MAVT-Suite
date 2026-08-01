@@ -25,6 +25,8 @@ import {
   Td,
   Th,
   Thead,
+  Spinner,
+  Textarea,
   Tr,
   Text,
   Tooltip,
@@ -36,6 +38,7 @@ import { DeleteIcon, HamburgerIcon, RepeatIcon, CopyIcon, ExternalLinkIcon, Lock
 import axios from 'axios'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { API_URL } from '../config'
+import { normalizePractitionerSettings } from '../utils/practitionerSettings'
 
 const getCriteriaSignature = (criteriaList) => {
   const normalized = (criteriaList || []).map((crit) => ({
@@ -172,14 +175,17 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
   const [code, setCode] = useState('')
   const [sessions, setSessions] = useState([])
   const [friendlyNames, setFriendlyNames] = useState({})
+  const [practitionerSettingsById, setPractitionerSettingsById] = useState({})
   const [criteria, setCriteria] = useState([])
   const [loading, setLoading] = useState(false)
   const [savingFriendlyNameById, setSavingFriendlyNameById] = useState({})
+  const [savingSettingsById, setSavingSettingsById] = useState({})
   const [togglingLockById, setTogglingLockById] = useState({})
   const [pendingDeleteId, setPendingDeleteId] = useState(null)
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onClose: onDeleteClose } = useDisclosure()
   const deleteCancelRef = useRef()
   const friendlyNameAutoSaveTimersRef = useRef({})
+  const notesAutoSaveTimersRef = useRef({})
   const toast = useToast()
 
   const canCreateSession = Boolean(studySessionId)
@@ -191,6 +197,7 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
       const response = await axios.get(`${API_URL}/study-session/${studySessionId}/elicitation-sessions`)
       const data = response.data
       const loadedSessions = Array.isArray(data.sessions) ? data.sessions : []
+      const loadedCriteria = Array.isArray(data.criteria) ? data.criteria : []
       setSessions(loadedSessions)
       setFriendlyNames(
         loadedSessions.reduce((acc, session) => {
@@ -198,7 +205,13 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
           return acc
         }, {})
       )
-      setCriteria(Array.isArray(data.criteria) ? data.criteria : [])
+      setPractitionerSettingsById(
+        loadedSessions.reduce((acc, session) => {
+          acc[session._id] = normalizePractitionerSettings(loadedCriteria, session.practitioner_settings)
+          return acc
+        }, {})
+      )
+      setCriteria(loadedCriteria)
     } catch (error) {
       toast({
         title: 'Request failed',
@@ -218,6 +231,7 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
     if (!studySessionId) {
       setSessions([])
       setFriendlyNames({})
+      setPractitionerSettingsById({})
       setCriteria([])
       setLoading(false)
       return () => {
@@ -228,6 +242,7 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
     setLoading(true)
     setSessions([])
     setFriendlyNames({})
+    setPractitionerSettingsById({})
     setCriteria([])
 
     const fetchSessions = async () => {
@@ -244,7 +259,14 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
             return acc
           }, {})
         )
-        setCriteria(Array.isArray(data.criteria) ? data.criteria : [])
+        const loadedCriteria = Array.isArray(data.criteria) ? data.criteria : []
+        setPractitionerSettingsById(
+          loadedSessions.reduce((acc, session) => {
+            acc[session._id] = normalizePractitionerSettings(loadedCriteria, session.practitioner_settings)
+            return acc
+          }, {})
+        )
+        setCriteria(loadedCriteria)
       } catch (error) {
         if (!isActive) return
         toast({
@@ -524,6 +546,8 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
     return () => {
       Object.values(friendlyNameAutoSaveTimersRef.current).forEach((timerId) => clearTimeout(timerId))
       friendlyNameAutoSaveTimersRef.current = {}
+      Object.values(notesAutoSaveTimersRef.current).forEach((timerId) => clearTimeout(timerId))
+      notesAutoSaveTimersRef.current = {}
     }
   }, [])
 
@@ -600,6 +624,70 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
   const handleOpenSessionLink = (sessionId) => {
     if (!sessionId) return
     window.open(buildUuidLink(sessionId), '_blank', 'noopener,noreferrer')
+  }
+
+  const handlePractitionerSettingsChange = (sessionId, updater) => {
+    setPractitionerSettingsById((prev) => {
+      const current = normalizePractitionerSettings(
+        criteria,
+        prev[sessionId] || sessions.find((session) => session._id === sessionId)?.practitioner_settings
+      )
+      return {
+        ...prev,
+        [sessionId]: normalizePractitionerSettings(
+          criteria,
+          typeof updater === 'function' ? updater(current) : updater
+        ),
+      }
+    })
+  }
+
+  const handleSavePractitionerSettings = async (sessionId, settingsOverride = null) => {
+    const settings = normalizePractitionerSettings(
+      criteria,
+      settingsOverride || practitionerSettingsById[sessionId]
+    )
+    setSavingSettingsById((prev) => ({ ...prev, [sessionId]: true }))
+    try {
+      const response = await axios.put(`${API_URL}/session/${sessionId}/practitioner-settings`, {
+        practitioner_settings: settings,
+      })
+      const updatedSettings = normalizePractitionerSettings(criteria, response.data?.practitioner_settings)
+      setPractitionerSettingsById((prev) => ({ ...prev, [sessionId]: updatedSettings }))
+      setSessions((prev) => prev.map((session) => (
+        session._id === sessionId
+          ? { ...session, practitioner_settings: updatedSettings }
+          : session
+      )))
+    } catch (error) {
+      toast({
+        title: 'Request failed',
+        description: error.response?.data?.error || 'Failed to save practitioner settings',
+        status: 'error',
+        duration: 3000,
+        isClosable: true,
+      })
+    } finally {
+      setSavingSettingsById((prev) => ({ ...prev, [sessionId]: false }))
+    }
+  }
+
+  const scheduleNotesAutoSave = (sessionId, settings) => {
+    if (notesAutoSaveTimersRef.current[sessionId]) {
+      clearTimeout(notesAutoSaveTimersRef.current[sessionId])
+    }
+
+    notesAutoSaveTimersRef.current[sessionId] = setTimeout(() => {
+      handleSavePractitionerSettings(sessionId, settings)
+    }, 600)
+  }
+
+  const flushNotesAutoSave = (sessionId, settings) => {
+    if (notesAutoSaveTimersRef.current[sessionId]) {
+      clearTimeout(notesAutoSaveTimersRef.current[sessionId])
+      delete notesAutoSaveTimersRef.current[sessionId]
+    }
+    handleSavePractitionerSettings(sessionId, settings)
   }
 
   // If no study session accessed, show access form
@@ -704,6 +792,7 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
               <Tr>
                 <Th>Session ID</Th>
                 <Th>Friendly Name</Th>
+                <Th>Notes</Th>
                 <Th>Progress</Th>
                 <Th>Status</Th>
                 <Th>Downloads</Th>
@@ -711,11 +800,17 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
               </Tr>
             </Thead>
             <Tbody>
-              {sessionRows.map((session) => (
-                <Tr key={session._id}>
-                  <Td>
-                    <HStack spacing={1}>
-                      <Text>{session._id || 'N/A'}</Text>
+            {sessionRows.map((session) => {
+              const practitionerSettings = normalizePractitionerSettings(
+                criteria,
+                practitionerSettingsById[session._id] || session.practitioner_settings
+              )
+              const notesValue = practitionerSettings.notes
+              return (
+              <Tr key={session._id}>
+                <Td>
+                  <HStack spacing={1}>
+                    <Text>{session._id || 'N/A'}</Text>
                       <Tooltip label={session._id ? 'Copy session link' : 'No session ID'} hasArrow>
                         <IconButton
                           aria-label="Copy session link"
@@ -749,12 +844,43 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
                       />
                     </HStack>
                   </Td>
-                  <Td minW="200px">
+                  <Td minW="260px">
+                    <Box position="relative">
+                      <Textarea
+                        size="sm"
+                        value={notesValue}
+                        onKeyDown={(e) => e.stopPropagation()}
+                        onChange={(e) => {
+                          const nextSettings = normalizePractitionerSettings(criteria, {
+                            ...practitionerSettings,
+                            notes: e.target.value,
+                          })
+                          handlePractitionerSettingsChange(session._id, nextSettings)
+                          scheduleNotesAutoSave(session._id, nextSettings)
+                        }}
+                        onBlur={(e) => {
+                          const nextSettings = normalizePractitionerSettings(criteria, {
+                            ...practitionerSettings,
+                            notes: e.target.value,
+                          })
+                          flushNotesAutoSave(session._id, nextSettings)
+                        }}
+                        placeholder="Expert description or practitioner notes (not visible to the expert)"
+                        rows={2}
+                      />
+                      {Boolean(savingSettingsById[session._id]) && (
+                        <Box position="absolute" top={2} right={2}>
+                          <Spinner size="xs" />
+                        </Box>
+                      )}
+                    </Box>
+                  </Td>
+                  <Td minW="170px">
                     <VStack align="stretch" spacing={2}>
-                      <Progress value={session.progress.percent} size="sm" borderRadius="full" />
-                      <HStack spacing={2}>
+                      <Progress value={session.progress.percent} size="xs" borderRadius="full" />
+                      <HStack spacing={1} flexWrap="wrap">
                         {session.progress.steps.map((step) => (
-                          <Badge key={step.key} colorScheme={step.done ? 'green' : 'gray'}>
+                          <Badge key={step.key} colorScheme={step.done ? 'green' : 'gray'} fontSize="0.65rem">
                             {step.label}
                           </Badge>
                         ))}
@@ -836,7 +962,7 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
                     </HStack>
                   </Td>
                 </Tr>
-              ))}
+              )})}
             </Tbody>
           </Table>
         </Box>

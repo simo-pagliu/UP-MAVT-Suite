@@ -462,6 +462,16 @@ def update_session_friendly_name(session_id):
     return jsonify(updated), 200
 
 
+@bp.route('/session/<session_id>/practitioner-settings', methods=['PUT'])
+def update_session_practitioner_settings(session_id):
+    data = request.json or {}
+    updated = SessionService(current_app.db).update_practitioner_settings(
+        session_id,
+        data.get('practitioner_settings'),
+    )
+    return jsonify(updated), 200
+
+
 @bp.route('/session/<session_id>/qualitative', methods=['PUT'])
 def update_qualitative(session_id):
     data = request.json
@@ -913,6 +923,7 @@ def update_run_page_preferences(study_session_id):
         study_session_id,
         use_non_linear_model=data.get('use_non_linear_model'),
         selected_session_ids=data.get('selected_session_ids'),
+        confidence_adjustments_by_session=data.get('confidence_adjustments_by_session'),
     )
     return jsonify(result), 200
 
