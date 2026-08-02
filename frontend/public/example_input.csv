@@ -1,0 +1,15 @@
+Alternative,Terminal handling charges,ISPS,Customs service,Port reputation,Satisfaction with terminal operations,Number of container terminals
+Group,G1,G1,G1,G1,G1,G1
+Description,"Terminal handling charges (€/TEU)","ISPS (€/unit)","Customs service","Port reputation","Satisfaction with terminal operations","Number of container terminals"
+is_qi,FALSE,FALSE,FALSE,FALSE,FALSE,FALSE
+vf_method,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE
+Min,,,,,,
+Max,,,,,,
+Piraeus,"N(106,1)","11±0.5","{4.2,4.3}","TRI(3.8,3.9,4)","4±0.1","3"
+Koper,"TRAP(145,146,147,148,0)","11±0.5","5.12±0.05","5.24±0.05","5±0.1","1"
+Genoa,"106±1","13±0.5","TRI(4.2,4.3,4.4)","4.4±0.05","4.4±0.1","2"
+Antwerp,"179±1","12±0.5","5.44±0.05","5±0.05","{5.11,5.12}","3"
+Rotterdam,"202±1","13±0.5","5.5±0.05","TRAP(5.93,5.94,5.95,5.96,0)","5.29±0.1","6"
+Hamburg,"TRI(223,224,225)","16±0.5","5.56±0.05","6.06±0.05","5.41±0.1","4"
+Gdansk,"{103,103.5}","14±0.5","4.6±0.05","5±0.05","4.4±0.1","2"
+Unit,EUR,EUR,score,score,score,count

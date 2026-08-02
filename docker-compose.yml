@@ -1,0 +1,58 @@
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: elicitation-mongo
+    environment:
+      MONGO_INITDB_DATABASE: ${MONGO_INITDB_DATABASE:-elicitation}
+    env_file:
+      - .env
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - elicitation-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: elicitation-backend
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    depends_on:
+      - mongo
+    networks:
+      - elicitation-network
+
+  worker:
+    build: ./worker
+    container_name: elicitation-worker
+    env_file:
+      - .env
+    depends_on:
+      - mongo
+    networks:
+      - elicitation-network
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    container_name: elicitation-frontend
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - elicitation-network
+
+volumes:
+  mongo_data:
+
+networks:
+  elicitation-network:
+    driver: bridge

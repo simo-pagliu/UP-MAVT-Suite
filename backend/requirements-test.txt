@@ -1,0 +1,5 @@
+# Test dependencies (install with: pip install -r requirements-test.txt)
+# The backend production deps (requirements.txt) must also be installed.
+pytest>=9.0
+mongomock>=4.3
+pytest-flask>=1.3

@@ -1,0 +1,141 @@
+import { Alert, AlertDescription, AlertIcon, AlertTitle, Box, Button, Divider, Heading, HStack, List, ListItem, Text, VStack } from '@chakra-ui/react'
+import axios from 'axios'
+import { useEffect, useMemo, useState } from 'react'
+import { API_URL } from '../config'
+import {
+  isInputComplete,
+  isQualitativeComplete,
+  isValueFunctionsComplete,
+  isPileBwtComplete,
+} from '../utils/sessionUtils'
+
+function RecapPage({ sessionId, onNavigate }) {
+  const [sessionData, setSessionData] = useState(null)
+  const [studyData, setStudyData] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const fetchSession = async () => {
+      if (!sessionId) return
+      setLoading(true)
+      try {
+        const response = await axios.get(`${API_URL}/session/${sessionId}`)
+        const session = response.data
+        setSessionData(session)
+        const studySessionId = session?.study_session_id
+        if (studySessionId) {
+          try {
+            const studyResponse = await axios.get(`${API_URL}/study-session/${studySessionId}`)
+            setStudyData(studyResponse.data)
+          } catch {
+            setStudyData(null)
+          }
+        } else {
+          setStudyData(null)
+        }
+      } catch {
+        setSessionData(null)
+        setStudyData(null)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchSession()
+  }, [sessionId])
+
+  const criteria = Array.isArray(sessionData?.criteria) ? sessionData.criteria : []
+  const qualitativeIndicators = sessionData?.qualitative_indicators
+  const valueFunctions = sessionData?.value_functions
+  const bwt = sessionData?.bwt
+
+  const completion = useMemo(() => {
+    return {
+      input: isInputComplete(criteria),
+      qualitative: isQualitativeComplete(criteria, qualitativeIndicators),
+      valueFunctions: isValueFunctionsComplete(criteria, valueFunctions),
+      pileBwt: isPileBwtComplete(criteria, bwt),
+    }
+  }, [criteria, qualitativeIndicators, valueFunctions, bwt])
+
+  const getStatusLabel = (isComplete) => (isComplete ? 'Complete' : 'Missing required criteria')
+
+  const missing = []
+  if (!completion.qualitative) missing.push({ key: 'qualitative', label: 'Qualitative Indicators', page: 'qualitative' })
+  if (!completion.valueFunctions) missing.push({ key: 'value', label: 'Quantitative Indicators', page: 'value' })
+  if (!completion.pileBwt) missing.push({ key: 'pile', label: 'Weight Elicitation', page: 'pile' })
+
+  const isAllComplete = missing.length === 0
+
+  return (
+    <Box bg="white" p={6} borderRadius="lg" boxShadow="sm">
+      <VStack spacing={6} align="stretch">
+        <Heading as="h1" size="lg">Overview</Heading>
+
+        {loading && <Text color="gray.600">Checking completion...</Text>}
+
+        {!loading && isAllComplete && (
+          <Alert status="success" variant="subtle" borderRadius="md">
+            <AlertIcon />
+            <VStack align="start" spacing={1}>
+              <AlertTitle>All steps complete</AlertTitle>
+              <AlertDescription>
+                Thank you. Your elicitation is complete and you can safely close this webpage.
+              </AlertDescription>
+            </VStack>
+          </Alert>
+        )}
+
+        {!loading && !isAllComplete && (
+          <Alert status="warning" variant="subtle" borderRadius="md">
+            <AlertIcon />
+            <VStack align="start" spacing={1}>
+              <AlertTitle>Some steps are still missing</AlertTitle>
+              <AlertDescription>
+                Please complete the missing sections listed below.
+              </AlertDescription>
+            </VStack>
+          </Alert>
+        )}
+
+        {!loading && (
+          <>
+            {(studyData?.title || studyData?.description) && (
+              <>
+                <Divider />
+                <VStack align="stretch" spacing={2}>
+                  <Text fontWeight="semibold">Case Study</Text>
+                  {studyData?.title && <Text><strong>Title:</strong> {studyData.title}</Text>}
+                  {studyData?.description && <Text><strong>Description:</strong> {studyData.description}</Text>}
+                </VStack>
+              </>
+            )}
+
+            <Divider />
+            <VStack align="stretch" spacing={3}>
+              <Text fontWeight="semibold">Completion checklist</Text>
+              <List spacing={2}>
+                <ListItem>Input Definition: {getStatusLabel(completion.input)}</ListItem>
+                <ListItem>Qualitative Indicators: {getStatusLabel(completion.qualitative)}</ListItem>
+                <ListItem>Quantitative Indicators: {getStatusLabel(completion.valueFunctions)}</ListItem>
+                <ListItem>Weight Elicitation: {getStatusLabel(completion.pileBwt)}</ListItem>
+              </List>
+            </VStack>
+          </>
+        )}
+
+        {!loading && !isAllComplete && onNavigate && (
+          <HStack spacing={3} flexWrap="wrap">
+            {missing.map((item) => (
+              <Button key={item.key} variant="outline" onClick={() => onNavigate(item.page)}>
+                Go to {item.label}
+              </Button>
+            ))}
+          </HStack>
+        )}
+      </VStack>
+    </Box>
+  )
+}
+
+export default RecapPage
