@@ -58,6 +58,11 @@ from app.repositories import UsersRepository
 
 logger = logging.getLogger(__name__)
 
+# The plain-text fallback used when ADMIN_PASSWORD is not set at all.
+# This exists purely to avoid a hard crash during development; it must *not*
+# be used in any production environment.
+_DEFAULT_PLAIN_PASSWORD = 'admin123'
+
 # JWT token lifetimes.
 _ACCESS_TOKEN_LIFETIME = datetime.timedelta(minutes=15)
 _REFRESH_TOKEN_LIFETIME = datetime.timedelta(days=7)
@@ -204,8 +209,10 @@ class AuthenticationService:
                 if not env_password:
                     logger.warning(
                         'ADMIN_PASSWORD is not configured. '
+                        'Falling back to the default insecure password. '
                         'Set ADMIN_PASSWORD to a hashed value in production.'
                     )
+                    env_password = _DEFAULT_PLAIN_PASSWORD
                 if self._is_hashed(env_password):
                     stored = env_password
                 else:
@@ -218,8 +225,10 @@ class AuthenticationService:
         if not stored:
             logger.warning(
                 'ADMIN_PASSWORD is not configured. '
+                'Falling back to the default insecure password. '
                 'Set ADMIN_PASSWORD to a hashed value in production.'
             )
+            stored = _DEFAULT_PLAIN_PASSWORD
         return self.verify_password(plain_password, stored)
 
     # ---------------------------------------------------------------------- #

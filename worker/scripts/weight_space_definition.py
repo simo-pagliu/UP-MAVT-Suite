@@ -141,7 +141,7 @@ def build_constraint_structure(comparisons, value_functions, criteria_order=None
             if c not in criteria:
                 criteria.append(c)
     else:
-        criteria = sorted(criteria_in_comparisons)
+        criteria = sorted(list(criteria_in_comparisons))
 
     criterion_to_index = {c: i for i, c in enumerate(criteria)}
 
@@ -224,7 +224,7 @@ def step_b_sample_boundary_candidates(
     target_step_b = max(0, max_results - 1)  # One slot is already occupied by Step A (DE) solution.
     print_fn(f"  Searching for {target_step_b} additional solutions with z < {upper_threshold:.6f} (max {max_restarts} attempts)...")
 
-    rng = np.random.default_rng(rng_seed)
+    rng = np.random.RandomState(rng_seed)
     valid_solutions = {}  # Key: tuple of rounded weights, Value: weight vector
     z_star_tuple = tuple(np.round(normalize_weights(z_star_weights), output_weight_decimals))
     seen_tuples = {z_star_tuple}   # Track unique rounded solutions, including Step A solution
@@ -440,7 +440,7 @@ def compute_weights(
         print_fn=print_fn,
     )
 
-    print_fn("\nResult:")
+    print_fn(f"\nResult:")
     print_fn(f"  Best weights: {np.round(z_star_weights, 4)}")
     print_fn(f"  Critical violation z*: {z_star:.8f}")
 
