@@ -148,6 +148,39 @@ class TestToggleLock:
 
 
 # ---------------------------------------------------------------------------
+# PUT /api/session/<id>/practitioner-settings
+# ---------------------------------------------------------------------------
+
+class TestUpdatePractitionerSettings:
+    def test_update_ok(self, client):
+        sid = create_session(client)
+        resp = client.put(
+            f'/api/session/{sid}/practitioner-settings',
+            json={
+                'practitioner_settings': {
+                    'notes': 'Session note',
+                    'overall_weight': 1.5,
+                    'confidence_adjustments': {
+                        'overall': -0.8,
+                    },
+                },
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json['practitioner_settings']['notes'] == 'Session note'
+        assert resp.json['practitioner_settings']['overall_weight'] == 1.5
+        assert resp.json['practitioner_settings']['confidence_adjustments']['overall'] == -0.8
+
+    def test_invalid_payload_returns_400(self, client):
+        sid = create_session(client)
+        resp = client.put(
+            f'/api/session/{sid}/practitioner-settings',
+            json={'practitioner_settings': 'bad'},
+        )
+        assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
 # PUT /api/session/<id>/qualitative
 # ---------------------------------------------------------------------------
 

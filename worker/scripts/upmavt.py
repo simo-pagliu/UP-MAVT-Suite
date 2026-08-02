@@ -221,6 +221,69 @@ def harmonic_mean(intermediate_results):
     return 0.001  # Avoid zero
 
 
+def geometric_mean_offset(intermediate_results, alpha):
+    """GEO+offset aggregation with alpha in [-1, 1]."""
+    alpha_safe = max(alpha, 1e-12)
+    offset = np.log(alpha_safe)
+    product = 1.0
+    for weight, value in intermediate_results:
+        shifted = max(1e-12, value - offset)
+        product *= shifted ** weight
+    return np.clip(product + offset, 0.001, 1.0)
+
+
+def weighted_sum_min_mix(intermediate_results, alpha):
+    """WAM+MIN aggregation with alpha in [-1, 1]."""
+    alpha_clamped = max(-1.0, min(1.0, alpha))
+    total = weighted_sum(intermediate_results)
+    min_value = min((value for _, value in intermediate_results), default=0.001)
+    score = (1.0 - alpha_clamped) * total + alpha_clamped * min_value
+    return np.clip(score, 0.001, 1.0)
+
+
+def weighted_power_mean(intermediate_results, alpha):
+    """WPM aggregation with alpha in [-1, 1]."""
+    alpha_clamped = max(-1.0, min(1.0, alpha))
+
+    if alpha_clamped >= 1.0:
+        return min((value for _, value in intermediate_results), default=0.001)
+    if alpha_clamped <= -1.0:
+        return max((value for _, value in intermediate_results), default=1.0)
+
+    p = np.log((2.0 / (alpha_clamped + 1.0)) - 1.0) + 1.0
+
+    if np.isneginf(p):
+        return min((value for _, value in intermediate_results), default=0.001)
+    if np.isposinf(p):
+        return max((value for _, value in intermediate_results), default=1.0)
+    if np.isclose(p, 0.0):
+        return geometric_mean(intermediate_results)
+
+    s = 0.0
+    for weight, value in intermediate_results:
+        s += weight * (max(value, 1e-12) ** p)
+    return np.clip(s ** (1.0 / p), 0.001, 1.0)
+
+
+def weighted_exponential_mean(intermediate_results, alpha):
+    """WEM aggregation with alpha in [-1, 1]."""
+    alpha_clamped = max(-1.0, min(1.0, alpha))
+    base = -np.log((alpha_clamped + 1.0) / 2.0) / np.log(2.0)
+
+    if np.isposinf(base):
+        return max((value for _, value in intermediate_results), default=1.0)
+    if np.isclose(base, 1.0):
+        return weighted_sum(intermediate_results)
+    if base <= 0:
+        return min((value for _, value in intermediate_results), default=0.001)
+
+    s = 0.0
+    for weight, value in intermediate_results:
+        s += weight * (base ** value)
+    score = np.log(s) / np.log(base)
+    return np.clip(score, 0.001, 1.0)
+
+
 # ============================================================================
 # EVALUATION FUNCTION
 # ============================================================================
@@ -234,14 +297,6 @@ def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_list
     For qualitative criteria: uncertainty is already encoded in alternative values (x ± error%),
     and VF is identity (y=x) with confidence=4 (no additional error).
     """
-    confidence_errors = {
-        0: 0.10,
-        1: 0.075,
-        2: 0.05,
-        3: 0.025,
-        4: 0.0,
-    }
-
     intermediate_results = []
 
     for crit in criteria:
@@ -256,7 +311,7 @@ def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_list
             normalized_value = float(vf(raw_value))
             
             # Apply confidence error margin
-            error_pct = confidence_errors.get(confidence, 0.0)
+            error_pct = 0.10 * (4.0 - max(0.0, min(4.0, float(confidence)))) / 4.0
             if error_pct > 0:
                 error_margin = normalized_value * error_pct
                 normalized_value = np.random.uniform(
@@ -278,7 +333,7 @@ def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_list
 # MONTE CARLO SIMULATION
 # ============================================================================
 def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
-                    confidence_lists, constraint_data_list, aggregation_method,
+                    confidence_lists, constraint_data_list, aggregation_method, aggregation_alpha,
                     opinion_weights, num_iterations, mc_mode, use_random_weights=False,
                     print_fn=None):
     """Run MC simulation.
@@ -314,15 +369,25 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
         'weighted_sum': weighted_sum,
         'geometric_mean': geometric_mean,
         'harmonic_mean': harmonic_mean,
+        'geometric_mean_offset': lambda intermediate_results: geometric_mean_offset(intermediate_results, aggregation_alpha),
+        'weighted_sum_min_mix': lambda intermediate_results: weighted_sum_min_mix(intermediate_results, aggregation_alpha),
+        'weighted_power_mean': lambda intermediate_results: weighted_power_mean(intermediate_results, aggregation_alpha),
+        'weighted_exponential_mean': lambda intermediate_results: weighted_exponential_mean(intermediate_results, aggregation_alpha),
     }
     agg_func = agg_funcs.get(aggregation_method, weighted_sum)
 
     num_elicitations = len(weight_solutions_list)
+    if isinstance(alternatives, list):
+        alternatives_list = alternatives
+        base_alternatives = alternatives[0] if alternatives else {}
+    else:
+        alternatives_list = [alternatives for _ in range(num_elicitations)]
+        base_alternatives = alternatives
     results = {}
 
     if mc_mode == "strict":
         for elicit_idx in range(num_elicitations):
-            results[elicit_idx] = {alt_name: [] for alt_name in alternatives.keys()}
+            results[elicit_idx] = {alt_name: [] for alt_name in base_alternatives.keys()}
 
         for iteration in range(num_iterations):
             if iteration % 100 == 0:
@@ -330,7 +395,7 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
                 if n_so_far > 1:
                     # Average MC_std across elicitations for each alternative
                     mc_std_parts = []
-                    for alt_name in alternatives.keys():
+                    for alt_name in base_alternatives.keys():
                         all_scores = []
                         for elicit_idx in range(num_elicitations):
                             all_scores.extend(results[elicit_idx][alt_name])
@@ -350,7 +415,8 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
                     constraint_data_list[elicit_idx],
                     use_random_weights=use_random_weights
                 )
-                for alt_name, alt_data in alternatives.items():
+                current_alternatives = alternatives_list[elicit_idx] if elicit_idx < len(alternatives_list) else base_alternatives
+                for alt_name, alt_data in current_alternatives.items():
                     score = evaluate_alternative(
                         alt_name, alt_data, criteria, vf_lists, confidence_lists,
                         elicit_idx, elicit_idx, sampled_weights, agg_func
@@ -358,14 +424,14 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
                     results[elicit_idx][alt_name].append(score)
     else:
         # Non-strict mode
-        results = {alt_name: [] for alt_name in alternatives.keys()}
+        results = {alt_name: [] for alt_name in base_alternatives.keys()}
 
         for iteration in range(num_iterations):
             if iteration % 100 == 0:
                 n_so_far = iteration
                 if n_so_far > 1:
                     mc_std_parts = []
-                    for alt_name in alternatives.keys():
+                    for alt_name in base_alternatives.keys():
                         if len(results[alt_name]) > 1:
                             arr = np.array(results[alt_name])
                             n = len(arr)
@@ -384,7 +450,8 @@ def run_monte_carlo(alternatives, criteria, weight_solutions_list, vf_lists,
             )
             vf_elicit_idx = np.random.choice(num_elicitations, p=opinion_weights)
 
-            for alt_name, alt_data in alternatives.items():
+            current_alternatives = alternatives_list[vf_elicit_idx] if vf_elicit_idx < len(alternatives_list) else base_alternatives
+            for alt_name, alt_data in current_alternatives.items():
                 score = evaluate_alternative(
                     alt_name, alt_data, criteria, vf_lists, confidence_lists,
                     weight_elicit_idx, vf_elicit_idx, sampled_weights, agg_func
@@ -407,7 +474,8 @@ def format_results_for_db(results, alternatives, mc_mode):
         For non-strict mode: {"aggregated_results": [[row], ...]}
         Each row is a list of scores in alternative order.
     """
-    alt_names = list(alternatives.keys())
+    base_alternatives = alternatives[0] if isinstance(alternatives, list) and alternatives else alternatives
+    alt_names = list(base_alternatives.keys())
 
     if mc_mode == "strict":
         results_by_elicitation = {}
@@ -499,7 +567,8 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
     for i, vf_dict in enumerate(vf_lists):
         print_fn(f"  - Elicitation {i+1}: {len(vf_dict)} value functions")
     
-    print_fn(f"✓ Loaded {len(alternatives)} alternatives")
+    base_alternatives = alternatives[0] if isinstance(alternatives, list) and alternatives else alternatives
+    print_fn(f"✓ Loaded {len(base_alternatives)} alternatives")
     print_fn(f"✓ Criteria: {criteria_names}")
 
     # Run MC simulation
@@ -529,7 +598,7 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
     
     results = run_monte_carlo(
         alternatives, criteria_names, weight_solutions_list, vf_lists,
-        confidence_lists, constraint_data_list, aggregation_method,
+        confidence_lists, constraint_data_list, aggregation_method, aggregation_alpha,
         opinion_weights, mc_iterations, mc_mode, use_random_weights=use_random_weights,
         print_fn=print_fn,
     )
@@ -546,7 +615,8 @@ def run_upmavt(vf_lists, confidence_lists, weight_solutions_list, alternatives,
     # Print summary
     print_fn("\nSummary:")
     print_fn("-" * 60)
-    alt_names = list(alternatives.keys())
+    _base_alts = alternatives[0] if isinstance(alternatives, list) and alternatives else alternatives
+    alt_names = list(_base_alts.keys())
 
     if mc_mode == "strict":
         for elicit_idx_str, rows in formatted.get('results_by_elicitation', {}).items():

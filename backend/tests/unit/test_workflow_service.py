@@ -167,21 +167,41 @@ class TestCreateRunStepTask:
         task = mock_db.tasks.find_one({'_id': ObjectId(task_id)})
         assert task['params']['aggregation_method'] == 'geometric_mean'
 
-    def test_removed_aggregation_methods_fall_back_to_weighted_sum(self, mock_db, wf_svc, study_with_weights, session_id):
+    def test_uses_practitioner_opinion_weights(self, mock_db, wf_svc, study_with_weights, session_id):
+        second_session_id = StudySessionService(mock_db).create_elicitation_session(study_with_weights, 'EXP-02')
+        mock_db.study_sessions.update_one(
+            {'_id': ObjectId(study_with_weights)},
+            {'$set': {'computed_weights.weight_solutions': {
+                session_id: [{'Cost': 1.0}],
+                second_session_id: [{'Cost': 1.0}],
+            }}}
+        )
+        # Set VF confidence: session 1 avg = 3.0, session 2 avg = 1.0 → normalized [0.75, 0.25]
+        mock_db.sessions.update_one(
+            {'_id': ObjectId(session_id)},
+            {'$set': {'value_functions': {'criteria': {'Cost': {'confidence': 3}}}}}
+        )
+        mock_db.sessions.update_one(
+            {'_id': ObjectId(second_session_id)},
+            {'$set': {'value_functions': {'criteria': {'Cost': {'confidence': 1}}}}}
+        )
+
         task_id = wf_svc.create_run_step_task(
             study_with_weights,
-            step_number=4,
-            selected_session_ids=[session_id],
-            mc_iterations=200,
-            aggregation_method='WPM',
-            aggregation_methods=['WPM', 'HAR'],
+            step_number=2,
+            selected_session_ids=[session_id, second_session_id],
+            mc_iterations=500,
+            aggregation_method='weighted_sum',
             aggregation_alpha=0.0,
             mc_mode='non_strict',
             use_random_weights=False,
         )
+
         task = mock_db.tasks.find_one({'_id': ObjectId(task_id)})
-        assert task['params']['aggregation_method'] == 'weighted_sum'
-        assert task['params']['aggregation_methods'] == ['harmonic_mean']
+        weights = task['params']['opinion_weights']
+        assert len(weights) == 2
+        assert abs(weights[0] - 0.75) < 1e-9
+        assert abs(weights[1] - 0.25) < 1e-9
 
     def test_study_not_found_raises(self, wf_svc, session_id):
         with pytest.raises(NotFoundError):

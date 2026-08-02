@@ -38,8 +38,6 @@ function LoginPage({ onLogin, onDocumentation }) {
   const requiresEmailVerification = emailEnabled && emailConsent === true
   const isCreateFlow = selectedFlow === 'create'
   const isUploadFlow = selectedFlow === 'upload'
-  const showEmailConsentChoice = emailEnabled
-  const canShowPrimaryAction = !emailEnabled || emailConsent !== null
 
   // Fetch email status on component mount
   useEffect(() => {
@@ -54,14 +52,6 @@ function LoginPage({ onLogin, onDocumentation }) {
     }
     fetchEmailStatus()
   }, [])
-
-  useEffect(() => {
-    if (!emailEnabled) {
-      setEmailConsent(false)
-      setEmail('')
-      resetEmailVerificationState()
-    }
-  }, [emailEnabled])
 
   const validateEmailInput = (value) => {
     if (!String(value || '').trim()) {
@@ -377,11 +367,6 @@ function LoginPage({ onLogin, onDocumentation }) {
     uploadFileRef.current?.click()
   }
 
-  const handlePrimarySubmit = async (event) => {
-    event.preventDefault()
-    await handlePrimaryAction()
-  }
-
   return (
     <Box minH={{ base: 'calc(100vh - 68px)', md: 'calc(100vh - 72px)' }} display="flex" flexDirection="column">
       <Grid templateColumns={{ base: '1fr', lg: '1.2fr 1fr' }} flex="1">
@@ -419,10 +404,10 @@ function LoginPage({ onLogin, onDocumentation }) {
 
             <VStack align="start" spacing={1}>
               <Text color="gray.400" fontWeight="semibold">
-                Read the publication about this software. (Work in progress)
+                Read the publication about this software. (coming soon)
               </Text>
               <Text color="gray.400" fontWeight="semibold">
-                Read the publication about the UP-MAVT method. (Work in progress)
+                Read the publication about the UP-MAVT method (work in progress)
               </Text>
             </VStack>
             <VStack align="start" spacing={2}>
@@ -453,7 +438,7 @@ function LoginPage({ onLogin, onDocumentation }) {
                     Large hierarchical uncertain case study
                   </Link>
                   <Text fontSize="sm" color="gray.600">
-                    A complete example, with hierarchical structure and real uncertainty, from the original UP-MAVT study (Work in progress).
+                    A complete example, with hierarchical structure and real uncertainty, from the original UP-MAVT study (DOI coming soon).
                   </Text>
                 </Box>
               </VStack>
@@ -539,52 +524,44 @@ function LoginPage({ onLogin, onDocumentation }) {
                 <Divider />
                 <VStack spacing={3} align="stretch">
                   <Heading size="sm">{isCreateFlow ? 'Create New Session' : 'Upload Case Study'}</Heading>
-                  {showEmailConsentChoice ? (
-                    <>
-                      <Text color="gray.600" fontSize="sm">
-                        Do you agree to share your email?
-                      </Text>
-                      <Text color="gray.600" fontSize="sm">
-                        Without your email, you may permanently lose access to this case study if you do not save your
-                        code. Your email also helps with session recovery, updates, and support. By providing your email,
-                        you agree to the{' '}
-                        <Link href={PSI_TERMS_OF_USE_URL} isExternal color="blue.700">
-                          PSI terms of use
-                        </Link>
-                        .
-                      </Text>
-                      <HStack spacing={3}>
-                        <Button
-                          variant={emailConsent === true ? 'solid' : 'outline'}
-                          colorScheme="blue"
-                          onClick={() => {
-                            setEmailConsent(true)
-                            setEmail('')
-                            resetEmailVerificationState()
-                          }}
-                        >
-                          Yes, share email
-                        </Button>
-                        <Button
-                          variant={emailConsent === false ? 'solid' : 'outline'}
-                          onClick={() => {
-                            setEmailConsent(false)
-                            setEmail('')
-                            resetEmailVerificationState()
-                          }}
-                        >
-                          No, continue without email
-                        </Button>
-                      </HStack>
-                    </>
-                  ) : (
-                    <Text color="gray.600" fontSize="sm">
-                      Email is currently disabled, so you can continue without sharing an email address.
-                    </Text>
-                  )}
+                  <Text color="gray.600" fontSize="sm">
+                    Do you agree to share your email?
+                  </Text>
+                  <Text color="gray.600" fontSize="sm">
+                    Without your email, you may permanently lose access to this case study if you do not save your
+                    code. Your email also helps with session recovery, updates, and support. By providing your email,
+                    you agree to the{' '}
+                    <Link href={PSI_TERMS_OF_USE_URL} isExternal color="blue.700">
+                      PSI terms of use
+                    </Link>
+                    .
+                  </Text>
+                  <HStack spacing={3}>
+                    <Button
+                      variant={emailConsent === true ? 'solid' : 'outline'}
+                      colorScheme="blue"
+                      onClick={() => {
+                        setEmailConsent(true)
+                        setEmail('')
+                        resetEmailVerificationState()
+                      }}
+                    >
+                      Yes, share email
+                    </Button>
+                    <Button
+                      variant={emailConsent === false ? 'solid' : 'outline'}
+                      onClick={() => {
+                        setEmailConsent(false)
+                        setEmail('')
+                        resetEmailVerificationState()
+                      }}
+                    >
+                      No, continue without email
+                    </Button>
+                  </HStack>
 
-                  {canShowPrimaryAction && (
-                    <Box as="form" onSubmit={handlePrimarySubmit}>
+                  {emailConsent !== null && (
+                    <>
                       <Text color="gray.600" fontSize="sm">
                         {getPrimaryInstruction()}
                       </Text>
@@ -603,6 +580,7 @@ function LoginPage({ onLogin, onDocumentation }) {
                               setEntryValue(nextValue)
                             }
                           }}
+                          onKeyDown={(e) => e.key === 'Enter' && handlePrimaryAction()}
                           isDisabled={loading || verificationLoading}
                           bg="white"
                         />
@@ -617,12 +595,16 @@ function LoginPage({ onLogin, onDocumentation }) {
                           {verificationError}
                         </Text>
                       )}
+                      {!emailEnabled && emailConsent === true && (
+                        <Text color="gray.600" fontSize="sm">
+                          Email verification is currently unavailable, so you can continue without email.
+                        </Text>
+                      )}
                       <HStack spacing={3}>
                         {requiresEmailVerification && verificationCodeSent && !isEmailVerified && (
                           <Button
                             variant="ghost"
                             onClick={handleBack}
-                            type="button"
                             isDisabled={loading || verificationLoading}
                             w="50%"
                           >
@@ -632,14 +614,14 @@ function LoginPage({ onLogin, onDocumentation }) {
                         <Button
                           colorScheme="blue"
                           variant="solid"
-                          type="submit"
                           isLoading={loading || verificationLoading}
+                          onClick={handlePrimaryAction}
                           w={requiresEmailVerification && verificationCodeSent && !isEmailVerified ? '50%' : '100%'}
                         >
                           {getPrimaryActionLabel()}
                         </Button>
                       </HStack>
-                    </Box>
+                    </>
                   )}
                 </VStack>
               </>

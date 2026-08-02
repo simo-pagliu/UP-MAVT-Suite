@@ -114,28 +114,6 @@ describe('LoginPage – create/upload without mandatory email', () => {
     expect(onLogin).toHaveBeenCalledWith('study-1', 'study-1', 'practitioner')
   })
 
-  it('hides email-sharing consent when email is disabled and creates directly', async () => {
-    const onLogin = vi.fn()
-    mockEmailEnabled(false)
-    axios.post.mockResolvedValueOnce({ data: { study_session_id: 'study-disabled-email' } })
-    renderLoginPage(onLogin)
-
-    await userEvent.click(screen.getByRole('button', { name: /create a new session/i }))
-
-    expect(screen.queryByRole('button', { name: /yes, share email/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /no, continue without email/i })).not.toBeInTheDocument()
-
-    await userEvent.click(screen.getByRole('button', { name: /create new empty session/i }))
-
-    await waitFor(() =>
-      expect(axios.post).toHaveBeenCalledWith(
-        expect.stringContaining('/study-session'),
-        expect.objectContaining({ auto_generate: true }),
-      ),
-    )
-    expect(onLogin).toHaveBeenCalledWith('study-disabled-email', 'study-disabled-email', 'practitioner')
-  })
-
   it('runs email verification when user consents, then creates a session with verified email', async () => {
     const onLogin = vi.fn()
     mockEmailEnabled()
@@ -165,26 +143,6 @@ describe('LoginPage – create/upload without mandatory email', () => {
       ),
     )
     expect(onLogin).toHaveBeenCalledWith('study-2', 'study-2', 'practitioner')
-  })
-
-  it('submits the email verification request when Enter is pressed in the email field', async () => {
-    mockEmailEnabled()
-    axios.post.mockResolvedValueOnce({})
-
-    renderLoginPage()
-
-    await userEvent.click(screen.getByRole('button', { name: /create a new session/i }))
-    await userEvent.click(screen.getByRole('button', { name: /yes, share email/i }))
-
-    const emailInput = screen.getByPlaceholderText(/email address/i)
-    await userEvent.type(emailInput, 'user@example.com{enter}')
-
-    await waitFor(() =>
-      expect(axios.post).toHaveBeenCalledWith(
-        expect.stringContaining('/email-verification/request'),
-        { email: 'user@example.com' },
-      ),
-    )
   })
 
   it('uploads a case study without contact email when user declines email sharing', async () => {

@@ -42,8 +42,16 @@ import {
   ModalCloseButton,
   ModalBody,
   ModalFooter,
+  Collapse,
+  TableContainer,
+  Table,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
 } from '@chakra-ui/react'
-import { DownloadIcon, ExternalLinkIcon } from '@chakra-ui/icons'
+import { DownloadIcon, ExternalLinkIcon, InfoOutlineIcon, ChevronDownIcon, ChevronRightIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import JSZip from 'jszip'
 import PdfModal from '../components/PdfModal'
@@ -70,6 +78,17 @@ import {
   isPileBwtComplete,
   isSessionComplete,
 } from '../utils/sessionUtils'
+import {
+  formatPerElicitationDistributionSummary,
+  buildDistributionStatsCsv,
+  buildDistributionStatsRows,
+  DISTRIBUTION_STAT_COLUMNS,
+} from '../utils/distributionStats'
+import { downloadCSVFile } from '../utils/csvExport'
+import {
+  normalizeConfidenceAdjustment,
+  normalizePractitionerSettings,
+} from '../utils/practitionerSettings'
 
 const STEP2_COLORS = ['#3182CE', '#E57373', '#C77DFF', '#4DD0E1', '#38A169', '#D69E2E']
 const PNG_SCALE_FACTOR = 2
@@ -117,8 +136,126 @@ const AGGREGATION_METHODS = [
     usesAlpha: false,
     formula: String.raw`V_{HAR} = \left(\sum_{i=1}^{n} \frac{w_i}{v_i}\right)^{-1}`,
   },
+  {
+    id: 'GEO_OFFSET',
+    label: 'GEO+offset',
+    fullName: 'Geometric Mean with Offset',
+    backendMethod: 'geometric_mean_offset',
+    usesAlpha: true,
+    formula: String.raw`V_{GEO+offset} = \left( \prod_{i=1}^{n} (v_i - \log(\alpha))^{w_i} \right) + \log(\alpha)`,
+  },
+  {
+    id: 'WAM_MIN',
+    label: 'WAM+MIN',
+    fullName: 'Mixture of Weighted Arithmetic Mean and Minimum',
+    backendMethod: 'weighted_sum_min_mix',
+    usesAlpha: true,
+    formula: String.raw`V_{WAM+MIN} = (1 - \alpha) \cdot \sum_{i=1}^{n} w_i v_i + \alpha \cdot \min(\mathbf{v})`,
+  },
+  {
+    id: 'WPM',
+    label: 'WPM',
+    fullName: 'Weighted Power Mean',
+    backendMethod: 'weighted_power_mean',
+    usesAlpha: true,
+    formula: String.raw`V_{WPM} =
+\begin{cases}
+\left( \sum_{i=1}^{n} w_i v_i^{\ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1} \right)^{\frac{1}{\ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1}} & \text{if } \ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1 \neq 0 \\
+\prod_{i=1}^{n} v_i^{w_i} & \text{if } \ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1 = 0 \\
+\min(\mathbf{v}) & \text{if } \ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1 = -\infty \\
+\max(\mathbf{v}) & \text{if } \ln\left(\frac{2}{\alpha + 1} - 1 \right) + 1 = \infty
+\end{cases}`,
+  },
+  {
+    id: 'WEM',
+    label: 'WEM',
+    fullName: 'Weighted Exponential Mean',
+    backendMethod: 'weighted_exponential_mean',
+    usesAlpha: true,
+    formula: String.raw`V_{WEM} =
+\begin{cases}
+\log_{\left( - \frac{\ln\left(\frac{\alpha + 1}{2}\right)}{\ln(2)}\right)} \left( \sum_{i=1}^{n} w_i \cdot \left( - \frac{\ln\left(\frac{\alpha + 1}{2}\right)}{\ln(2)}\right)^{v_i} \right) & \text{if } - \frac{\ln\left(\frac{\alpha + 1}{2}\right)}{\ln(2)} \neq 1 \\
+\sum_{i=1}^{n} w_i v_i & \text{if } - \frac{\ln\left(\frac{\alpha + 1}{2}\right)}{\ln(2)} = 1
+\end{cases}`,
+  },
 ]
 const DEFAULT_AGGREGATION_STEP_METHODS = ['WAM', 'GEO', 'HAR']
+const DISTRIBUTION_STAT_TOOLTIPS = {
+  average: 'Arithmetic mean; useful as a central tendency indicator but sensitive to extreme values.',
+  median: 'Robust central tendency (50th percentile); less sensitive to outliers than the mean.',
+  stdDev: 'Spread around the mean; larger values indicate higher overall variability.',
+  iqr: 'Interquartile Range (P75 - P25); robust spread measure focused on the middle 50% of values.',
+  skewness: 'Asymmetry indicator: positive means a longer right tail, negative means a longer left tail.',
+  kurtosis: 'Tail heaviness relative to a normal distribution; higher values indicate more extreme tails.',
+  min: 'Smallest observed value in the sampled distribution.',
+  p5: 'Lower-tail quantile: 5% of sampled values are below this point.',
+  p25: 'First quartile: 25% of sampled values are below this point.',
+  p75: 'Third quartile: 75% of sampled values are below this point.',
+  p95: 'Upper-tail quantile: 95% of sampled values are below this point.',
+  max: 'Largest observed value in the sampled distribution.',
+}
+function toConfidenceNumber(value, fallback = null) {
+  const numericValue = Number(value)
+  if (!Number.isFinite(numericValue)) return fallback
+  return Math.max(0, Math.min(4, numericValue))
+}
+
+function formatConfidenceValue(value) {
+  const numericValue = toConfidenceNumber(value)
+  if (numericValue === null) return 'N/A'
+  return Number.isInteger(numericValue) ? `${numericValue}` : numericValue.toFixed(1)
+}
+
+function averageConfidence(values) {
+  if (!Array.isArray(values) || values.length === 0) return null
+  const total = values.reduce((sum, value) => sum + value, 0)
+  return total / values.length
+}
+
+function formatSignedAdjustment(value) {
+  const numericValue = normalizeConfidenceAdjustment(value, 0)
+  return `${numericValue > 0 ? '+' : ''}${numericValue.toFixed(1)}`
+}
+
+function applyConfidenceAdjustment(value, ...adjustments) {
+  const confidence = toConfidenceNumber(value)
+  if (confidence === null) return null
+  const totalAdjustment = adjustments.reduce(
+    (sum, adjustment) => sum + normalizeConfidenceAdjustment(adjustment, 0),
+    0
+  )
+  return toConfidenceNumber(confidence + totalAdjustment, 0)
+}
+
+function getQualitativeDeclaredConfidences(session, criterionName) {
+  const criterionData = session?.qualitative_indicators?.[criterionName]
+  const confidences = criterionData?.confidences
+  if (!confidences || typeof confidences !== 'object') return []
+  return Object.values(confidences)
+    .map((value) => toConfidenceNumber(value))
+    .filter((value) => value !== null)
+}
+
+function getValueFunctionDeclaredConfidence(session, criterionName) {
+  return toConfidenceNumber(session?.value_functions?.criteria?.[criterionName]?.confidence)
+}
+
+function getSessionDeclaredConfidenceValues(session, criteria, scope = 'all') {
+  const values = []
+  ;(criteria || []).forEach((criterion) => {
+    const criterionName = criterion?.criterion_name
+    if (!criterionName) return
+    if (criterion?.is_qualitative) {
+      if (scope === 'vf') return
+      values.push(...getQualitativeDeclaredConfidences(session, criterionName))
+      return
+    }
+    if (scope === 'qi') return
+    const confidence = getValueFunctionDeclaredConfidence(session, criterionName)
+    if (confidence !== null) values.push(confidence)
+  })
+  return values
+}
 
 function getAggregationMeta(methodId) {
   const token = String(methodId || '').trim().toUpperCase()
@@ -187,6 +324,9 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [sessions, setSessions] = useState([])
   const [criteria, setCriteria] = useState([])
   const [selectedSessions, setSelectedSessions] = useState([])
+  const [practitionerSettingsById, setPractitionerSettingsById] = useState({})
+  const [savingPractitionerSettingsById, setSavingPractitionerSettingsById] = useState({})
+  const [practitionerSettingsSaveStateById, setPractitionerSettingsSaveStateById] = useState({})
   const [loadingStudy, setLoadingStudy] = useState(true)
 
   // Workflow status from DB
@@ -198,6 +338,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [consoleOutput, setConsoleOutput] = useState('')
   const [showConsole, setShowConsole] = useState(false)
   const pollRef = useRef(null)
+  const practitionerSettingsSaveTimersRef = useRef({})
 
   // Active tab
   const [activeStep, setActiveStep] = useState(0)
@@ -220,6 +361,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   // Weight space plot state
   const [selectedWeightSession, setSelectedWeightSession] = useState('')
   const [weightSpaceData, setWeightSpaceData] = useState(null)
+  const [showDeclaredVsComputed, setShowDeclaredVsComputed] = useState(false)
+  const [expandedConfidenceSections, setExpandedConfidenceSections] = useState({})
   const [useNonLinearModel, setUseNonLinearModel] = useState(true)
   const [runPrefsHydrated, setRunPrefsHydrated] = useState(false)
   const [phase3TolerancePct, setPhase3TolerancePct] = useState(1)
@@ -244,6 +387,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const [exportIncludeResultsCsv, setExportIncludeResultsCsv] = useState(true)
   const [exportIncludeSimulationCsvs, setExportIncludeSimulationCsvs] = useState(true)
   const [exportIncludePlotImages, setExportIncludePlotImages] = useState(true)
+  const [exportIncludeStep2ConsensusQuantificationCsv, setExportIncludeStep2ConsensusQuantificationCsv] = useState(true)
+  const [exportIncludeStep5UncertaintyStatsCsv, setExportIncludeStep5UncertaintyStatsCsv] = useState(true)
   const [exportIncludeFullData, setExportIncludeFullData] = useState(false)
   // PDF Modal states
   const { isOpen: isUncertaintiesOpen, onOpen: onUncertaintiesOpen, onClose: onUncertaintiesClose } = useDisclosure()
@@ -346,6 +491,12 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
         setSessions(allSessions)
         setCriteria(allCriteria)
+        setPractitionerSettingsById(
+          allSessions.reduce((acc, session) => {
+            acc[session._id] = normalizePractitionerSettings(allCriteria, session.practitioner_settings)
+            return acc
+          }, {})
+        )
 
         const completedAndLocked = allSessions.filter((s) =>
           isSessionComplete(s, allCriteria) && s.session_locked === true
@@ -540,6 +691,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current)
+      Object.values(practitionerSettingsSaveTimersRef.current).forEach((timeoutId) => clearTimeout(timeoutId))
     }
   }, [])
 
@@ -567,6 +719,85 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     const friendly = String(session.friendly_name || '').trim()
     if (friendly) return friendly
     return session._id || fallbackLabel || 'Unknown session'
+  }
+
+  const handlePractitionerSettingsChange = (sessionId, updater) => {
+    let nextSettings = null
+    setPractitionerSettingsById((prev) => {
+      const session = sessions.find((entry) => entry._id === sessionId)
+      const current = normalizePractitionerSettings(
+        criteria,
+        prev[sessionId] || session?.practitioner_settings
+      )
+      nextSettings = normalizePractitionerSettings(
+        criteria,
+        typeof updater === 'function' ? updater(current) : updater
+      )
+      return {
+        ...prev,
+        [sessionId]: nextSettings,
+      }
+    });
+    if (nextSettings) {
+      const existingTimeout = practitionerSettingsSaveTimersRef.current[sessionId]
+      if (existingTimeout) clearTimeout(existingTimeout)
+      setPractitionerSettingsSaveStateById((prev) => ({ ...prev, [sessionId]: 'pending' }))
+      practitionerSettingsSaveTimersRef.current[sessionId] = setTimeout(() => {
+        handleSavePractitionerSettings(sessionId, nextSettings)
+      }, 500)
+    }
+  }
+
+  const handleSavePractitionerSettings = async (sessionId, settingsOverride = null) => {
+    const session = sessions.find((entry) => entry._id === sessionId)
+    if (!session) return
+
+    const existingTimeout = practitionerSettingsSaveTimersRef.current[sessionId]
+    if (existingTimeout) {
+      clearTimeout(existingTimeout)
+      delete practitionerSettingsSaveTimersRef.current[sessionId]
+    }
+
+    const settings = normalizePractitionerSettings(
+      criteria,
+      settingsOverride || practitionerSettingsById[sessionId] || session.practitioner_settings
+    )
+
+    setSavingPractitionerSettingsById((prev) => ({ ...prev, [sessionId]: true }))
+    setPractitionerSettingsSaveStateById((prev) => ({ ...prev, [sessionId]: 'saving' }))
+    try {
+      const response = await axios.put(`${API_URL}/session/${sessionId}/practitioner-settings`, {
+        practitioner_settings: settings,
+      })
+      const updatedSettings = normalizePractitionerSettings(criteria, response.data?.practitioner_settings)
+      setPractitionerSettingsById((prev) => ({ ...prev, [sessionId]: updatedSettings }))
+      setSessions((prev) => prev.map((entry) => (
+        entry._id === sessionId
+          ? { ...entry, practitioner_settings: updatedSettings }
+          : entry
+      )))
+      setPractitionerSettingsSaveStateById((prev) => ({ ...prev, [sessionId]: 'saved' }))
+    } catch (error) {
+      setPractitionerSettingsSaveStateById((prev) => ({ ...prev, [sessionId]: 'error' }))
+      toast({
+        title: 'Failed to save session settings',
+        description: error.response?.data?.error || error.message,
+        status: 'error',
+        duration: 4000,
+      })
+    } finally {
+      setSavingPractitionerSettingsById((prev) => ({ ...prev, [sessionId]: false }))
+    }
+  }
+
+  const handleToggleConfidenceSection = (sessionId, sectionKey) => {
+    setExpandedConfidenceSections((prev) => ({
+      ...prev,
+      [sessionId]: {
+        ...prev[sessionId],
+        [sectionKey]: !prev[sessionId]?.[sectionKey],
+      },
+    }))
   }
 
   // ============================================================================
@@ -869,6 +1100,11 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           <Box bg="white" borderWidth={1} borderColor="gray.200" borderRadius="md" p={3} overflowX="auto">
             <BlockMath math={meta.formula} />
           </Box>
+          {meta.usesAlpha && (
+            <Text fontSize="xs" color="gray.600">
+              α ∈ [-1, 1]. At α = 0 the aggregation is fully compensatory; values toward 1 emphasize poor performance, while values toward -1 emphasize strong performance.
+            </Text>
+          )}
         </VStack>
       </VStack>
     )
@@ -950,7 +1186,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         )
       })}
       <Text fontSize="xs" color="gray.600">
-        Compare how the alternative aggregation approaches influence the resulting ranking, and select the method whose behavior most closely reflects the decision-maker's perspective and intended trade-offs.
+        α ∈ [-1, 1]. At α = 0 the aggregation is fully compensatory; values toward 1 emphasize poor performance, while values toward -1 emphasize strong performance.
       </Text>
     </VStack>
   )
@@ -1029,13 +1265,18 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       return row
     })
 
+    const distributionSummary = formatPerElicitationDistributionSummary(expertSeries)
     const expertNames = expertSeries.map((entry) => entry.expertName)
+    const consensus = computeConsensusQuantification(densityData, expertNames)
 
     return {
       altName: stepResults.alternative_names[altIndex],
       densityData,
       expertNames,
       expertSeries,
+      summaryText: distributionSummary.text,
+      summaryLines: distributionSummary.lines,
+      consensus,
     }
   }
 
@@ -1110,6 +1351,105 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   })
 
   const weightSpaceSolutionCount = normalizeWeightSamples(weightSpaceData).length
+
+  // UI: toggles for showing per-distribution stats (collapsed by default)
+  const [showDistributionStats, setShowDistributionStats] = useState({})
+
+  const toggleDistributionStats = (key) => {
+    setShowDistributionStats((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  const formatDistributionStatValue = (value) => {
+    const numericValue = Number(value)
+    if (!Number.isFinite(numericValue)) return 'n/a'
+    return numericValue.toFixed(4)
+  }
+
+  const handleDownloadDistributionStatsCsv = (expertSeries, title, filenameBase) => {
+    const csvContent = buildDistributionStatsCsv(expertSeries, {
+      title,
+      placeholderMessage: 'Distribution stats are not available yet.',
+    })
+    downloadCSVFile(csvContent, `${sanitizeFilename(filenameBase)}.csv`)
+  }
+
+  const renderDistributionStatsTable = ({ stepPrefix, altIndex, distData, title, filenameBase }) => {
+    const statsKey = `${stepPrefix}_${altIndex}`
+    const isOpen = Boolean(showDistributionStats[statsKey])
+    const statsRows = buildDistributionStatsRows(distData?.expertSeries || [])
+
+    return (
+      <>
+        <HStack justify="space-between" align="center" mb={2} pr={12}>
+          <Text fontWeight="semibold" fontSize="sm">{`Distribution of Values for ${distData?.altName || 'Alternative'}`}</Text>
+          <Button
+            size="sm"
+            variant="link"
+            rightIcon={(
+              <ChevronDownIcon
+                transform={isOpen ? 'rotate(180deg)' : 'rotate(0deg)'}
+                transition="transform 0.2s ease"
+              />
+            )}
+            onClick={() => toggleDistributionStats(statsKey)}
+          >
+            Distribution stats
+          </Button>
+        </HStack>
+        <Collapse in={isOpen} animateOpacity>
+          <Box mb={3} bg="white" borderWidth={1} borderColor="gray.200" borderRadius="md" p={3}>
+            <HStack justify="space-between" mb={3}>
+              <Text fontSize="sm" color="gray.700" fontWeight="medium">
+                Per-expert uncertainty statistics
+              </Text>
+              <Tooltip label="Download stats table as CSV" hasArrow>
+                <IconButton
+                  aria-label={`Download distribution stats table for ${distData?.altName || 'alternative'}`}
+                  icon={<DownloadIcon />}
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleDownloadDistributionStatsCsv(distData?.expertSeries || [], title, filenameBase)}
+                />
+              </Tooltip>
+            </HStack>
+            <TableContainer overflowX="auto">
+              <Table size="sm" variant="simple">
+                <Thead>
+                  <Tr>
+                    <Th>Expert</Th>
+                    {DISTRIBUTION_STAT_COLUMNS.map((column) => (
+                      <Th key={column.key}>
+                        <HStack spacing={1}>
+                          <Text as="span">{column.label}</Text>
+                          <Tooltip label={DISTRIBUTION_STAT_TOOLTIPS[column.key] || column.label} hasArrow>
+                            <Box as="span" display="inline-flex" alignItems="center">
+                              <InfoOutlineIcon color="gray.500" boxSize={3} />
+                            </Box>
+                          </Tooltip>
+                        </HStack>
+                      </Th>
+                    ))}
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {statsRows.map((row) => (
+                    <Tr key={`${row.label}-${row.expertName}`}>
+                      <Td>{`${row.label} (${row.expertName})`}</Td>
+                      {DISTRIBUTION_STAT_COLUMNS.map((column) => (
+                        <Td key={`${row.label}-${row.expertName}-${column.key}`}>
+                          {formatDistributionStatValue(row[column.key])}
+                        </Td>
+                      ))}
+                    </Tr>
+                  ))}
+                </Tbody>
+              </Table>
+            </TableContainer>
+          </Box>
+        </Collapse>
+      </>
+    )
+  }
 
   const getConsistencyPlotData = () => {
     const sessionDoc = sessions.find((session) => session?._id === selectedWeightSession)
@@ -1347,17 +1687,33 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     `.replace(/\n\s+/g, '\n').trim()
   }
 
-  const buildDistributionPlotSvg = ({ title, altName, densityData, expertNames }) => {
+  const buildDistributionPlotSvg = ({ title, altName, densityData, expertNames, summaryLines = [] }) => {
     if (!Array.isArray(densityData) || densityData.length === 0 || !Array.isArray(expertNames) || expertNames.length === 0) return null
 
     const width = 980
     const top = 82
     const right = 30
-    const bottom = 55
+    const summaryLineHeight = 14
+    const normalizedSummaryLines = Array.isArray(summaryLines)
+      ? summaryLines.filter((line) => typeof line === 'string')
+      : []
+    const printableSummaryLines = normalizedSummaryLines.length > 0
+      ? ['Distribution Summary (per elicitation)', '', ...normalizedSummaryLines]
+      : []
+
+    const summaryBoxPadding = 12
+    const summaryBoxHeight = printableSummaryLines.length > 0
+      ? Math.max(62, (printableSummaryLines.length * summaryLineHeight) + (summaryBoxPadding * 2))
+      : 0
+
+    const bottom = printableSummaryLines.length > 0
+      ? (summaryBoxHeight + 70)
+      : 55
     const left = 70
     const plotWidth = width - left - right
     const plotHeight = 250
     const height = top + plotHeight + bottom
+    const summaryBoxY = top + plotHeight + 44
 
     const maxDensity = Math.max(0.001, ...densityData.flatMap((row) => expertNames.map((name) => Number(row?.[name]) || 0)))
     const scaleX = (value) => left + Math.max(0, Math.min(1, value)) * plotWidth
@@ -1408,6 +1764,23 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         ${series.map((entry) => `
           <path d="${createPolylinePath(entry.points)}" fill="none" stroke="${entry.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" />
         `).join('')}
+
+        ${printableSummaryLines.length > 0 ? `
+          <rect
+            x="${left}"
+            y="${summaryBoxY}"
+            width="${plotWidth}"
+            height="${summaryBoxHeight}"
+            rx="6"
+            fill="#f8fafc"
+            stroke="#e2e8f0"
+          />
+          ${printableSummaryLines.map((line, idx) => {
+    const y = summaryBoxY + summaryBoxPadding + 12 + (idx * summaryLineHeight)
+    const fontWeight = idx === 0 ? '700' : '400'
+    return `<text x="${left + summaryBoxPadding}" y="${y}" font-family="Arial, sans-serif" font-size="11" font-weight="${fontWeight}" fill="#334155">${escapeSvgText(line)}</text>`
+  }).join('')}
+        ` : ''}
       </svg>
     `.replace(/\n\s+/g, '\n').trim()
 
@@ -1555,7 +1928,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   }
 
   const handleExportFinalResults = async () => {
-    if (!exportIncludeResultsCsv && !exportIncludeSimulationCsvs && !exportIncludePlotImages && !exportIncludeFullData) {
+    if (!exportIncludeResultsCsv && !exportIncludeSimulationCsvs && !exportIncludePlotImages && !exportIncludeStep2ConsensusQuantificationCsv && !exportIncludeStep5UncertaintyStatsCsv && !exportIncludeFullData) {
       toast({
         title: 'Choose at least one export item',
         status: 'warning',
@@ -1589,6 +1962,44 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           exportZip.file(`results/simulation_csvs/${sanitizeFilename(workflowNamedBase)}.csv`, entry.csvText)
         })
         if (simulationExports.length > 0) {
+          exportedArtifacts += 1
+        }
+      }
+
+      if (exportIncludeStep2ConsensusQuantificationCsv || exportIncludeStep5UncertaintyStatsCsv) {
+        if (exportIncludeStep2ConsensusQuantificationCsv) {
+          const step2ConsensusRows = (step2Results?.alternative_names || []).map((altName, altIndex) => {
+            const distData = getDistributionDataForAlternative(step2Results, altIndex)
+            if (!distData?.consensus) return null
+            return {
+              alternative: altName,
+              ...distData.consensus,
+            }
+          }).filter(Boolean)
+
+          const step2StatsCsv = buildConsensusQuantificationCsv(step2ConsensusRows, {
+            title: 'Step 4 consensus analysis quantification',
+            placeholderMessage: 'Consensus quantification is not available yet.',
+          })
+          exportZip.file('results/step4_consensus_analysis_quantification.csv', step2StatsCsv)
+          exportedArtifacts += 1
+        }
+
+        if (exportIncludeStep5UncertaintyStatsCsv) {
+          const step5Stats = (step5Results?.alternative_names || []).flatMap((altName, altIndex) => {
+            const distData = getDistributionDataForAlternative(step5Results, altIndex)
+            if (!distData) return []
+            return distData.expertSeries.map((entry) => ({
+              label: `${altName} - ${entry.label}`,
+              expertName: entry.expertName,
+              values: entry.values,
+            }))
+          })
+          const step5StatsCsv = buildDistributionStatsCsv(step5Stats, {
+            title: 'Step 3 uncertainty analysis stats',
+            placeholderMessage: 'Uncertainty stats are not available yet.',
+          })
+          exportZip.file('results/step3_uncertainty_analysis_stats.csv', step5StatsCsv)
           exportedArtifacts += 1
         }
       }
@@ -1780,7 +2191,13 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
             Run UP-MAVT
           </Heading>
           <Text color="gray.700">
-            Uncertainty Propagated - Multi-Attribute Value Theory (UP-MAVT) is an extension of traditional MAVT, developed by Pagliuca et al. (2026 - Work in progress) to systematically incorporate uncertainty into the decision analysis process.
+            Uncertainty Propagated - Multi-Attribute Value Theory (UP-MAVT) is an extension of traditional MAVT, developed by Pagliuca et al. (2026 - publications forthcoming) to systematically incorporate uncertainty into the decision analysis process.
+            
+            {/* {' '}
+            <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
+              PLACEHOLDER <ExternalLinkIcon mx="2px" />
+            </Link>
+            ). */}
             <Link color="blue.600" textDecoration="underline" cursor="pointer" onClick={onUncertaintiesOpen}>
               This diagram illustrates the sources of uncertainty considered in the framework.
             </Link>
@@ -1794,14 +2211,18 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
             <Link color="blue.600" textDecoration="underline" cursor="pointer" onClick={onMcModesOpen}>
               The logic behind these methods is detailed in this image.
             </Link>
-            {' '}For a comprehensive explanation, an overview of the workflow, and an example case study, see the publication (Work in progress).
+            {' '}For a comprehensive explanation, an overview of the workflow, and an example case study, please refer to the publication{' '}
+            <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
+              PLACEHOLDER <ExternalLinkIcon mx="2px" />
+            </Link>
+            .
           </Text>
         </VStack>
 
         <Text color="gray.700">
           To run this study locally, use the <b>Download Data ZIP</b> action in this page. It exports a runnable local bundle with scripts and CSV data for the selected study.
           {' '}For the full project source code, see the{' '}
-          <Link href="https://github.com/simo-pagliu/UP-MAVT-Suite" isExternal color="blue.600" textDecoration="underline">
+          <Link href="https://github.com/your-repo/elicitation-tools" isExternal color="blue.600" textDecoration="underline">
             repository <ExternalLinkIcon mx="2px" />
           </Link>
           .
@@ -1942,7 +2363,11 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                         Additional controls are available in the Advanced panel.
                       </Text>
                       <Text>
-                        For background on the general workflow, see the publication (Work in progress).
+                        For background on the general workflow, see{' '}
+                        <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
+                          PLACEHOLDER <ExternalLinkIcon mx="2px" />
+                        </Link>
+                        .
                       </Text>
                       <Alert status="info" borderRadius="md">
                         <AlertIcon />
@@ -2307,7 +2732,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   }
                   statusInfo={null}
                 >
-                  {weightsComputed && (
+                  <VStack spacing={6} align="stretch">
+                    {weightsComputed && (
                     <VStack spacing={3} align="stretch">
                       <HStack spacing={3}>
                         <Text fontWeight="bold">View weight space for:</Text>
@@ -2338,109 +2764,480 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                           .filter((name) => typeof name === 'string' && name.length > 0)}
                       />
 
-                      <Text mt={4}>Declared vs Computed Ratios</Text>
-                      {step1ConsistencyData.length > 0 ? (
-                        <Box borderWidth={1} borderRadius="md" p={3} bg="white" position="relative" data-export-id="step1_declared_computed_ratios">
-                          <Tooltip label="Download image as PNG" hasArrow>
-                            <IconButton
-                              aria-label="Download declared vs computed ratios image"
-                              icon={<DownloadIcon />}
-                              size="sm"
-                              variant="ghost"
-                              position="absolute"
-                              top={2}
-                              right={2}
-                              zIndex={2}
-                              onClick={() => handleDownloadChartPng('step1_declared_computed_ratios', 'declared_computed_ratios')}
-                            />
-                          </Tooltip>
-                          <ResponsiveContainer width="100%" height={Math.max(300, step1ConsistencyComparisons.length * 28 + 100)}>
-                            <ScatterChart
-                              margin={{ top: 35, right: 20, left: 10, bottom: 5 }}
-                            >
-                              <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
-                              <XAxis 
-                                type="number" 
-                                dataKey="value"
-                                name="Ratio"
-                                label={{ value: 'Ratio Value', position: 'insideBottom', offset: -3, fontSize: 11 }}
-                                tick={{ fontSize: 10 }}
+                      <Button
+                        mt={4}
+                        variant="ghost"
+                        justifyContent="flex-start"
+                        leftIcon={showDeclaredVsComputed ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                        onClick={() => setShowDeclaredVsComputed((prev) => !prev)}
+                      >
+                        Declared vs Computed Ratios
+                      </Button>
+                      <Collapse in={showDeclaredVsComputed} animateOpacity>
+                        {step1ConsistencyData.length > 0 ? (
+                          <Box borderWidth={1} borderRadius="md" p={3} bg="white" position="relative" data-export-id="step1_declared_computed_ratios">
+                            <Tooltip label="Download image as PNG" hasArrow>
+                              <IconButton
+                                aria-label="Download declared vs computed ratios image"
+                                icon={<DownloadIcon />}
+                                size="sm"
+                                variant="ghost"
+                                position="absolute"
+                                top={2}
+                                right={2}
+                                zIndex={2}
+                                onClick={() => handleDownloadChartPng('step1_declared_computed_ratios', 'declared_computed_ratios')}
                               />
-                              <YAxis
-                                type="number"
-                                dataKey="yPlot"
-                                name="Comparison"
-                                width={240}
-                                tick={{ fontSize: 10 }}
-                                interval={0}
-                                domain={[
-                                  -0.5,
-                                  Math.max(0, step1ConsistencyComparisons.length - 1) + 0.5,
-                                ]}
-                                ticks={step1ConsistencyComparisons.map((_, idx) => idx)}
-                                tickFormatter={(value) => step1ConsistencyComparisons[Math.round(value)] || ''}
-                              />
-                              <RechartsTooltip
-                                cursor={{ strokeDasharray: '3 3' }}
-                                wrapperStyle={{ pointerEvents: 'auto' }}
-                                isAnimationActive={false}
-                                content={({ active, payload }) => {
-                                  if (!active || !payload || payload.length === 0) return null
-                                  const data = payload[0].payload
-                                  return (
-                                    <Box bg="white" p={2} borderWidth={1} borderRadius="md" boxShadow="md">
-                                      <Text fontSize="xs" fontWeight="bold" mb={1}>{data.comparison}</Text>
-                                      <Text fontSize="xs" color={payload[0].color}>
-                                        {payload[0].name}: {Number(data.value).toFixed(4)}
-                                      </Text>
-                                      {data.type === 'computed' && Number.isInteger(data.solutionIndex) && (
-                                        <Text fontSize="xs" color="gray.600">
-                                          Solution #{data.solutionIndex + 1}
+                            </Tooltip>
+                            <ResponsiveContainer width="100%" height={Math.max(300, step1ConsistencyComparisons.length * 28 + 100)}>
+                              <ScatterChart
+                                margin={{ top: 35, right: 20, left: 10, bottom: 5 }}
+                              >
+                                <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.2} />
+                                <XAxis 
+                                  type="number" 
+                                  dataKey="value"
+                                  name="Ratio"
+                                  label={{ value: 'Ratio Value', position: 'insideBottom', offset: -3, fontSize: 11 }}
+                                  tick={{ fontSize: 10 }}
+                                />
+                                <YAxis
+                                  type="number"
+                                  dataKey="yPlot"
+                                  name="Comparison"
+                                  width={240}
+                                  tick={{ fontSize: 10 }}
+                                  interval={0}
+                                  domain={[
+                                    -0.5,
+                                    Math.max(0, step1ConsistencyComparisons.length - 1) + 0.5,
+                                  ]}
+                                  ticks={step1ConsistencyComparisons.map((_, idx) => idx)}
+                                  tickFormatter={(value) => step1ConsistencyComparisons[Math.round(value)] || ''}
+                                />
+                                <RechartsTooltip
+                                  cursor={{ strokeDasharray: '3 3' }}
+                                  wrapperStyle={{ pointerEvents: 'auto' }}
+                                  isAnimationActive={false}
+                                  content={({ active, payload }) => {
+                                    if (!active || !payload || payload.length === 0) return null
+                                    const data = payload[0].payload
+                                    return (
+                                      <Box bg="white" p={2} borderWidth={1} borderRadius="md" boxShadow="md">
+                                        <Text fontSize="xs" fontWeight="bold" mb={1}>{data.comparison}</Text>
+                                        <Text fontSize="xs" color={payload[0].color}>
+                                          {payload[0].name}: {Number(data.value).toFixed(4)}
                                         </Text>
-                                      )}
-                                    </Box>
-                                  )
-                                }}
-                              />
-                              <RechartsLegend 
-                                verticalAlign="top"
-                                height={30}
-                                iconSize={10}
-                              />
-                              <Scatter 
-                                name="Computed (w_adj / w_ref)" 
-                                data={step1ConsistencyData.filter(d => d.type === 'computed')}
-                                fill="#48BB78"
-                                fillOpacity={0.6}
-                                shape="circle"
-                              />
-                              <Scatter 
-                                name="Declared (1 / vf(value))" 
-                                data={step1ConsistencyData.filter(d => d.type === 'declared')}
-                                fill="#DD6B20"
-                                shape={(props) => {
-                                  const { cx, cy } = props;
-                                  const size = 6;
-                                  return (
-                                    <polygon
-                                      points={`${cx},${cy-size} ${cx+size},${cy} ${cx},${cy+size} ${cx-size},${cy}`}
-                                      fill="#DD6B20"
-                                      stroke="#DD6B20"
-                                      strokeWidth={1}
-                                    />
-                                  );
-                                }}
-                              />
-                            </ScatterChart>
-                          </ResponsiveContainer>
+                                        {data.type === 'computed' && Number.isInteger(data.solutionIndex) && (
+                                          <Text fontSize="xs" color="gray.600">
+                                            Solution #{data.solutionIndex + 1}
+                                          </Text>
+                                        )}
+                                      </Box>
+                                    )
+                                  }}
+                                />
+                                <RechartsLegend 
+                                  verticalAlign="top"
+                                  height={30}
+                                  iconSize={10}
+                                />
+                                <Scatter 
+                                  name="Computed (w_adj / w_ref)" 
+                                  data={step1ConsistencyData.filter(d => d.type === 'computed')}
+                                  fill="#48BB78"
+                                  fillOpacity={0.6}
+                                  shape="circle"
+                                />
+                                <Scatter 
+                                  name="Declared (1 / vf(value))" 
+                                  data={step1ConsistencyData.filter(d => d.type === 'declared')}
+                                  fill="#DD6B20"
+                                  shape={(props) => {
+                                    const { cx, cy } = props
+                                    const size = 6
+                                    return (
+                                      <polygon
+                                        points={`${cx},${cy-size} ${cx+size},${cy} ${cx},${cy+size} ${cx-size},${cy}`}
+                                        fill="#DD6B20"
+                                        stroke="#DD6B20"
+                                        strokeWidth={1}
+                                      />
+                                    )
+                                  }}
+                                />
+                              </ScatterChart>
+                            </ResponsiveContainer>
+                          </Box>
+                        ) : (
+                          <Box bg="gray.100" h={200} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
+                            <Text color="gray.500">No comparable declared/computed ratio data available for this elicitation.</Text>
+                          </Box>
+                        )}
+                      </Collapse>
+                    </VStack>
+                    )}
+
+                    <VStack align="stretch" spacing={4}>
+                      <VStack spacing={1} align="stretch">
+                        <Heading as="h3" size="md">
+                          Confidence Review
+                        </Heading>
+                        <Box color="gray.600">
+                          Review the self-declared confidence reported by each expert and apply practitioner-side corrections for underestimation or overestimation. Adjustments are applied hierarchically, the resulting confidence values are clipped to the 0-4 range, and these corrections are not shown in the expert-facing interface.
                         </Box>
+                      </VStack>
+
+                      {selectedSessions.length > 0 ? (
+                        <VStack align="stretch" spacing={4}>
+                          {selectedSessions.map((sessionId) => {
+                            const session = sessions.find((entry) => entry._id === sessionId)
+                            if (!session) return null
+
+                            const practitionerSettings = normalizePractitionerSettings(
+                              criteria,
+                              practitionerSettingsById[sessionId] || session.practitioner_settings
+                            )
+                            const adjustments = practitionerSettings.confidence_adjustments
+                            const qiCriteriaEntries = Object.entries(adjustments.qi_criteria)
+                            const vfCriteriaEntries = Object.entries(adjustments.vf_criteria)
+                            const overallDeclaredAverage = averageConfidence(getSessionDeclaredConfidenceValues(session, criteria, 'all'))
+                            const qiDeclaredAverage = averageConfidence(getSessionDeclaredConfidenceValues(session, criteria, 'qi'))
+                            const vfDeclaredAverage = averageConfidence(getSessionDeclaredConfidenceValues(session, criteria, 'vf'))
+                            const showQiDetails = Boolean(expandedConfidenceSections[sessionId]?.qi)
+                            const showVfDetails = Boolean(expandedConfidenceSections[sessionId]?.vf)
+                            const saveState = practitionerSettingsSaveStateById[sessionId]
+                            const expertDescription = String(practitionerSettings.notes || '').trim()
+
+                            return (
+                              <Box key={sessionId} borderWidth={1} borderRadius="md" p={3} bg="white">
+                                <VStack align="stretch" spacing={3}>
+                                  <HStack justify="space-between" align="center" spacing={3}>
+                                    <Text fontWeight="semibold">
+                                      {getSessionLabel(session, sessionId)}
+                                      {expertDescription ? (
+                                        <Text as="span" fontWeight="normal" color="gray.600">
+                                          {' - '}{expertDescription}
+                                        </Text>
+                                      ) : null}
+                                    </Text>
+                                    <HStack spacing={2}>
+                                      {Boolean(savingPractitionerSettingsById[sessionId]) && <Spinner size="sm" />}
+                                      <Text fontSize="xs" color="gray.500">
+                                        {saveState === 'saving'
+                                          ? 'Saving changes...'
+                                          : saveState === 'error'
+                                              ? 'Save failed'
+                                              : ''}
+                                      </Text>
+                                    </HStack>
+                                  </HStack>
+
+                                  <VStack align="stretch" spacing={3}>
+                                    <SimpleGrid columns={{ base: 1, lg: 3 }} spacing={3} alignItems="center">
+                                      <Box>
+                                        <Text fontSize="sm" fontWeight="semibold">Overall adjustment</Text>
+                                      </Box>
+                                      <Text fontSize="sm" color="gray.600">
+                                        Declared {formatConfidenceValue(overallDeclaredAverage)} / 4 {'→'} Effective {formatConfidenceValue(
+                                          applyConfidenceAdjustment(overallDeclaredAverage, adjustments.overall)
+                                        )} / 4
+                                      </Text>
+                                      <HStack justify={{ base: 'flex-start', lg: 'flex-end' }} spacing={2}>
+                                        <Text fontSize="xs" color="gray.500" minW="52px">Adjustment</Text>
+                                        <NumberInput
+                                          size="sm"
+                                          step={0.1}
+                                          min={-4}
+                                          max={4}
+                                          precision={1}
+                                          value={adjustments.overall.toFixed(1)}
+                                          onChange={(_, valueAsNumber) => {
+                                            if (!Number.isFinite(valueAsNumber)) return
+                                            handlePractitionerSettingsChange(sessionId, (current) => ({
+                                              ...current,
+                                              confidence_adjustments: {
+                                                ...current.confidence_adjustments,
+                                                overall: normalizeConfidenceAdjustment(
+                                                  valueAsNumber,
+                                                  current.confidence_adjustments.overall
+                                                ),
+                                              },
+                                            }))
+                                          }}
+                                          maxW="120px"
+                                        >
+                                          <NumberInputField />
+                                          <NumberInputStepper>
+                                            <NumberIncrementStepper />
+                                            <NumberDecrementStepper />
+                                          </NumberInputStepper>
+                                        </NumberInput>
+                                        <Text fontSize="xs" color="gray.500" minW="40px" textAlign="right">
+                                          {formatSignedAdjustment(adjustments.overall)}
+                                        </Text>
+                                      </HStack>
+                                    </SimpleGrid>
+
+                                    <Divider />
+
+                                    <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
+                                      <VStack align="stretch" spacing={2}>
+                                        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3} alignItems="center">
+                                          <Box>
+                                            <Text fontSize="sm" fontWeight="semibold">Qualitative indicators (QI)</Text>
+                                          </Box>
+                                          <Text fontSize="sm" color="gray.600">
+                                            Declared {formatConfidenceValue(qiDeclaredAverage)} / 4 {'→'} Effective {formatConfidenceValue(
+                                              applyConfidenceAdjustment(qiDeclaredAverage, adjustments.overall, adjustments.qi)
+                                            )} / 4
+                                          </Text>
+                                          <HStack justify={{ base: 'flex-start', md: 'flex-end' }} spacing={2}>
+                                            <Text fontSize="xs" color="gray.500" minW="52px">Adjustment</Text>
+                                            <NumberInput
+                                              size="sm"
+                                              step={0.1}
+                                              min={-4}
+                                              max={4}
+                                              precision={1}
+                                              value={adjustments.qi.toFixed(1)}
+                                              onChange={(_, valueAsNumber) => {
+                                                if (!Number.isFinite(valueAsNumber)) return
+                                                handlePractitionerSettingsChange(sessionId, (current) => ({
+                                                  ...current,
+                                                  confidence_adjustments: {
+                                                    ...current.confidence_adjustments,
+                                                    qi: normalizeConfidenceAdjustment(
+                                                      valueAsNumber,
+                                                      current.confidence_adjustments.qi
+                                                    ),
+                                                  },
+                                                }))
+                                              }}
+                                              maxW="120px"
+                                            >
+                                              <NumberInputField />
+                                              <NumberInputStepper>
+                                                <NumberIncrementStepper />
+                                                <NumberDecrementStepper />
+                                              </NumberInputStepper>
+                                            </NumberInput>
+                                            <Text fontSize="xs" color="gray.500" minW="40px" textAlign="right">
+                                              {formatSignedAdjustment(adjustments.qi)}
+                                            </Text>
+                                          </HStack>
+                                        </SimpleGrid>
+
+                                        {qiCriteriaEntries.length > 0 && (
+                                          <>
+                                            <Button
+                                              size="sm"
+                                              variant="ghost"
+                                              justifyContent="flex-start"
+                                              leftIcon={showQiDetails ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                                              onClick={() => handleToggleConfidenceSection(sessionId, 'qi')}
+                                            >
+                                              Refine QI adjustments by criterion
+                                            </Button>
+                                            <Collapse in={showQiDetails} animateOpacity>
+                                              <VStack align="stretch" spacing={2} pl={{ base: 0, md: 4 }}>
+                                                {qiCriteriaEntries.map(([criterionName, value]) => {
+                                                  const declaredValues = getQualitativeDeclaredConfidences(session, criterionName)
+                                                  const declaredAverage = averageConfidence(declaredValues)
+                                                  const effectiveAverage = applyConfidenceAdjustment(
+                                                    declaredAverage,
+                                                    adjustments.overall,
+                                                    adjustments.qi,
+                                                    value
+                                                  )
+                                                  return (
+                                                    <SimpleGrid key={criterionName} columns={{ base: 1, md: 3 }} spacing={3} alignItems="center">
+                                                      <Box minW={0}>
+                                                        <Text fontSize="sm" noOfLines={1}>{criterionName}</Text>
+                                                      </Box>
+                                                      <Text fontSize="sm" color="gray.600">
+                                                        {formatConfidenceValue(declaredAverage)} / 4 {'→'} {formatConfidenceValue(effectiveAverage)} / 4
+                                                      </Text>
+                                                      <HStack justify={{ base: 'flex-start', md: 'flex-end' }} spacing={2}>
+                                                        <Text fontSize="xs" color="gray.500" minW="52px">Adjustment</Text>
+                                                        <NumberInput
+                                                          size="sm"
+                                                          step={0.1}
+                                                          min={-4}
+                                                          max={4}
+                                                          precision={1}
+                                                          value={Number(value).toFixed(1)}
+                                                          onChange={(_, valueAsNumber) => {
+                                                            if (!Number.isFinite(valueAsNumber)) return
+                                                            handlePractitionerSettingsChange(sessionId, (current) => ({
+                                                              ...current,
+                                                              confidence_adjustments: {
+                                                                ...current.confidence_adjustments,
+                                                                qi_criteria: {
+                                                                  ...current.confidence_adjustments.qi_criteria,
+                                                                  [criterionName]: normalizeConfidenceAdjustment(
+                                                                    valueAsNumber,
+                                                                    current.confidence_adjustments.qi_criteria[criterionName]
+                                                                  ),
+                                                                },
+                                                              },
+                                                            }))
+                                                          }}
+                                                          maxW="120px"
+                                                        >
+                                                          <NumberInputField />
+                                                          <NumberInputStepper>
+                                                            <NumberIncrementStepper />
+                                                            <NumberDecrementStepper />
+                                                          </NumberInputStepper>
+                                                        </NumberInput>
+                                                        <Text fontSize="xs" color="gray.500" minW="40px" textAlign="right">
+                                                          {formatSignedAdjustment(value)}
+                                                        </Text>
+                                                      </HStack>
+                                                    </SimpleGrid>
+                                                  )
+                                                })}
+                                              </VStack>
+                                            </Collapse>
+                                          </>
+                                        )}
+                                      </VStack>
+
+                                      <VStack align="stretch" spacing={2}>
+                                        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3} alignItems="center">
+                                          <Box>
+                                            <Text fontSize="sm" fontWeight="semibold">Value functions (VF)</Text>
+                                          </Box>
+                                          <Text fontSize="sm" color="gray.600">
+                                            Declared {formatConfidenceValue(vfDeclaredAverage)} / 4 {'→'} Effective {formatConfidenceValue(
+                                              applyConfidenceAdjustment(vfDeclaredAverage, adjustments.overall, adjustments.vf)
+                                            )} / 4
+                                          </Text>
+                                          <HStack justify={{ base: 'flex-start', md: 'flex-end' }} spacing={2}>
+                                            <Text fontSize="xs" color="gray.500" minW="52px">Adjustment</Text>
+                                            <NumberInput
+                                              size="sm"
+                                              step={0.1}
+                                              min={-4}
+                                              max={4}
+                                              precision={1}
+                                              value={adjustments.vf.toFixed(1)}
+                                              onChange={(_, valueAsNumber) => {
+                                                if (!Number.isFinite(valueAsNumber)) return
+                                                handlePractitionerSettingsChange(sessionId, (current) => ({
+                                                  ...current,
+                                                  confidence_adjustments: {
+                                                    ...current.confidence_adjustments,
+                                                    vf: normalizeConfidenceAdjustment(
+                                                      valueAsNumber,
+                                                      current.confidence_adjustments.vf
+                                                    ),
+                                                  },
+                                                }))
+                                              }}
+                                              maxW="120px"
+                                            >
+                                              <NumberInputField />
+                                              <NumberInputStepper>
+                                                <NumberIncrementStepper />
+                                                <NumberDecrementStepper />
+                                              </NumberInputStepper>
+                                            </NumberInput>
+                                            <Text fontSize="xs" color="gray.500" minW="40px" textAlign="right">
+                                              {formatSignedAdjustment(adjustments.vf)}
+                                            </Text>
+                                          </HStack>
+                                        </SimpleGrid>
+
+                                        {vfCriteriaEntries.length > 0 && (
+                                          <>
+                                            <Button
+                                              size="sm"
+                                              variant="ghost"
+                                              justifyContent="flex-start"
+                                              leftIcon={showVfDetails ? <ChevronDownIcon /> : <ChevronRightIcon />}
+                                              onClick={() => handleToggleConfidenceSection(sessionId, 'vf')}
+                                            >
+                                              Refine VF adjustments by criterion
+                                            </Button>
+                                            <Collapse in={showVfDetails} animateOpacity>
+                                              <VStack align="stretch" spacing={2} pl={{ base: 0, md: 4 }}>
+                                                {vfCriteriaEntries.map(([criterionName, value]) => {
+                                                  const declaredConfidence = getValueFunctionDeclaredConfidence(session, criterionName)
+                                                  const effectiveConfidence = applyConfidenceAdjustment(
+                                                    declaredConfidence,
+                                                    adjustments.overall,
+                                                    adjustments.vf,
+                                                    value
+                                                  )
+                                                  return (
+                                                    <SimpleGrid key={criterionName} columns={{ base: 1, md: 3 }} spacing={3} alignItems="center">
+                                                      <Box minW={0}>
+                                                        <Text fontSize="sm" noOfLines={1}>{criterionName}</Text>
+                                                      </Box>
+                                                      <Text fontSize="sm" color="gray.600">
+                                                        {formatConfidenceValue(declaredConfidence)} / 4 {'→'} {formatConfidenceValue(effectiveConfidence)} / 4
+                                                      </Text>
+                                                      <HStack justify={{ base: 'flex-start', md: 'flex-end' }} spacing={2}>
+                                                        <Text fontSize="xs" color="gray.500" minW="52px">Adjustment</Text>
+                                                        <NumberInput
+                                                          size="sm"
+                                                          step={0.1}
+                                                          min={-4}
+                                                          max={4}
+                                                          precision={1}
+                                                          value={Number(value).toFixed(1)}
+                                                          onChange={(_, valueAsNumber) => {
+                                                            if (!Number.isFinite(valueAsNumber)) return
+                                                            handlePractitionerSettingsChange(sessionId, (current) => ({
+                                                              ...current,
+                                                              confidence_adjustments: {
+                                                                ...current.confidence_adjustments,
+                                                                vf_criteria: {
+                                                                  ...current.confidence_adjustments.vf_criteria,
+                                                                  [criterionName]: normalizeConfidenceAdjustment(
+                                                                    valueAsNumber,
+                                                                    current.confidence_adjustments.vf_criteria[criterionName]
+                                                                  ),
+                                                                },
+                                                              },
+                                                            }))
+                                                          }}
+                                                          maxW="120px"
+                                                        >
+                                                          <NumberInputField />
+                                                          <NumberInputStepper>
+                                                            <NumberIncrementStepper />
+                                                            <NumberDecrementStepper />
+                                                          </NumberInputStepper>
+                                                        </NumberInput>
+                                                        <Text fontSize="xs" color="gray.500" minW="40px" textAlign="right">
+                                                          {formatSignedAdjustment(value)}
+                                                        </Text>
+                                                      </HStack>
+                                                    </SimpleGrid>
+                                                  )
+                                                })}
+                                              </VStack>
+                                            </Collapse>
+                                          </>
+                                        )}
+                                      </VStack>
+                                    </SimpleGrid>
+                                  </VStack>
+                                </VStack>
+                              </Box>
+                            )
+                          })}
+                        </VStack>
                       ) : (
-                        <Box bg="gray.100" h={200} borderRadius="md" display="flex" alignItems="center" justifyContent="center">
-                          <Text color="gray.500">No comparable declared/computed ratio data available for this elicitation.</Text>
-                        </Box>
+                        <Text fontSize="sm" color="gray.500">
+                          Select at least one completed and locked session to edit confidence adjustments here.
+                        </Text>
                       )}
                     </VStack>
-                  )}
+                  </VStack>
                 </StepSection>
               </TabPanel>
 
@@ -2448,7 +3245,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
               <TabPanel>
                 <StepSection
                   title="Aggregation Analysis"
-                  description="Select one or more aggregation methods and run NSMC to compare how the resulting rankings change across aggregation approaches. The preferred method should be the one whose ranking behavior most closely aligns with the decision-maker's perspective and intended trade-offs."
+                  description="Select one or more aggregation methods and run NSMC to compare ranking behavior. For methods with α, α = 0 is fully compensatory; moving α toward 1 penalizes poor criterion performance more, while moving α toward -1 rewards strong criterion performance more."
                   onRun={() => handleRunStep(4, 'Aggregation')}
                   onStop={handleStopExecution}
                   isRunning={runningStep === 'Aggregation'}
@@ -2554,7 +3351,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
               <TabPanel>
                 <StepSection
                   title="Uncertainty Analysis"
-                  description="By running the SMC with the preferred aggregation method, the practitioner can examine both the overall spread and the shape of the resulting distributions to understand how uncertainty may influence the final results. This step helps surface effects that may not be apparent from the final aggregated ranking alone."
+                  description="By running the SMC with the preferred aggregation method, the practitioner can assess the overall uncertainty of the resulting distributions. This step can reveal insights that might otherwise be obscured by the final aggregated results."
                   onRun={() => handleRunStep(5, 'Uncertainty')}
                   onStop={handleStopExecution}
                   isRunning={runningStep === 'Uncertainty'}
@@ -2647,11 +3444,13 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   onClick={() => handleDownloadChartPng(`step5_distribution_${altIndex}`, `step3_uncertainty_analysis_distribution_${altName}`)}
                                 />
                               </Tooltip>
-                              <HStack justify="space-between" align="center" mb={2} pr={12}>
-                                <HStack spacing={3}>
-                                  <Text fontWeight="semibold" fontSize="sm">{`Distribution of Values for ${altName}`}</Text>
-                                </HStack>
-                              </HStack>
+                              {renderDistributionStatsTable({
+                                stepPrefix: 'step5',
+                                altIndex,
+                                distData,
+                                title: `Step 3 uncertainty analysis stats - ${altName}`,
+                                filenameBase: `step3_uncertainty_analysis_stats_${altName}`,
+                              })}
                               <ResponsiveContainer width="100%" height={250}>
                                 <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 0, bottom: 24 }}>
                                   <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
@@ -2710,7 +3509,11 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   title="Consensus Analysis"
                   description={(
                     <Text>
-                      The output of the SMC can be used to assess the consensus or agreement among experts. You can judge the consensus by observing the visual overlap of the distributions. If distributions overlap strongly, consensus is high; otherwise, aggregating divergent opinions requires caution.
+                      The output of the SMC can be used to assess the consensus or agreement among experts. Consensus is quantified as{' '}
+                      <InlineMath math={'C = \\frac{A}{N-1}'} />
+                      , with{' '}
+                      <InlineMath math={'A = \\sum_x \\left|\\max_i p_i(x) - \\sum_i p_i(x)\\right|'} />
+                      . If distributions overlap strongly, consensus is high; otherwise, aggregating divergent opinions requires caution.
                     </Text>
                   )}
                   onRun={() => handleRunStep(2, 'Consensus')}
@@ -2805,6 +3608,9 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                               <HStack justify="space-between" align="center" mb={2} pr={12}>
                                 <HStack spacing={3}>
                                   <Text fontWeight="semibold" fontSize="sm">{`Distribution of Values for ${altName}`}</Text>
+                                  <Badge colorScheme="blue" variant="subtle">
+                                    {`Consensus = ${Number(distData.consensus?.consensusPercent || 0).toFixed(2)}%`}
+                                  </Badge>
                                 </HStack>
                               </HStack>
                               <ResponsiveContainer width="100%" height={250}>
@@ -2986,6 +3792,18 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   Plot Images (PNG and SVG)
                 </Checkbox>
                 <Checkbox
+                  isChecked={exportIncludeStep2ConsensusQuantificationCsv}
+                  onChange={(e) => setExportIncludeStep2ConsensusQuantificationCsv(e.target.checked)}
+                >
+                  Step 4 consensus quantification
+                </Checkbox>
+                <Checkbox
+                  isChecked={exportIncludeStep5UncertaintyStatsCsv}
+                  onChange={(e) => setExportIncludeStep5UncertaintyStatsCsv(e.target.checked)}
+                >
+                  Step 3 uncertainty stats
+                </Checkbox>
+                <Checkbox
                   isChecked={exportIncludeFullData}
                   onChange={(e) => setExportIncludeFullData(e.target.checked)}
                 >
@@ -3122,6 +3940,79 @@ function getRankingHeatmapDimensions(results) {
   const height = 90 + alternatives.length * (cellSize + cellGap) + 24
 
   return { width, height }
+}
+
+function computeConsensusQuantification(densityData, expertNames) {
+  if (!Array.isArray(densityData) || densityData.length === 0 || !Array.isArray(expertNames) || expertNames.length === 0) {
+    return null
+  }
+
+  const normalizedExpertNames = expertNames
+    .map((name) => String(name || '').trim())
+    .filter((name) => name.length > 0)
+
+  if (normalizedExpertNames.length === 0) return null
+
+  let differenceArea = 0
+  densityData.forEach((row) => {
+    let distributionSum = 0
+    let profile = 0
+
+    normalizedExpertNames.forEach((expertName) => {
+      const density = Number(row?.[expertName])
+      const value = Number.isFinite(density) ? density : 0
+      distributionSum += value
+      if (value > profile) profile = value
+    })
+
+    differenceArea += Math.abs(profile - distributionSum)
+  })
+
+  const elicitationCount = normalizedExpertNames.length
+  const rawConsensus = elicitationCount > 1 ? (differenceArea / (elicitationCount - 1)) : 1
+  const consensusRatio = Math.max(0, Math.min(1, rawConsensus))
+
+  return {
+    differenceArea,
+    elicitationCount,
+    consensusRatio,
+    consensusPercent: consensusRatio * 100,
+  }
+}
+
+function buildConsensusQuantificationCsv(consensusRows, options = {}) {
+  const title = String(options.title || 'Step 4 consensus analysis quantification').trim()
+  const placeholderMessage = String(
+    options.placeholderMessage || 'Consensus quantification is not available yet.'
+  ).trim()
+
+  const lines = [
+    `title;${title}`,
+    'alternative;elicitation_count;difference_area;consensus_ratio;consensus_percent',
+  ]
+
+  if (!Array.isArray(consensusRows) || consensusRows.length === 0) {
+    lines.push(`;note;${placeholderMessage}`)
+    return `${lines.join('\n')}\n`
+  }
+
+  consensusRows.forEach((row) => {
+    const altName = String(row?.alternative || '').replace(/;/g, ',')
+    const elicitationCount = Number(row?.elicitationCount)
+    const differenceArea = Number(row?.differenceArea)
+    const consensusRatio = Number(row?.consensusRatio)
+    const consensusPercent = Number(row?.consensusPercent)
+
+    lines.push([
+      altName,
+      Number.isFinite(elicitationCount) ? String(elicitationCount) : '',
+      Number.isFinite(differenceArea) ? differenceArea.toFixed(6) : '',
+      Number.isFinite(consensusRatio) ? consensusRatio.toFixed(6) : '',
+      Number.isFinite(consensusPercent) ? consensusPercent.toFixed(2) : '',
+    ].join(';'))
+  })
+
+  return `${lines.join('\n')}\n`
 }
 
 function buildRankProbabilityCsv(results) {
@@ -3886,6 +4777,8 @@ function StepSection({
 export {
   buildRankProbabilityMatrix,
   buildRankProbabilityCsv,
+  computeConsensusQuantification,
+  buildConsensusQuantificationCsv,
   buildSimulationRowsCsv,
   buildSimulationCsvExports,
   buildRankingHeatmapSvg,

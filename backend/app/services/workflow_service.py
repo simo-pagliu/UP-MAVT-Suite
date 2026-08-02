@@ -138,9 +138,17 @@ class WorkflowService:
             'WAM': 'weighted_sum',
             'GEO': 'geometric_mean',
             'HAR': 'harmonic_mean',
+            'GEO_OFFSET': 'geometric_mean_offset',
+            'WAM_MIN': 'weighted_sum_min_mix',
+            'WPM': 'weighted_power_mean',
+            'WEM': 'weighted_exponential_mean',
             'weighted_sum': 'weighted_sum',
             'geometric_mean': 'geometric_mean',
             'harmonic_mean': 'harmonic_mean',
+            'geometric_mean_offset': 'geometric_mean_offset',
+            'weighted_sum_min_mix': 'weighted_sum_min_mix',
+            'weighted_power_mean': 'weighted_power_mean',
+            'weighted_exponential_mean': 'weighted_exponential_mean',
         }
         aggregation_method = agg_map.get(aggregation_method, 'weighted_sum')
         try:
@@ -189,6 +197,22 @@ class WorkflowService:
             raise ValidationError('No valid session IDs selected')
 
         session_docs = self._sessions.find_by_ids(selected_session_ids)
+        session_docs_by_id = {
+            str(doc.get('_id')): doc
+            for doc in session_docs
+            if self._sessions._to_oid(doc.get('study_session_id')) == self._studies._to_oid(study_session_id)
+        }
+        selected_session_ids = [sid for sid in selected_session_ids if str(sid) in session_docs_by_id]
+        if not selected_session_ids:
+            raise ValidationError('No valid session IDs selected')
+        session_docs = [session_docs_by_id[str(sid)] for sid in selected_session_ids]
+        confidence_adjustments = (
+            (study.get('workflow_preferences') or {})
+            .get('run_page', {})
+            .get('confidence_adjustments_by_session') or {}
+        )
+        raw_opinion_weights = []
+        session_ids_ordered = []
         for session_doc in session_docs:
             session_study_id = self._sessions._to_oid(session_doc.get('study_session_id'))
             if session_study_id != self._studies._to_oid(study_session_id):
@@ -199,6 +223,21 @@ class WorkflowService:
             normalized_qi = self._session_svc.normalize_qualitative_indicators(criteria, current_qi)
             if normalized_qi != current_qi:
                 self._sessions.update(session_doc['_id'], {'qualitative_indicators': normalized_qi})
+            sid = str(session_doc.get('_id', ''))
+            session_ids_ordered.append(sid)
+            base_confidence = self._compute_session_base_confidence(session_doc)
+            try:
+                adjustment = float(confidence_adjustments.get(sid, 0.0))
+            except (TypeError, ValueError):
+                adjustment = 0.0
+            adjusted = max(0.0, base_confidence + adjustment)
+            raw_opinion_weights.append(adjusted)
+
+        total_opinion_weight = sum(raw_opinion_weights)
+        if total_opinion_weight <= 0:
+            opinion_weights = None
+        else:
+            opinion_weights = [w / total_opinion_weight for w in raw_opinion_weights]
 
         if not study.get('computed_weights'):
             raise ValidationError('Compute weights first (Step 1)')
@@ -220,12 +259,43 @@ class WorkflowService:
                 'aggregation_alphas': normalized_alphas,
                 'mc_mode': mc_mode,
                 'use_random_weights': use_random_weights,
-                'opinion_weights': None,
+                'opinion_weights': opinion_weights,
             },
             'console_output': '',
             'created_at': datetime.now(timezone.utc),
         }
         return str(self._tasks.insert(doc))
+
+    @staticmethod
+    def _compute_session_base_confidence(session_doc):
+        """Compute the average self-declared confidence for a session (0–4 scale).
+
+        Reads confidence values from both value functions and qualitative
+        indicators and returns their mean. Returns 2.0 (mid-scale) when no
+        confidence data is available.
+        """
+        scores = []
+        vf = session_doc.get('value_functions') or {}
+        if isinstance(vf, dict):
+            for crit_data in (vf.get('criteria') or {}).values():
+                if isinstance(crit_data, dict) and crit_data.get('confidence') is not None:
+                    try:
+                        scores.append(float(crit_data['confidence']))
+                    except (TypeError, ValueError):
+                        pass
+        qi = session_doc.get('qualitative_indicators') or {}
+        if isinstance(qi, dict):
+            for indicator in qi.values():
+                if not isinstance(indicator, dict):
+                    continue
+                for conf_val in (indicator.get('confidences') or {}).values():
+                    try:
+                        scores.append(float(conf_val))
+                    except (TypeError, ValueError):
+                        pass
+        if not scores:
+            return 2.0
+        return sum(scores) / len(scores)
 
     def get_task_status(self, task_id):
         """Return the current status and metadata of a task.
@@ -403,6 +473,11 @@ class WorkflowService:
                         for session_id in run_page.get('selected_session_ids', [])
                         if session_id is not None
                     ],
+                    'confidence_adjustments_by_session': {
+                        str(k): float(v)
+                        for k, v in (run_page.get('confidence_adjustments_by_session') or {}).items()
+                        if v is not None
+                    },
                 }
             },
         }
@@ -412,6 +487,7 @@ class WorkflowService:
         study_session_id,
         use_non_linear_model=None,
         selected_session_ids=None,
+        confidence_adjustments_by_session=None,
     ):
         """Persist run-page preferences to the study session document."""
         study = self._studies.find_by_id(study_session_id)
@@ -430,6 +506,15 @@ class WorkflowService:
                 for session_id in selected_session_ids
                 if session_id is not None
             ]
+
+        if confidence_adjustments_by_session is not None:
+            if not isinstance(confidence_adjustments_by_session, dict):
+                raise ValidationError('confidence_adjustments_by_session must be a dict')
+            updates['workflow_preferences.run_page.confidence_adjustments_by_session'] = {
+                str(k): max(-4.0, min(4.0, float(v)))
+                for k, v in confidence_adjustments_by_session.items()
+                if v is not None
+            }
 
         if updates:
             self._studies.update(study_session_id, updates)
