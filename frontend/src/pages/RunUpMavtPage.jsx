@@ -212,11 +212,6 @@ function averageConfidence(values) {
   return total / values.length
 }
 
-function formatSignedAdjustment(value) {
-  const numericValue = normalizeConfidenceAdjustment(value, 0)
-  return `${numericValue > 0 ? '+' : ''}${numericValue.toFixed(1)}`
-}
-
 function applyConfidenceAdjustment(value, ...adjustments) {
   const confidence = toConfidenceNumber(value)
   if (confidence === null) return null
@@ -3065,7 +3060,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                       </VStack>
 
                       {selectedSessions.length > 0 ? (
-                        <VStack align="stretch" spacing={4}>
+                        <VStack align="stretch" spacing={3}>
                           {selectedSessions.map((sessionId) => {
                             const session = sessions.find((entry) => entry._id === sessionId)
                             if (!session) return null
@@ -3080,16 +3075,188 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                             const overallDeclaredAverage = averageConfidence(getSessionDeclaredConfidenceValues(session, criteria, 'all'))
                             const qiDeclaredAverage = averageConfidence(getSessionDeclaredConfidenceValues(session, criteria, 'qi'))
                             const vfDeclaredAverage = averageConfidence(getSessionDeclaredConfidenceValues(session, criteria, 'vf'))
-                            const showQiDetails = Boolean(expandedConfidenceSections[sessionId]?.qi)
-                            const showVfDetails = Boolean(expandedConfidenceSections[sessionId]?.vf)
                             const saveState = practitionerSettingsSaveStateById[sessionId]
                             const expertDescription = String(practitionerSettings.notes || '').trim()
+                            const isOpen = Boolean(expandedConfidenceSections[sessionId]?.session)
+
+                            // One row per adjustable "scope": the three bulk knobs (Overall, all-QI,
+                            // all-VF) followed by one row per criterion for fine-grained overrides.
+                            // All of it lives in a single table so the column headers - notably
+                            // "Adjustment" - are set once instead of repeated (and wrapping) on every row.
+                            const bulkRows = [
+                              {
+                                key: 'overall',
+                                scope: 'Overall (all criteria)',
+                                category: null,
+                                declared: overallDeclaredAverage,
+                                value: adjustments.overall,
+                                effective: applyConfidenceAdjustment(overallDeclaredAverage, adjustments.overall),
+                                onChange: (valueAsNumber) => handlePractitionerSettingsChange(sessionId, (current) => ({
+                                  ...current,
+                                  confidence_adjustments: {
+                                    ...current.confidence_adjustments,
+                                    overall: normalizeConfidenceAdjustment(valueAsNumber, current.confidence_adjustments.overall),
+                                  },
+                                })),
+                              },
+                              {
+                                key: 'qi',
+                                scope: 'All Qualitative Indicators',
+                                category: 'QI',
+                                declared: qiDeclaredAverage,
+                                value: adjustments.qi,
+                                effective: applyConfidenceAdjustment(qiDeclaredAverage, adjustments.overall, adjustments.qi),
+                                onChange: (valueAsNumber) => handlePractitionerSettingsChange(sessionId, (current) => ({
+                                  ...current,
+                                  confidence_adjustments: {
+                                    ...current.confidence_adjustments,
+                                    qi: normalizeConfidenceAdjustment(valueAsNumber, current.confidence_adjustments.qi),
+                                  },
+                                })),
+                              },
+                              {
+                                key: 'vf',
+                                scope: 'All Value Functions',
+                                category: 'VF',
+                                declared: vfDeclaredAverage,
+                                value: adjustments.vf,
+                                effective: applyConfidenceAdjustment(vfDeclaredAverage, adjustments.overall, adjustments.vf),
+                                onChange: (valueAsNumber) => handlePractitionerSettingsChange(sessionId, (current) => ({
+                                  ...current,
+                                  confidence_adjustments: {
+                                    ...current.confidence_adjustments,
+                                    vf: normalizeConfidenceAdjustment(valueAsNumber, current.confidence_adjustments.vf),
+                                  },
+                                })),
+                              },
+                            ]
+
+                            const criterionRows = [
+                              ...qiCriteriaEntries.map(([criterionName, value]) => {
+                                const declared = averageConfidence(getQualitativeDeclaredConfidences(session, criterionName))
+                                return {
+                                  key: `qi-${criterionName}`,
+                                  scope: criterionName,
+                                  category: 'QI',
+                                  declared,
+                                  value,
+                                  effective: applyConfidenceAdjustment(declared, adjustments.overall, adjustments.qi, value),
+                                  onChange: (valueAsNumber) => handlePractitionerSettingsChange(sessionId, (current) => ({
+                                    ...current,
+                                    confidence_adjustments: {
+                                      ...current.confidence_adjustments,
+                                      qi_criteria: {
+                                        ...current.confidence_adjustments.qi_criteria,
+                                        [criterionName]: normalizeConfidenceAdjustment(
+                                          valueAsNumber,
+                                          current.confidence_adjustments.qi_criteria[criterionName]
+                                        ),
+                                      },
+                                    },
+                                  })),
+                                }
+                              }),
+                              ...vfCriteriaEntries.map(([criterionName, value]) => {
+                                const declared = getValueFunctionDeclaredConfidence(session, criterionName)
+                                return {
+                                  key: `vf-${criterionName}`,
+                                  scope: criterionName,
+                                  category: 'VF',
+                                  declared,
+                                  value,
+                                  effective: applyConfidenceAdjustment(declared, adjustments.overall, adjustments.vf, value),
+                                  onChange: (valueAsNumber) => handlePractitionerSettingsChange(sessionId, (current) => ({
+                                    ...current,
+                                    confidence_adjustments: {
+                                      ...current.confidence_adjustments,
+                                      vf_criteria: {
+                                        ...current.confidence_adjustments.vf_criteria,
+                                        [criterionName]: normalizeConfidenceAdjustment(
+                                          valueAsNumber,
+                                          current.confidence_adjustments.vf_criteria[criterionName]
+                                        ),
+                                      },
+                                    },
+                                  })),
+                                }
+                              }),
+                            ]
+
+                            const allRows = [...bulkRows, ...criterionRows]
+                            const adjustedCount = allRows.filter((row) => Math.abs(row.value) > 0.0001).length
+
+                            const renderAdjustmentRow = (row, { bold = false } = {}) => {
+                              const isUp = row.effective !== null && row.declared !== null && row.effective > row.declared
+                              const isDown = row.effective !== null && row.declared !== null && row.effective < row.declared
+                              return (
+                                <Tr key={row.key} bg={bold ? 'gray.50' : undefined}>
+                                  <Td>
+                                    <Text fontSize="sm" fontWeight={bold ? 'semibold' : 'normal'} noOfLines={1}>
+                                      {row.scope}
+                                    </Text>
+                                  </Td>
+                                  <Td>
+                                    {row.category && (
+                                      <Badge colorScheme={row.category === 'QI' ? 'blue' : 'purple'} fontSize="0.65rem">
+                                        {row.category}
+                                      </Badge>
+                                    )}
+                                  </Td>
+                                  <Td isNumeric fontSize="sm" color="gray.600">{formatConfidenceValue(row.declared)}</Td>
+                                  <Td isNumeric>
+                                    <NumberInput
+                                      size="sm"
+                                      step={0.1}
+                                      min={-4}
+                                      max={4}
+                                      precision={1}
+                                      value={Number(row.value).toFixed(1)}
+                                      onChange={(_, valueAsNumber) => {
+                                        if (!Number.isFinite(valueAsNumber)) return
+                                        row.onChange(valueAsNumber)
+                                      }}
+                                      maxW="90px"
+                                      ml="auto"
+                                    >
+                                      <NumberInputField textAlign="right" />
+                                      <NumberInputStepper>
+                                        <NumberIncrementStepper />
+                                        <NumberDecrementStepper />
+                                      </NumberInputStepper>
+                                    </NumberInput>
+                                  </Td>
+                                  <Td
+                                    isNumeric
+                                    fontSize="sm"
+                                    fontWeight={isUp || isDown ? 'bold' : bold ? 'semibold' : 'normal'}
+                                    color={isUp ? 'green.600' : isDown ? 'orange.600' : 'gray.700'}
+                                  >
+                                    {formatConfidenceValue(row.effective)}
+                                  </Td>
+                                </Tr>
+                              )
+                            }
 
                             return (
-                              <Box key={sessionId} borderWidth={1} borderRadius="md" p={3} bg="white">
-                                <VStack align="stretch" spacing={3}>
-                                  <HStack justify="space-between" align="center" spacing={3}>
-                                    <Text fontWeight="semibold">
+                              <Box key={sessionId} borderWidth={1} borderRadius="md" bg="white" overflow="hidden">
+                                <HStack
+                                  justify="space-between"
+                                  align="center"
+                                  spacing={3}
+                                  px={4}
+                                  py={3}
+                                  cursor="pointer"
+                                  _hover={{ bg: 'gray.50' }}
+                                  onClick={() => handleToggleConfidenceSection(sessionId, 'session')}
+                                >
+                                  <HStack spacing={2} align="center" minW={0}>
+                                    <ChevronRightIcon
+                                      boxSize={4}
+                                      color="gray.400"
+                                      transform={isOpen ? 'rotate(90deg)' : 'rotate(0deg)'}
+                                      transition="transform 0.15s ease"
+                                    />
+                                    <Text fontWeight="semibold" noOfLines={1}>
                                       {getSessionLabel(session, sessionId)}
                                       {expertDescription ? (
                                         <Text as="span" fontWeight="normal" color="gray.600">
@@ -3097,312 +3264,49 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                         </Text>
                                       ) : null}
                                     </Text>
-                                    <HStack spacing={2}>
-                                      {Boolean(savingPractitionerSettingsById[sessionId]) && <Spinner size="sm" />}
-                                      <Text fontSize="xs" color="gray.500">
-                                        {saveState === 'saving'
-                                          ? 'Saving changes...'
-                                          : saveState === 'error'
-                                              ? 'Save failed'
-                                              : ''}
-                                      </Text>
-                                    </HStack>
                                   </HStack>
+                                  <HStack spacing={2} flexShrink={0}>
+                                    {Boolean(savingPractitionerSettingsById[sessionId]) && <Spinner size="sm" />}
+                                    {saveState === 'saving' && (
+                                      <Text fontSize="xs" color="gray.500">Saving changes...</Text>
+                                    )}
+                                    {saveState === 'error' && (
+                                      <Text fontSize="xs" color="red.500">Save failed</Text>
+                                    )}
+                                    <Badge fontFamily="mono" fontWeight="normal" colorScheme="gray" fontSize="0.7rem">
+                                      Overall {formatConfidenceValue(overallDeclaredAverage)} {'→'} {formatConfidenceValue(bulkRows[0].effective)}
+                                    </Badge>
+                                    <Badge
+                                      fontFamily="mono"
+                                      colorScheme={adjustedCount > 0 ? 'teal' : 'gray'}
+                                      fontSize="0.7rem"
+                                    >
+                                      {adjustedCount} of {allRows.length} adjusted
+                                    </Badge>
+                                  </HStack>
+                                </HStack>
 
-                                  <VStack align="stretch" spacing={3}>
-                                    <SimpleGrid columns={{ base: 1, lg: 3 }} spacing={3} alignItems="center">
-                                      <Box>
-                                        <Text fontSize="sm" fontWeight="semibold">Overall adjustment</Text>
-                                      </Box>
-                                      <Text fontSize="sm" color="gray.600">
-                                        Declared {formatConfidenceValue(overallDeclaredAverage)} / 4 {'→'} Effective {formatConfidenceValue(
-                                          applyConfidenceAdjustment(overallDeclaredAverage, adjustments.overall)
-                                        )} / 4
-                                      </Text>
-                                      <HStack justify={{ base: 'flex-start', lg: 'flex-end' }} spacing={2}>
-                                        <Text fontSize="xs" color="gray.500" minW="52px">Adjustment</Text>
-                                        <NumberInput
-                                          size="sm"
-                                          step={0.1}
-                                          min={-4}
-                                          max={4}
-                                          precision={1}
-                                          value={adjustments.overall.toFixed(1)}
-                                          onChange={(_, valueAsNumber) => {
-                                            if (!Number.isFinite(valueAsNumber)) return
-                                            handlePractitionerSettingsChange(sessionId, (current) => ({
-                                              ...current,
-                                              confidence_adjustments: {
-                                                ...current.confidence_adjustments,
-                                                overall: normalizeConfidenceAdjustment(
-                                                  valueAsNumber,
-                                                  current.confidence_adjustments.overall
-                                                ),
-                                              },
-                                            }))
-                                          }}
-                                          maxW="120px"
-                                        >
-                                          <NumberInputField />
-                                          <NumberInputStepper>
-                                            <NumberIncrementStepper />
-                                            <NumberDecrementStepper />
-                                          </NumberInputStepper>
-                                        </NumberInput>
-                                        <Text fontSize="xs" color="gray.500" minW="40px" textAlign="right">
-                                          {formatSignedAdjustment(adjustments.overall)}
-                                        </Text>
-                                      </HStack>
-                                    </SimpleGrid>
-
-                                    <Divider />
-
-                                    <SimpleGrid columns={{ base: 1, xl: 2 }} spacing={4}>
-                                      <VStack align="stretch" spacing={2}>
-                                        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3} alignItems="center">
-                                          <Box>
-                                            <Text fontSize="sm" fontWeight="semibold">Qualitative indicators (QI)</Text>
-                                          </Box>
-                                          <Text fontSize="sm" color="gray.600">
-                                            Declared {formatConfidenceValue(qiDeclaredAverage)} / 4 {'→'} Effective {formatConfidenceValue(
-                                              applyConfidenceAdjustment(qiDeclaredAverage, adjustments.overall, adjustments.qi)
-                                            )} / 4
-                                          </Text>
-                                          <HStack justify={{ base: 'flex-start', md: 'flex-end' }} spacing={2}>
-                                            <Text fontSize="xs" color="gray.500" minW="52px">Adjustment</Text>
-                                            <NumberInput
-                                              size="sm"
-                                              step={0.1}
-                                              min={-4}
-                                              max={4}
-                                              precision={1}
-                                              value={adjustments.qi.toFixed(1)}
-                                              onChange={(_, valueAsNumber) => {
-                                                if (!Number.isFinite(valueAsNumber)) return
-                                                handlePractitionerSettingsChange(sessionId, (current) => ({
-                                                  ...current,
-                                                  confidence_adjustments: {
-                                                    ...current.confidence_adjustments,
-                                                    qi: normalizeConfidenceAdjustment(
-                                                      valueAsNumber,
-                                                      current.confidence_adjustments.qi
-                                                    ),
-                                                  },
-                                                }))
-                                              }}
-                                              maxW="120px"
-                                            >
-                                              <NumberInputField />
-                                              <NumberInputStepper>
-                                                <NumberIncrementStepper />
-                                                <NumberDecrementStepper />
-                                              </NumberInputStepper>
-                                            </NumberInput>
-                                            <Text fontSize="xs" color="gray.500" minW="40px" textAlign="right">
-                                              {formatSignedAdjustment(adjustments.qi)}
-                                            </Text>
-                                          </HStack>
-                                        </SimpleGrid>
-
-                                        {qiCriteriaEntries.length > 0 && (
-                                          <>
-                                            <Button
-                                              size="sm"
-                                              variant="ghost"
-                                              justifyContent="flex-start"
-                                              leftIcon={showQiDetails ? <ChevronDownIcon /> : <ChevronRightIcon />}
-                                              onClick={() => handleToggleConfidenceSection(sessionId, 'qi')}
-                                            >
-                                              Refine QI adjustments by criterion
-                                            </Button>
-                                            <Collapse in={showQiDetails} animateOpacity>
-                                              <VStack align="stretch" spacing={2} pl={{ base: 0, md: 4 }}>
-                                                {qiCriteriaEntries.map(([criterionName, value]) => {
-                                                  const declaredValues = getQualitativeDeclaredConfidences(session, criterionName)
-                                                  const declaredAverage = averageConfidence(declaredValues)
-                                                  const effectiveAverage = applyConfidenceAdjustment(
-                                                    declaredAverage,
-                                                    adjustments.overall,
-                                                    adjustments.qi,
-                                                    value
-                                                  )
-                                                  return (
-                                                    <SimpleGrid key={criterionName} columns={{ base: 1, md: 3 }} spacing={3} alignItems="center">
-                                                      <Box minW={0}>
-                                                        <Text fontSize="sm" noOfLines={1}>{criterionName}</Text>
-                                                      </Box>
-                                                      <Text fontSize="sm" color="gray.600">
-                                                        {formatConfidenceValue(declaredAverage)} / 4 {'→'} {formatConfidenceValue(effectiveAverage)} / 4
-                                                      </Text>
-                                                      <HStack justify={{ base: 'flex-start', md: 'flex-end' }} spacing={2}>
-                                                        <Text fontSize="xs" color="gray.500" minW="52px">Adjustment</Text>
-                                                        <NumberInput
-                                                          size="sm"
-                                                          step={0.1}
-                                                          min={-4}
-                                                          max={4}
-                                                          precision={1}
-                                                          value={Number(value).toFixed(1)}
-                                                          onChange={(_, valueAsNumber) => {
-                                                            if (!Number.isFinite(valueAsNumber)) return
-                                                            handlePractitionerSettingsChange(sessionId, (current) => ({
-                                                              ...current,
-                                                              confidence_adjustments: {
-                                                                ...current.confidence_adjustments,
-                                                                qi_criteria: {
-                                                                  ...current.confidence_adjustments.qi_criteria,
-                                                                  [criterionName]: normalizeConfidenceAdjustment(
-                                                                    valueAsNumber,
-                                                                    current.confidence_adjustments.qi_criteria[criterionName]
-                                                                  ),
-                                                                },
-                                                              },
-                                                            }))
-                                                          }}
-                                                          maxW="120px"
-                                                        >
-                                                          <NumberInputField />
-                                                          <NumberInputStepper>
-                                                            <NumberIncrementStepper />
-                                                            <NumberDecrementStepper />
-                                                          </NumberInputStepper>
-                                                        </NumberInput>
-                                                        <Text fontSize="xs" color="gray.500" minW="40px" textAlign="right">
-                                                          {formatSignedAdjustment(value)}
-                                                        </Text>
-                                                      </HStack>
-                                                    </SimpleGrid>
-                                                  )
-                                                })}
-                                              </VStack>
-                                            </Collapse>
-                                          </>
-                                        )}
-                                      </VStack>
-
-                                      <VStack align="stretch" spacing={2}>
-                                        <SimpleGrid columns={{ base: 1, md: 3 }} spacing={3} alignItems="center">
-                                          <Box>
-                                            <Text fontSize="sm" fontWeight="semibold">Value functions (VF)</Text>
-                                          </Box>
-                                          <Text fontSize="sm" color="gray.600">
-                                            Declared {formatConfidenceValue(vfDeclaredAverage)} / 4 {'→'} Effective {formatConfidenceValue(
-                                              applyConfidenceAdjustment(vfDeclaredAverage, adjustments.overall, adjustments.vf)
-                                            )} / 4
-                                          </Text>
-                                          <HStack justify={{ base: 'flex-start', md: 'flex-end' }} spacing={2}>
-                                            <Text fontSize="xs" color="gray.500" minW="52px">Adjustment</Text>
-                                            <NumberInput
-                                              size="sm"
-                                              step={0.1}
-                                              min={-4}
-                                              max={4}
-                                              precision={1}
-                                              value={adjustments.vf.toFixed(1)}
-                                              onChange={(_, valueAsNumber) => {
-                                                if (!Number.isFinite(valueAsNumber)) return
-                                                handlePractitionerSettingsChange(sessionId, (current) => ({
-                                                  ...current,
-                                                  confidence_adjustments: {
-                                                    ...current.confidence_adjustments,
-                                                    vf: normalizeConfidenceAdjustment(
-                                                      valueAsNumber,
-                                                      current.confidence_adjustments.vf
-                                                    ),
-                                                  },
-                                                }))
-                                              }}
-                                              maxW="120px"
-                                            >
-                                              <NumberInputField />
-                                              <NumberInputStepper>
-                                                <NumberIncrementStepper />
-                                                <NumberDecrementStepper />
-                                              </NumberInputStepper>
-                                            </NumberInput>
-                                            <Text fontSize="xs" color="gray.500" minW="40px" textAlign="right">
-                                              {formatSignedAdjustment(adjustments.vf)}
-                                            </Text>
-                                          </HStack>
-                                        </SimpleGrid>
-
-                                        {vfCriteriaEntries.length > 0 && (
-                                          <>
-                                            <Button
-                                              size="sm"
-                                              variant="ghost"
-                                              justifyContent="flex-start"
-                                              leftIcon={showVfDetails ? <ChevronDownIcon /> : <ChevronRightIcon />}
-                                              onClick={() => handleToggleConfidenceSection(sessionId, 'vf')}
-                                            >
-                                              Refine VF adjustments by criterion
-                                            </Button>
-                                            <Collapse in={showVfDetails} animateOpacity>
-                                              <VStack align="stretch" spacing={2} pl={{ base: 0, md: 4 }}>
-                                                {vfCriteriaEntries.map(([criterionName, value]) => {
-                                                  const declaredConfidence = getValueFunctionDeclaredConfidence(session, criterionName)
-                                                  const effectiveConfidence = applyConfidenceAdjustment(
-                                                    declaredConfidence,
-                                                    adjustments.overall,
-                                                    adjustments.vf,
-                                                    value
-                                                  )
-                                                  return (
-                                                    <SimpleGrid key={criterionName} columns={{ base: 1, md: 3 }} spacing={3} alignItems="center">
-                                                      <Box minW={0}>
-                                                        <Text fontSize="sm" noOfLines={1}>{criterionName}</Text>
-                                                      </Box>
-                                                      <Text fontSize="sm" color="gray.600">
-                                                        {formatConfidenceValue(declaredConfidence)} / 4 {'→'} {formatConfidenceValue(effectiveConfidence)} / 4
-                                                      </Text>
-                                                      <HStack justify={{ base: 'flex-start', md: 'flex-end' }} spacing={2}>
-                                                        <Text fontSize="xs" color="gray.500" minW="52px">Adjustment</Text>
-                                                        <NumberInput
-                                                          size="sm"
-                                                          step={0.1}
-                                                          min={-4}
-                                                          max={4}
-                                                          precision={1}
-                                                          value={Number(value).toFixed(1)}
-                                                          onChange={(_, valueAsNumber) => {
-                                                            if (!Number.isFinite(valueAsNumber)) return
-                                                            handlePractitionerSettingsChange(sessionId, (current) => ({
-                                                              ...current,
-                                                              confidence_adjustments: {
-                                                                ...current.confidence_adjustments,
-                                                                vf_criteria: {
-                                                                  ...current.confidence_adjustments.vf_criteria,
-                                                                  [criterionName]: normalizeConfidenceAdjustment(
-                                                                    valueAsNumber,
-                                                                    current.confidence_adjustments.vf_criteria[criterionName]
-                                                                  ),
-                                                                },
-                                                              },
-                                                            }))
-                                                          }}
-                                                          maxW="120px"
-                                                        >
-                                                          <NumberInputField />
-                                                          <NumberInputStepper>
-                                                            <NumberIncrementStepper />
-                                                            <NumberDecrementStepper />
-                                                          </NumberInputStepper>
-                                                        </NumberInput>
-                                                        <Text fontSize="xs" color="gray.500" minW="40px" textAlign="right">
-                                                          {formatSignedAdjustment(value)}
-                                                        </Text>
-                                                      </HStack>
-                                                    </SimpleGrid>
-                                                  )
-                                                })}
-                                              </VStack>
-                                            </Collapse>
-                                          </>
-                                        )}
-                                      </VStack>
-                                    </SimpleGrid>
-                                  </VStack>
-                                </VStack>
+                                <Collapse in={isOpen} animateOpacity>
+                                  <Box borderTopWidth={1} borderColor="gray.100" px={4} py={3}>
+                                    <TableContainer>
+                                      <Table size="sm" variant="simple">
+                                        <Thead>
+                                          <Tr>
+                                            <Th>Scope</Th>
+                                            <Th>Category</Th>
+                                            <Th isNumeric>Declared</Th>
+                                            <Th isNumeric>Adjustment</Th>
+                                            <Th isNumeric>Effective</Th>
+                                          </Tr>
+                                        </Thead>
+                                        <Tbody>
+                                          {bulkRows.map((row) => renderAdjustmentRow(row, { bold: true }))}
+                                          {criterionRows.map((row) => renderAdjustmentRow(row))}
+                                        </Tbody>
+                                      </Table>
+                                    </TableContainer>
+                                  </Box>
+                                </Collapse>
                               </Box>
                             )
                           })}
