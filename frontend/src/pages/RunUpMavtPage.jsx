@@ -4624,7 +4624,10 @@ function RankingHeatmap({ title, results, onDownloadPng }) {
   const minGridWidth = rowLabelWidth + alternatives.length * (cellSize + cellGap)
 
   return (
-    <VStack spacing={2} align="stretch">
+    // minW={0} overrides the flex/grid-item default of min-width:auto - without it, a heatmap
+    // wider than its grid column refuses to shrink and bleeds into the next column instead of
+    // scrolling inside its own overflowX box.
+    <VStack spacing={2} align="stretch" minW={0}>
       <HStack justify="space-between" align="center">
         <Text fontWeight="bold">{title}</Text>
         {onDownloadPng && (
