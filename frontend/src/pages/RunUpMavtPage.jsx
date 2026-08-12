@@ -1097,7 +1097,18 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           <Text fontSize="sm" color="gray.700">
             <strong>{meta.label}</strong> = {meta.fullName}
           </Text>
-          <Box bg="white" borderWidth={1} borderColor="gray.200" borderRadius="md" p={3} overflowX="auto">
+          <Box
+            bg="white"
+            borderWidth={1}
+            borderColor="gray.200"
+            borderRadius="md"
+            py={2}
+            px={3}
+            overflowX="auto"
+            maxW="360px"
+            fontSize="14px"
+            sx={{ '.katex-display': { margin: 0, textAlign: 'left' } }}
+          >
             <BlockMath math={meta.formula} />
           </Box>
           {meta.usesAlpha && (
@@ -1113,78 +1124,89 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const renderAggregationChecklist = () => (
     <VStack spacing={3} align="stretch">
       <Text fontWeight="bold">Aggregation methods (select one or more):</Text>
-      {AGGREGATION_METHODS.map((method) => {
-        const isSelected = aggregationStepMethods.includes(method.id)
-        const alphaValue = Number(aggregationStepAlphas[method.id] ?? 0)
-        return (
-          <Box key={method.id} bg="white" borderWidth={1} borderColor="gray.200" borderRadius="md" p={3}>
-            <VStack spacing={2} align="stretch">
-              <HStack spacing={3} align="center" flexWrap="wrap">
-                <Checkbox
-                  isChecked={isSelected}
-                  isDisabled={runningStep !== null}
-                  onChange={(e) => {
-                    const checked = e.target.checked
-                    setAggregationStepMethods((prev) => {
-                      if (checked) {
-                        return prev.includes(method.id) ? prev : [...prev, method.id]
-                      }
-                      return prev.filter((id) => id !== method.id)
-                    })
-                  }}
-                >
-                  <Text fontWeight="semibold">{method.label}</Text>
-                </Checkbox>
-                <Text fontSize="sm" color="gray.700">
-                  {method.fullName}
-                </Text>
-              </HStack>
-              <Box borderWidth={1} borderColor="gray.200" borderRadius="md" p={3} overflowX="auto">
-                <BlockMath math={method.formula} />
-              </Box>
-              {method.usesAlpha && isSelected && (
-                <HStack spacing={2} align="center" flexWrap="wrap">
-                  <Text fontWeight="medium">α:</Text>
-                  <Slider
-                    value={alphaValue}
-                    min={-1}
-                    max={1}
-                    step={0.01}
+      <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
+        {AGGREGATION_METHODS.map((method) => {
+          const isSelected = aggregationStepMethods.includes(method.id)
+          const alphaValue = Number(aggregationStepAlphas[method.id] ?? 0)
+          return (
+            <Box key={method.id} bg="white" borderWidth={1} borderColor="gray.200" borderRadius="md" p={3}>
+              <VStack spacing={2} align="stretch">
+                <HStack spacing={3} align="center" flexWrap="wrap">
+                  <Checkbox
+                    isChecked={isSelected}
                     isDisabled={runningStep !== null}
-                    onChange={(value) => setAggregationStepAlphas((prev) => ({ ...prev, [method.id]: Number(value) }))}
-                    flex={1}
-                  >
-                    <SliderTrack>
-                      <SliderFilledTrack />
-                    </SliderTrack>
-                    <SliderThumb />
-                  </Slider>
-                  <NumberInput
-                    value={alphaValue}
-                    min={-1}
-                    max={1}
-                    step={0.01}
-                    precision={2}
-                    width="100px"
-                    isDisabled={runningStep !== null}
-                    onChange={(_, valueAsNumber) => {
-                      if (!Number.isFinite(valueAsNumber)) return
-                      const clamped = Math.max(-1, Math.min(1, valueAsNumber))
-                      setAggregationStepAlphas((prev) => ({ ...prev, [method.id]: clamped }))
+                    onChange={(e) => {
+                      const checked = e.target.checked
+                      setAggregationStepMethods((prev) => {
+                        if (checked) {
+                          return prev.includes(method.id) ? prev : [...prev, method.id]
+                        }
+                        return prev.filter((id) => id !== method.id)
+                      })
                     }}
                   >
-                    <NumberInputField />
-                    <NumberInputStepper>
-                      <NumberIncrementStepper />
-                      <NumberDecrementStepper />
-                    </NumberInputStepper>
-                  </NumberInput>
+                    <Text fontWeight="semibold">{method.label}</Text>
+                  </Checkbox>
+                  <Text fontSize="sm" color="gray.700">
+                    {method.fullName}
+                  </Text>
                 </HStack>
-              )}
-            </VStack>
-          </Box>
-        )
-      })}
+                <Box
+                  borderWidth={1}
+                  borderColor="gray.200"
+                  borderRadius="md"
+                  py={2}
+                  px={3}
+                  overflowX="auto"
+                  fontSize="14px"
+                  sx={{ '.katex-display': { margin: 0, textAlign: 'left' } }}
+                >
+                  <BlockMath math={method.formula} />
+                </Box>
+                {method.usesAlpha && isSelected && (
+                  <HStack spacing={2} align="center" flexWrap="wrap">
+                    <Text fontWeight="medium">α:</Text>
+                    <Slider
+                      value={alphaValue}
+                      min={-1}
+                      max={1}
+                      step={0.01}
+                      isDisabled={runningStep !== null}
+                      onChange={(value) => setAggregationStepAlphas((prev) => ({ ...prev, [method.id]: Number(value) }))}
+                      flex={1}
+                    >
+                      <SliderTrack>
+                        <SliderFilledTrack />
+                      </SliderTrack>
+                      <SliderThumb />
+                    </Slider>
+                    <NumberInput
+                      value={alphaValue}
+                      min={-1}
+                      max={1}
+                      step={0.01}
+                      precision={2}
+                      width="100px"
+                      isDisabled={runningStep !== null}
+                      onChange={(_, valueAsNumber) => {
+                        if (!Number.isFinite(valueAsNumber)) return
+                        const clamped = Math.max(-1, Math.min(1, valueAsNumber))
+                        setAggregationStepAlphas((prev) => ({ ...prev, [method.id]: clamped }))
+                      }}
+                    >
+                      <NumberInputField />
+                      <NumberInputStepper>
+                        <NumberIncrementStepper />
+                        <NumberDecrementStepper />
+                      </NumberInputStepper>
+                    </NumberInput>
+                  </HStack>
+                )}
+              </VStack>
+            </Box>
+          )
+        })}
+      </SimpleGrid>
       <Text fontSize="xs" color="gray.600">
         α ∈ [-1, 1]. At α = 0 the aggregation is fully compensatory; values toward 1 emphasize poor performance, while values toward -1 emphasize strong performance.
       </Text>
@@ -3422,7 +3444,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                         return String(a[0]).localeCompare(String(b[0]))
                       })
                       return (
-                        <VStack spacing={4} align="stretch">
+                        <SimpleGrid columns={{ base: 1, xl: orderedEntries.length >= 3 ? 3 : 2 }} spacing={5}>
                           {orderedEntries.map(([backendMethod, result]) => {
                             const plotLabel = getAggregationPlotLabel(
                               backendMethod,
@@ -3439,7 +3461,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                               />
                             )
                           })}
-                        </VStack>
+                        </SimpleGrid>
                       )
                     }
 
