@@ -1352,7 +1352,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
   const weightSpaceSolutionCount = normalizeWeightSamples(weightSpaceData).length
 
-  // UI: toggles for showing per-distribution stats (collapsed by default)
+  // UI: toggles for showing per-distribution stats (each table's own defaultOpen sets its initial state)
   const [showDistributionStats, setShowDistributionStats] = useState({})
 
   const toggleDistributionStats = (key) => {
@@ -1373,9 +1373,9 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     downloadCSVFile(csvContent, `${sanitizeFilename(filenameBase)}.csv`)
   }
 
-  const renderDistributionStatsTable = ({ stepPrefix, altIndex, distData, title, filenameBase }) => {
+  const renderDistributionStatsTable = ({ stepPrefix, altIndex, distData, title, filenameBase, defaultOpen = false }) => {
     const statsKey = `${stepPrefix}_${altIndex}`
-    const isOpen = Boolean(showDistributionStats[statsKey])
+    const isOpen = statsKey in showDistributionStats ? showDistributionStats[statsKey] : defaultOpen
     const statsRows = buildDistributionStatsRows(distData?.expertSeries || [])
 
     return (
@@ -1542,21 +1542,51 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     window.URL.revokeObjectURL(objectUrl)
   }
 
-  const buildSvgMarkupFromElement = (svgElement) => {
+  // Captures a live Recharts SVG for PNG export. Chart titles/badges rendered as surrounding HTML
+  // (not inside the <svg>) are lost by a raw capture, so `headerLines` lets callers prepend them
+  // as real SVG text above the chart instead.
+  const buildSvgMarkupFromElement = (svgElement, headerLines = []) => {
     if (!svgElement) return null
     const clonedSvg = svgElement.cloneNode(true)
     inlineSvgComputedStyles(svgElement, clonedSvg)
     const bounds = svgElement.getBoundingClientRect()
-    const width = Math.max(1, Math.round(bounds.width || DEFAULT_PNG_WIDTH))
-    const height = Math.max(1, Math.round(bounds.height || DEFAULT_PNG_HEIGHT))
-    clonedSvg.setAttribute('width', String(width))
-    clonedSvg.setAttribute('height', String(height))
+    const contentWidth = Math.max(1, Math.round(bounds.width || DEFAULT_PNG_WIDTH))
+    const contentHeight = Math.max(1, Math.round(bounds.height || DEFAULT_PNG_HEIGHT))
+    clonedSvg.setAttribute('width', String(contentWidth))
+    clonedSvg.setAttribute('height', String(contentHeight))
     if (!clonedSvg.getAttribute('viewBox')) {
-      clonedSvg.setAttribute('viewBox', `0 0 ${width} ${height}`)
+      clonedSvg.setAttribute('viewBox', `0 0 ${contentWidth} ${contentHeight}`)
     }
     clonedSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
     clonedSvg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink')
-    return new XMLSerializer().serializeToString(clonedSvg)
+
+    const validHeaderLines = (headerLines || []).filter((line) => typeof line === 'string' && line.trim().length > 0)
+    if (validHeaderLines.length === 0) {
+      return { svgMarkup: new XMLSerializer().serializeToString(clonedSvg), width: contentWidth, height: contentHeight }
+    }
+
+    const headerLineHeight = 20
+    const headerPaddingTop = 12
+    const headerPaddingBottom = 8
+    const headerHeight = headerPaddingTop + validHeaderLines.length * headerLineHeight + headerPaddingBottom
+    const width = contentWidth
+    const height = contentHeight + headerHeight
+
+    clonedSvg.setAttribute('x', '0')
+    clonedSvg.setAttribute('y', String(headerHeight))
+    const innerSvgMarkup = new XMLSerializer().serializeToString(clonedSvg)
+
+    const headerMarkup = validHeaderLines.map((line, idx) => {
+      const y = headerPaddingTop + idx * headerLineHeight + 14
+      const fontSize = idx === 0 ? 15 : 12
+      const fontWeight = idx === 0 ? '700' : '400'
+      const color = idx === 0 ? '#1A202C' : '#4A5568'
+      return `<text x="12" y="${y}" font-family="Arial, sans-serif" font-size="${fontSize}" font-weight="${fontWeight}" fill="${color}">${escapeSvgText(line)}</text>`
+    }).join('')
+
+    const svgMarkup = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#ffffff" />${headerMarkup}${innerSvgMarkup}</svg>`
+
+    return { svgMarkup, width, height }
   }
 
   const getPlotSvgElement = (container) => {
@@ -1620,12 +1650,21 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const buildConsistencyPlotSvg = ({ title, comparisons, data }) => {
     if (!Array.isArray(comparisons) || comparisons.length === 0 || !Array.isArray(data) || data.length === 0) return null
 
-    const width = 980
+    const labelFontSize = 11
+    const minLeft = 160
+    const maxLeft = 460
+    const labelPadding = 40
+    // Size the label column to fit the longest comparison name (capped), instead of a fixed
+    // width that clips or overlaps long names against the axis.
+    const measuredMaxLabelWidth = Math.max(
+      0,
+      ...comparisons.map((comparison) => measureSvgTextWidth(comparison, labelFontSize, '400'))
+    )
+    const left = Math.min(maxLeft, Math.max(minLeft, measuredMaxLabelWidth + labelPadding))
+    const plotWidth = 700
+    const width = left + plotWidth + 30
     const top = 82
-    const right = 30
     const bottom = 55
-    const left = 250
-    const plotWidth = width - left - right
     const plotHeight = Math.max(220, comparisons.length * 30)
     const height = top + plotHeight + bottom
 
@@ -1660,9 +1699,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
         ${yTicks.map(({ label, y }) => {
           const yPos = scaleY(y)
+          const displayLabel = truncateSvgTextToWidth(label, left - labelPadding + 20, labelFontSize, '400')
           return `
             <line x1="${left}" y1="${yPos}" x2="${left + plotWidth}" y2="${yPos}" stroke="#f3f4f6" stroke-width="1" />
-            <text x="${left - 10}" y="${yPos + 4}" text-anchor="end" font-family="Arial, sans-serif" font-size="11" fill="#374151">${escapeSvgText(label)}</text>
+            <text x="${left - 10}" y="${yPos + 4}" text-anchor="end" font-family="Arial, sans-serif" font-size="11" fill="#374151"><title>${escapeSvgText(label)}</title>${escapeSvgText(displayLabel)}</text>
           `
         }).join('')}
 
@@ -1678,22 +1718,97 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         <line x1="${left}" y1="${top}" x2="${left}" y2="${top + plotHeight}" stroke="#9ca3af" stroke-width="1.2" />
         <text x="${left + plotWidth / 2}" y="${height - 16}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#4b5563">Ratio value</text>
 
-        <rect x="${left + plotWidth - 280}" y="${top - 24}" width="260" height="22" rx="4" fill="#ffffff" stroke="#e5e7eb" />
-        <circle cx="${left + plotWidth - 262}" cy="${top - 13}" r="4" fill="#48BB78" fill-opacity="0.72" />
-        <text x="${left + plotWidth - 250}" y="${top - 9}" font-family="Arial, sans-serif" font-size="11" fill="#374151">Computed</text>
-        <polygon points="${left + plotWidth - 198},${top - 18} ${left + plotWidth - 188},${top - 13} ${left + plotWidth - 198},${top - 8} ${left + plotWidth - 208},${top - 13}" fill="#DD6B20" stroke="#DD6B20" />
-        <text x="${left + plotWidth - 176}" y="${top - 9}" font-family="Arial, sans-serif" font-size="11" fill="#374151">Declared</text>
+        ${(() => {
+          const legendFontSize = 11
+          // Icon box is a fixed 12px-wide slot; the label starts iconSlotWidth past the slot's left edge.
+          const iconSlotWidth = 12
+          const iconToTextGap = 6
+          const itemGap = 20
+          const legendPaddingX = 14
+          const items = [
+            {
+              label: 'Computed',
+              // x here is the left edge of the icon slot.
+              renderSwatch: (x, y) => `<circle cx="${x + 4}" cy="${y}" r="4" fill="#48BB78" fill-opacity="0.72" />`,
+            },
+            {
+              label: 'Declared',
+              renderSwatch: (x, y) => `<polygon points="${x + 6},${y - 5} ${x + 11},${y} ${x + 6},${y + 5} ${x + 1},${y}" fill="#DD6B20" stroke="#DD6B20" />`,
+            },
+          ]
+          const itemWidths = items.map((item) => iconSlotWidth + iconToTextGap + measureSvgTextWidth(item.label, legendFontSize, '400'))
+          const legendContentWidth = itemWidths.reduce((sum, w) => sum + w, 0) + itemGap * (items.length - 1)
+          const legendBoxWidth = legendContentWidth + legendPaddingX * 2
+          const legendBoxHeight = 22
+          const legendBoxX = left + plotWidth - legendBoxWidth
+          const legendBoxY = top - 24
+          const legendCenterY = legendBoxY + legendBoxHeight / 2
+
+          let cursorX = legendBoxX + legendPaddingX
+          const itemsMarkup = items.map((item, idx) => {
+            const markup = `
+              ${item.renderSwatch(cursorX, legendCenterY)}
+              <text x="${cursorX + iconSlotWidth + iconToTextGap}" y="${legendCenterY + 4}" font-family="Arial, sans-serif" font-size="${legendFontSize}" fill="#374151">${escapeSvgText(item.label)}</text>
+            `
+            cursorX += itemWidths[idx] + itemGap
+            return markup
+          }).join('')
+
+          return `
+            <rect x="${legendBoxX}" y="${legendBoxY}" width="${legendBoxWidth}" height="${legendBoxHeight}" rx="4" fill="#ffffff" stroke="#e5e7eb" />
+            ${itemsMarkup}
+          `
+        })()}
       </svg>
     `.replace(/\n\s+/g, '\n').trim()
+
+    return { svgMarkup, width, height }
   }
 
-  const buildDistributionPlotSvg = ({ title, altName, densityData, expertNames, summaryLines = [] }) => {
+  // Self-contained distribution plot builder (no DOM dependency) used for the bulk ZIP export, so
+  // charts export correctly regardless of which step tab happens to be active in the browser.
+  const buildDistributionPlotSvg = ({ title, altName, subtitleLines = [], densityData, expertNames, summaryLines = [] }) => {
     if (!Array.isArray(densityData) || densityData.length === 0 || !Array.isArray(expertNames) || expertNames.length === 0) return null
 
     const width = 980
-    const top = 82
     const right = 30
+    const left = 70
+    const plotWidth = width - left - right
+    const plotHeight = 250
     const summaryLineHeight = 14
+
+    const legendFontSize = 11
+    const legendSwatchSize = 10
+    const legendSwatchToTextGap = 6
+    const legendItemGap = 18
+    const legendRowHeight = 18
+
+    const legendItems = expertNames.map((expertName, idx) => ({
+      expertName,
+      color: STEP2_COLORS[idx % STEP2_COLORS.length],
+      itemWidth: legendSwatchSize + legendSwatchToTextGap + measureSvgTextWidth(expertName, legendFontSize, '400'),
+    }))
+    const legendRows = []
+    let currentRow = []
+    let currentRowWidth = 0
+    legendItems.forEach((item) => {
+      const widthWithGap = item.itemWidth + (currentRow.length > 0 ? legendItemGap : 0)
+      if (currentRow.length > 0 && currentRowWidth + widthWithGap > plotWidth) {
+        legendRows.push(currentRow)
+        currentRow = []
+        currentRowWidth = 0
+      }
+      currentRow.push(item)
+      currentRowWidth += item.itemWidth + (currentRow.length > 1 ? legendItemGap : 0)
+    })
+    if (currentRow.length > 0) legendRows.push(currentRow)
+
+    const normalizedSubtitleLines = Array.isArray(subtitleLines) ? subtitleLines.filter((line) => typeof line === 'string' && line.length > 0) : []
+    const subtitleY = 44
+    const legendStartY = subtitleY + (normalizedSubtitleLines.length > 0 ? 16 : 0) + 12
+    const legendHeight = legendRows.length * legendRowHeight
+    const top = legendStartY + legendHeight + 14
+
     const normalizedSummaryLines = Array.isArray(summaryLines)
       ? summaryLines.filter((line) => typeof line === 'string')
       : []
@@ -1709,9 +1824,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     const bottom = printableSummaryLines.length > 0
       ? (summaryBoxHeight + 70)
       : 55
-    const left = 70
-    const plotWidth = width - left - right
-    const plotHeight = 250
     const height = top + plotHeight + bottom
     const summaryBoxY = top + plotHeight + 44
 
@@ -1737,11 +1849,27 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       return { ...entry, polygonPoints }
     })
 
-    return `
+    let legendCursorX = left
+    const legendMarkup = legendRows.map((row, rowIdx) => {
+      legendCursorX = left
+      const rowY = legendStartY + rowIdx * legendRowHeight
+      return row.map((item) => {
+        const markup = `
+          <rect x="${legendCursorX}" y="${rowY - legendSwatchSize + 2}" width="${legendSwatchSize}" height="${legendSwatchSize}" fill="${item.color}" fill-opacity="0.22" stroke="${item.color}" />
+          <text x="${legendCursorX + legendSwatchSize + legendSwatchToTextGap}" y="${rowY + 2}" font-family="Arial, sans-serif" font-size="${legendFontSize}" fill="${item.color}">${escapeSvgText(item.expertName)}</text>
+        `
+        legendCursorX += item.itemWidth + legendItemGap
+        return markup
+      }).join('')
+    }).join('')
+
+    const svgMarkup = `
       <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
         <rect width="100%" height="100%" fill="#ffffff" />
         <text x="${left}" y="26" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#1f2937">${escapeSvgText(title)}</text>
-        <text x="${left}" y="42" font-family="Arial, sans-serif" font-size="12" fill="#6b7280">${escapeSvgText(altName)}</text>
+        <text x="${left}" y="${subtitleY}" font-family="Arial, sans-serif" font-size="12" fill="#6b7280">${escapeSvgText([altName, ...normalizedSubtitleLines].filter(Boolean).join('  ·  '))}</text>
+
+        ${legendMarkup}
 
         ${xTicks.map((tick) => {
           const x = scaleX(tick)
@@ -1755,10 +1883,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         <line x1="${left}" y1="${top + plotHeight}" x2="${left + plotWidth}" y2="${top + plotHeight}" stroke="#9ca3af" stroke-width="1.2" />
         <text x="${left + plotWidth / 2}" y="${top + plotHeight + 36}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#4b5563">Value</text>
 
-        ${fillPolygons.map((entry, idx) => `
+        ${fillPolygons.map((entry) => `
           <polygon points="${entry.polygonPoints}" fill="${entry.color}" fill-opacity="0.22" stroke="none" />
-          <text x="${left + idx * 140}" y="${top - 20}" font-family="Arial, sans-serif" font-size="11" fill="${entry.color}">${escapeSvgText(entry.expertName)}</text>
-          <rect x="${left + idx * 140 - 14}" y="${top - 28}" width="10" height="10" fill="${entry.color}" fill-opacity="0.22" stroke="${entry.color}" />
         `).join('')}
 
         ${series.map((entry) => `
@@ -1784,18 +1910,14 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       </svg>
     `.replace(/\n\s+/g, '\n').trim()
 
-    return {
-      svgMarkup,
-      width,
-      height,
-    }
+    return { svgMarkup, width, height }
   }
 
-  const handleDownloadChartPng = async (exportId, filenameBase) => {
+  const handleDownloadChartPng = async (exportId, filenameBase, headerLines = []) => {
     const container = document.querySelector(`[data-export-id="${exportId}"]`)
     const svgElement = getPlotSvgElement(container)
-    const svgMarkup = buildSvgMarkupFromElement(svgElement)
-    if (!svgMarkup) {
+    const rendered = buildSvgMarkupFromElement(svgElement, headerLines)
+    if (!rendered?.svgMarkup) {
       toast({
         title: 'Image not available',
         description: 'The plot is not ready for download yet.',
@@ -1806,10 +1928,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     }
 
     try {
-      const bounds = svgElement.getBoundingClientRect()
-      const width = Math.max(1, Math.round(bounds.width || DEFAULT_PNG_WIDTH))
-      const height = Math.max(1, Math.round(bounds.height || DEFAULT_PNG_HEIGHT))
-      const pngBlob = await renderSvgMarkupToPngBlob(svgMarkup, width * PNG_SCALE_FACTOR, height * PNG_SCALE_FACTOR)
+      const pngBlob = await renderSvgMarkupToPngBlob(rendered.svgMarkup, rendered.width * PNG_SCALE_FACTOR, rendered.height * PNG_SCALE_FACTOR)
       triggerDownloadFromBlob(pngBlob, `${sanitizeFilename(filenameBase)}.png`)
     } catch (error) {
       toast({
@@ -1822,8 +1941,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   }
 
   const handleDownloadHeatmapPng = async (results, title, filenameBase) => {
-    const svgMarkup = buildRankingHeatmapSvg({ title, results })
-    if (!svgMarkup) {
+    const rendered = buildRankingHeatmapSvg({ title, results })
+    if (!rendered?.svgMarkup) {
       toast({
         title: 'Image not available',
         description: 'No ranking heatmap is available yet.',
@@ -1834,8 +1953,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     }
 
     try {
-      const { width, height } = getRankingHeatmapDimensions(results)
-      const pngBlob = await renderSvgMarkupToPngBlob(svgMarkup, width * PNG_SCALE_FACTOR, height * PNG_SCALE_FACTOR)
+      const pngBlob = await renderSvgMarkupToPngBlob(rendered.svgMarkup, rendered.width * PNG_SCALE_FACTOR, rendered.height * PNG_SCALE_FACTOR)
       triggerDownloadFromBlob(pngBlob, `${sanitizeFilename(filenameBase)}.png`)
     } catch (error) {
       toast({
@@ -2005,18 +2123,17 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       }
 
       if (exportIncludeResultsCsv) {
-        const finalHeatmapSvg = buildRankingHeatmapSvg({
+        const finalHeatmap = buildRankingHeatmapSvg({
           title: 'Results Heatmap',
           results: step6Results,
         })
-        if (finalHeatmapSvg) {
-          const { width, height } = getRankingHeatmapDimensions(step6Results)
-          exportZip.file('results/step5_final_results_ranking_heatmap.svg', finalHeatmapSvg)
+        if (finalHeatmap?.svgMarkup) {
+          exportZip.file('results/step5_final_results_ranking_heatmap.svg', finalHeatmap.svgMarkup)
           try {
             const finalHeatmapPng = await renderSvgMarkupToPngBlob(
-              finalHeatmapSvg,
-              width * PNG_SCALE_FACTOR,
-              height * PNG_SCALE_FACTOR
+              finalHeatmap.svgMarkup,
+              finalHeatmap.width * PNG_SCALE_FACTOR,
+              finalHeatmap.height * PNG_SCALE_FACTOR
             )
             exportZip.file('results/step5_final_results_ranking_heatmap.png', finalHeatmapPng)
           } catch (error) {
@@ -2043,19 +2160,17 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         const imageTargets = []
 
         const consistencyData = getConsistencyPlotData()
-        const consistencySvg = buildConsistencyPlotSvg({
+        const consistencyRendered = buildConsistencyPlotSvg({
           title: 'Declared vs Computed Ratios',
           comparisons: consistencyData.comparisons,
           data: consistencyData.data,
         })
-        if (consistencySvg) {
-          const width = 980
-          const height = Math.max(220, 82 + Math.max(220, consistencyData.comparisons.length * 30) + 55)
+        if (consistencyRendered?.svgMarkup) {
           imageTargets.push({
             filenameBase: 'step1_declared_computed_ratios',
-            svgMarkup: consistencySvg,
-            width,
-            height,
+            svgMarkup: consistencyRendered.svgMarkup,
+            width: consistencyRendered.width,
+            height: consistencyRendered.height,
           })
         }
 
@@ -2080,29 +2195,39 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           })
         }
 
-        const appendDistributionTargets = (stepResults, stepPrefix) => {
+        // Built from step-result data directly (not captured from the live DOM) so these images
+        // export correctly even when their step's tab isn't the one currently open in the browser.
+        const appendDistributionTargets = (stepResults, stepPrefix, plotTitle, includeConsensus) => {
           if (!stepResults?.alternative_names) return
           stepResults.alternative_names.forEach((altName, altIndex) => {
-            const container = document.querySelector(`[data-export-id="${stepPrefix}_distribution_${altIndex}"]`)
-            const svgElement = getPlotSvgElement(container)
-            const svgMarkup = buildSvgMarkupFromElement(svgElement)
-            if (!svgMarkup) return
+            const distData = getDistributionDataForAlternative(stepResults, altIndex)
+            if (!distData) return
 
-            const bounds = svgElement.getBoundingClientRect()
-            const width = Math.max(1, Math.round(bounds.width || DEFAULT_PNG_WIDTH))
-            const height = Math.max(1, Math.round(bounds.height || DEFAULT_PNG_HEIGHT))
+            const subtitleLines = includeConsensus
+              ? [`Consensus = ${Number(distData.consensus?.consensusPercent || 0).toFixed(2)}%`]
+              : []
+
+            const rendered = buildDistributionPlotSvg({
+              title: plotTitle,
+              altName,
+              subtitleLines,
+              densityData: distData.densityData,
+              expertNames: distData.expertNames,
+              summaryLines: distData.summaryLines,
+            })
+            if (!rendered?.svgMarkup) return
 
             imageTargets.push({
               filenameBase: `${stepPrefix}_distribution_${altIndex}`,
-              svgMarkup,
-              width,
-              height,
+              svgMarkup: rendered.svgMarkup,
+              width: rendered.width,
+              height: rendered.height,
             })
           })
         }
 
-        appendDistributionTargets(step2Results, 'step2')
-        appendDistributionTargets(step5Results, 'step5')
+        appendDistributionTargets(step2Results, 'step2', 'Distribution of Values', true)
+        appendDistributionTargets(step5Results, 'step5', 'Uncertainty Distribution', false)
 
         const heatmapTargets = buildPipelineHeatmapExports({
           step4Results,
@@ -2110,10 +2235,9 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
         })
 
         for (const target of heatmapTargets) {
-          const svgMarkup = buildRankingHeatmapSvg({ title: target.title, results: target.results })
-          if (!svgMarkup) continue
-          const { width, height } = getRankingHeatmapDimensions(target.results)
-          imageTargets.push({ filenameBase: target.filenameBase, svgMarkup, width, height })
+          const rendered = buildRankingHeatmapSvg({ title: target.title, results: target.results })
+          if (!rendered?.svgMarkup) continue
+          imageTargets.push({ filenameBase: target.filenameBase, svgMarkup: rendered.svgMarkup, width: rendered.width, height: rendered.height })
         }
 
         if (imageTargets.length > 0) {
@@ -2786,7 +2910,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                 top={2}
                                 right={2}
                                 zIndex={2}
-                                onClick={() => handleDownloadChartPng('step1_declared_computed_ratios', 'declared_computed_ratios')}
+                                onClick={() => handleDownloadChartPng('step1_declared_computed_ratios', 'declared_computed_ratios', ['Declared vs Computed Ratios'])}
                               />
                             </Tooltip>
                             <ResponsiveContainer width="100%" height={Math.max(300, step1ConsistencyComparisons.length * 28 + 100)}>
@@ -3441,7 +3565,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   top={2}
                                   right={2}
                                   zIndex={2}
-                                  onClick={() => handleDownloadChartPng(`step5_distribution_${altIndex}`, `step3_uncertainty_analysis_distribution_${altName}`)}
+                                  onClick={() => handleDownloadChartPng(`step5_distribution_${altIndex}`, `step3_uncertainty_analysis_distribution_${altName}`, [`Uncertainty Distribution for ${altName}`])}
                                 />
                               </Tooltip>
                               {renderDistributionStatsTable({
@@ -3450,9 +3574,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                 distData,
                                 title: `Step 3 uncertainty analysis stats - ${altName}`,
                                 filenameBase: `step3_uncertainty_analysis_stats_${altName}`,
+                                defaultOpen: true,
                               })}
                               <ResponsiveContainer width="100%" height={250}>
-                                <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 0, bottom: 24 }}>
+                                <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 14, bottom: 24 }}>
                                   <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
                                   <XAxis
                                     type="number"
@@ -3473,6 +3598,12 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                     isAnimationActive={false}
                                     formatter={(value, name) => [`${(Number(value) * 100).toFixed(2)}%`, String(name)]}
                                     labelFormatter={(v) => `Value ${Number(v).toFixed(3)}`}
+                                  />
+                                  <RechartsLegend
+                                    verticalAlign="top"
+                                    height={22}
+                                    iconSize={8}
+                                    wrapperStyle={{ fontSize: 10 }}
                                   />
                                   {distData.expertNames.map((expertName, idx) => (
                                     <Area
@@ -3602,7 +3733,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   top={2}
                                   right={2}
                                   zIndex={2}
-                                  onClick={() => handleDownloadChartPng(`step2_distribution_${altIndex}`, `step4_consensus_analysis_distribution_${altName}`)}
+                                  onClick={() => handleDownloadChartPng(`step2_distribution_${altIndex}`, `step4_consensus_analysis_distribution_${altName}`, [
+                                    `Distribution of Values for ${altName}`,
+                                    `Consensus = ${Number(distData.consensus?.consensusPercent || 0).toFixed(2)}%`,
+                                  ])}
                                 />
                               </Tooltip>
                               <HStack justify="space-between" align="center" mb={2} pr={12}>
@@ -3614,7 +3748,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                 </HStack>
                               </HStack>
                               <ResponsiveContainer width="100%" height={250}>
-                                <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 0, bottom: 24 }}>
+                                <AreaChart data={distData.densityData} margin={{ top: 10, right: 12, left: 14, bottom: 24 }}>
                                   <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.15} />
                                   <XAxis
                                     type="number"
@@ -3635,6 +3769,12 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                     isAnimationActive={false}
                                     formatter={(value, name) => [`${(Number(value) * 100).toFixed(2)}%`, String(name)]}
                                     labelFormatter={(v) => `Value ${Number(v).toFixed(3)}`}
+                                  />
+                                  <RechartsLegend
+                                    verticalAlign="top"
+                                    height={22}
+                                    iconSize={8}
+                                    wrapperStyle={{ fontSize: 10 }}
                                   />
                                   {distData.expertNames.map((expertName, idx) => (
                                     <Area
@@ -3907,6 +4047,52 @@ function escapeSvgText(value) {
     .replace(/`/g, '&#96;')
 }
 
+let svgTextMeasurementContext = null
+let svgTextMeasurementAttempted = false
+function measureSvgTextWidth(text, fontSize = 12, fontWeight = '400', fontFamily = 'Arial, sans-serif') {
+  const str = String(text ?? '')
+  if (str.length === 0) return 0
+
+  if (!svgTextMeasurementAttempted) {
+    svgTextMeasurementAttempted = true
+    try {
+      svgTextMeasurementContext = typeof document !== 'undefined'
+        ? document.createElement('canvas').getContext('2d') || null
+        : null
+    } catch (error) {
+      svgTextMeasurementContext = null
+    }
+  }
+
+  if (svgTextMeasurementContext) {
+    svgTextMeasurementContext.font = `${fontWeight} ${fontSize}px ${fontFamily}`
+    const measured = svgTextMeasurementContext.measureText(str).width
+    if (Number.isFinite(measured) && measured > 0) return measured
+  }
+
+  // Fallback heuristic when canvas measurement is unavailable (e.g. non-browser test runner).
+  return str.length * fontSize * 0.55
+}
+
+function truncateSvgTextToWidth(text, maxWidth, fontSize = 12, fontWeight = '400') {
+  const str = String(text ?? '')
+  if (measureSvgTextWidth(str, fontSize, fontWeight) <= maxWidth) return str
+
+  const ellipsis = '…'
+  let low = 0
+  let high = str.length
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2)
+    const candidate = `${str.slice(0, mid)}${ellipsis}`
+    if (measureSvgTextWidth(candidate, fontSize, fontWeight) <= maxWidth) {
+      low = mid
+    } else {
+      high = mid - 1
+    }
+  }
+  return low > 0 ? `${str.slice(0, low)}${ellipsis}` : ellipsis
+}
+
 function sanitizeFilename(value) {
   return String(value || '')
     .toLowerCase()
@@ -3915,30 +4101,74 @@ function sanitizeFilename(value) {
     .replace(/^_+|_+$/g, '') || 'export'
 }
 
-function toWorkflowStepFilenameBase(filenameBase) {
-  const base = String(filenameBase || '')
-  if (base.startsWith('step_1_')) return base.replace('step_1_', 'step_1_finalize_elicited_data_')
-  if (base.startsWith('step_2_')) return base.replace('step_2_', 'step_4_consensus_analysis_')
-  if (base.startsWith('step_4_')) return base.replace('step_4_', 'step_2_choose_aggregation_method_')
-  if (base.startsWith('step_5_')) return base.replace('step_5_', 'step_3_uncertainty_analysis_')
-  if (base.startsWith('step_6_')) return base.replace('step_6_', 'step_5_final_results_')
-  return base
+// Maps internal step numbers (the order results are computed in) to the workflow-facing step
+// numbers/names shown to users. CSV filenameBases are built as `step_${n}_...` (underscore before
+// the digit) while image filenameBases were built as `step${n}_...` (no underscore) - both forms
+// are accepted here so neither export path silently skips renaming.
+const WORKFLOW_STEP_RENAME = {
+  1: 'step_1_finalize_elicited_data_',
+  2: 'step_4_consensus_analysis_',
+  4: 'step_2_choose_aggregation_method_',
+  5: 'step_3_uncertainty_analysis_',
+  6: 'step_5_final_results_',
 }
 
-function getRankingHeatmapDimensions(results) {
-  const matrix = buildRankProbabilityMatrix(results)
-  if (!matrix) {
-    return { width: HEATMAP_FALLBACK_WIDTH, height: HEATMAP_FALLBACK_HEIGHT }
-  }
+function toWorkflowStepFilenameBase(filenameBase) {
+  const base = String(filenameBase || '')
+  const match = base.match(/^step_?([0-9]+)_(.*)$/)
+  if (!match) return base
+  const [, stepDigits, rest] = match
+  const renamedPrefix = WORKFLOW_STEP_RENAME[Number(stepDigits)]
+  return renamedPrefix ? `${renamedPrefix}${rest}` : base
+}
 
-  const { alternatives } = matrix
+const HEATMAP_HEADER_FONT_SIZE = 12
+const HEATMAP_HEADER_ROTATION_DEG = 40
+
+// Single source of truth for heatmap geometry: both the SVG builder and the
+// PNG canvas sizing must agree exactly, or the exported image gets stretched.
+function computeRankingHeatmapLayout(results) {
+  const matrix = buildRankProbabilityMatrix(results)
   const cellSize = HEATMAP_CELL_SIZE
   const cellGap = HEATMAP_CELL_GAP
   const rowLabelWidth = HEATMAP_ROW_LABEL_WIDTH
+  const bottomPad = 18
+
+  if (!matrix) {
+    return {
+      matrix: null,
+      width: HEATMAP_FALLBACK_WIDTH,
+      height: HEATMAP_FALLBACK_HEIGHT,
+      cellSize,
+      cellGap,
+      rowLabelWidth,
+      topPad: 44,
+      needsHeaderRotation: false,
+      bottomPad,
+    }
+  }
+
+  const { alternatives } = matrix
+  const maxHeaderWidth = Math.max(
+    0,
+    ...alternatives.map((name) => measureSvgTextWidth(name, HEATMAP_HEADER_FONT_SIZE, '600'))
+  )
+  // Column headers overlap their neighbors once the label is wider than the cell; rotate them
+  // diagonally (like the matplotlib heatmap export) and grow the top margin to fit.
+  const needsHeaderRotation = maxHeaderWidth > cellSize - 10
+  const topPad = needsHeaderRotation
+    ? Math.ceil(22 + maxHeaderWidth * Math.sin((HEATMAP_HEADER_ROTATION_DEG * Math.PI) / 180) + HEATMAP_HEADER_FONT_SIZE)
+    : 44
+
   const minGridWidth = rowLabelWidth + alternatives.length * (cellSize + cellGap)
   const width = Math.max(HEATMAP_FALLBACK_WIDTH, minGridWidth + 24)
-  const height = 90 + alternatives.length * (cellSize + cellGap) + 24
+  const height = topPad + alternatives.length * (cellSize + cellGap) + bottomPad
 
+  return { matrix, width, height, cellSize, cellGap, rowLabelWidth, topPad, needsHeaderRotation, bottomPad }
+}
+
+function getRankingHeatmapDimensions(results) {
+  const { width, height } = computeRankingHeatmapLayout(results)
   return { width, height }
 }
 
@@ -4121,24 +4351,27 @@ function buildSimulationCsvExports(stepNumber, stepResults) {
 }
 
 function buildRankingHeatmapSvg({ title, results }) {
-  const matrix = buildRankProbabilityMatrix(results)
+  const layout = computeRankingHeatmapLayout(results)
+  const { matrix, width, height, cellSize, cellGap, rowLabelWidth, topPad, needsHeaderRotation } = layout
   if (!matrix) return null
 
   const { alternatives, probabilities } = matrix
-  const cellSize = HEATMAP_CELL_SIZE
-  const cellGap = HEATMAP_CELL_GAP
-  const rowLabelWidth = HEATMAP_ROW_LABEL_WIDTH
   const leftPad = 12
-  const topPad = 44
   const textY = 24
-  const width = Math.max(HEATMAP_FALLBACK_WIDTH, rowLabelWidth + alternatives.length * (cellSize + cellGap) + 24)
-  const height = topPad + (alternatives.length + 1) * (cellSize + cellGap) + 18
   const gridX = leftPad + rowLabelWidth
   const gridY = topPad
 
   const headerCells = alternatives.map((altName, colIndex) => {
     const x = gridX + colIndex * (cellSize + cellGap) + (cellSize / 2)
-    return `<text x="${x}" y="${gridY - 10}" font-size="12" text-anchor="middle" font-weight="600" fill="#1A202C">${escapeSvgText(altName)}</text>`
+    const y = gridY - 10
+    const label = escapeSvgText(altName)
+    if (needsHeaderRotation) {
+      // Positive angle swings the start of the (text-anchor="end") label up and away from the
+      // grid, matching the matplotlib rotation=45,ha='right' look. A negative angle here would
+      // swing the label down into row 1 instead.
+      return `<text x="${x}" y="${y}" font-size="${HEATMAP_HEADER_FONT_SIZE}" text-anchor="end" font-weight="600" fill="#1A202C" transform="rotate(${HEATMAP_HEADER_ROTATION_DEG} ${x} ${y})">${label}</text>`
+    }
+    return `<text x="${x}" y="${y}" font-size="${HEATMAP_HEADER_FONT_SIZE}" text-anchor="middle" font-weight="600" fill="#1A202C">${label}</text>`
   }).join('')
 
   const rowLabels = probabilities.map((_, rankIndex) => {
@@ -4161,15 +4394,17 @@ function buildRankingHeatmapSvg({ title, results }) {
     }).join('')
   )).join('')
 
-  return `
+  const svgMarkup = `
     <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
       <rect x="0" y="0" width="${width}" height="${height}" fill="#FFFFFF" />
       <text x="${leftPad}" y="${textY}" font-size="16" font-weight="700" fill="#1A202C">${escapeSvgText(title)}</text>
-      ${headerCells}
-      ${rowLabels}
       ${cells}
+      ${rowLabels}
+      ${headerCells}
     </svg>
   `.trim()
+
+  return { svgMarkup, width, height }
 }
 
 function buildPipelineChartExportTargets({
@@ -4323,7 +4558,17 @@ function buildWeightSpacePlotSvg({
 
   const rowHeight = 24
   const topPad = 58
-  const leftLabel = 220
+  const rowFontSize = 12
+  const minLeftLabel = 140
+  const maxLeftLabel = 460
+  const labelPadding = 30
+  // Size the label column to fit the longest criterion name (capped), instead of a fixed
+  // width that clips or overlaps long names against the bars.
+  const measuredMaxLabelWidth = Math.max(
+    0,
+    ...normalized.criteria.map((criterion) => measureSvgTextWidth(criterion, rowFontSize, '400'))
+  )
+  const leftLabel = Math.min(maxLeftLabel, Math.max(minLeftLabel, measuredMaxLabelWidth + labelPadding))
   const plotWidth = 760
   const width = leftLabel + plotWidth + 20
   const height = topPad + normalized.criteria.length * rowHeight + 50
@@ -4336,9 +4581,10 @@ function buildWeightSpacePlotSvg({
       const x = leftLabel + (Number(weight) / axisMax) * plotWidth
       return `<rect x="${x}" y="${y + 3}" width="5" height="16" rx="2" ry="2" fill="#3182CE" fill-opacity="0.75" />`
     }).join('')
+    const label = truncateSvgTextToWidth(criterion, leftLabel - labelPadding + 10, rowFontSize, '400')
 
     return `
-      <text x="${leftLabel - 10}" y="${y + 15}" text-anchor="end" font-size="12" fill="#1A202C">${escapeSvgText(criterion)}</text>
+      <text x="${leftLabel - 10}" y="${y + 15}" text-anchor="end" font-size="${rowFontSize}" fill="#1A202C"><title>${escapeSvgText(criterion)}</title>${escapeSvgText(label)}</text>
       <rect x="${leftLabel}" y="${y + 2}" width="${plotWidth}" height="18" rx="4" ry="4" fill="#F7FAFC" />
       ${marks}
     `
@@ -4787,6 +5033,7 @@ export {
   buildPipelineHeatmapExports,
   buildWeightSpacePlotSvg,
   inlineSvgComputedStyles,
+  toWorkflowStepFilenameBase,
 }
 
 export default RunUpMavtPage

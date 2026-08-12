@@ -158,7 +158,7 @@ def plot_weight_space_2d(weight_solutions, output_path):
         ax.set_xlim(0, max_weight * 1.1)
         ax.grid(True, alpha=0.3, axis='x')
         plt.tight_layout()
-        plt.savefig(output_path, dpi=150)
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
         plt.close()
     except Exception as e:
         logger.warning("Could not create weight space plot: %s", e)
@@ -246,10 +246,10 @@ def plot_distribution(data_by_elicitation, alt_name, output_path):
         plt.xlabel('Value')
         plt.ylabel('Frequency')
         plt.title(f'Distribution of Values for {alt_name}')
-        plt.legend()
+        plt.legend(loc='upper left', bbox_to_anchor=(1.02, 1), borderaxespad=0, fontsize=9)
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
-        plt.savefig(output_path, dpi=150)
+        plt.savefig(output_path, dpi=150, bbox_inches='tight')
         plt.close()
     except Exception as e:
         logger.warning("Could not create distribution plot: %s", e)
@@ -440,15 +440,15 @@ def step_2_consensus_analysis(data_dir, output_dir, session_names, weight_soluti
                     plt.xlabel('Value')
                     plt.ylabel('Frequency')
                     plt.title(f'Distribution of Values for {alt_name}')
-                    plt.legend()
+                    plt.legend(loc='upper left', bbox_to_anchor=(1.02, 1), borderaxespad=0, fontsize=9)
                     plt.grid(True, alpha=0.3)
                     plt.tight_layout()
-                    plt.savefig(plot_path, dpi=150)
+                    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
                     plt.close()
                 except Exception as e:
                     logger.warning("Could not create plot for %s: %s", alt_name, e)
             logger.info("✓ Distribution plots saved to: %s", output_dir)
-        
+
     except Exception as e:
         logger.error("✗ Error in Step 2: %s", e, exc_info=True)
 
@@ -616,10 +616,10 @@ def step_5_uncertainty_analysis(data_dir, output_dir, session_names, weight_solu
                     plt.xlabel('Value')
                     plt.ylabel('Frequency')
                     plt.title(f'Uncertainty Distribution for {alt_name}')
-                    plt.legend()
+                    plt.legend(loc='upper left', bbox_to_anchor=(1.02, 1), borderaxespad=0, fontsize=9)
                     plt.grid(True, alpha=0.3)
                     plt.tight_layout()
-                    plt.savefig(plot_path, dpi=150)
+                    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
                     plt.close()
                 except Exception as e:
                     logger.warning("Could not create plot for %s: %s", alt_name, e)

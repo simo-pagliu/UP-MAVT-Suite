@@ -12,6 +12,7 @@ import {
   buildPipelineHeatmapExports,
   buildWeightSpacePlotSvg,
   inlineSvgComputedStyles,
+  toWorkflowStepFilenameBase,
 } from './RunUpMavtPage'
 
 const sampleResults = {
@@ -66,16 +67,29 @@ describe('RunUpMavtPage export helpers', () => {
   })
 
   it('builds SVG markup for ranking heatmap export', () => {
-    const svg = buildRankingHeatmapSvg({
+    const rendered = buildRankingHeatmapSvg({
       title: 'Results Heatmap',
       results: sampleResults,
     })
 
-    expect(svg).toContain('<svg')
-    expect(svg).toContain('Results Heatmap')
-    expect(svg).toContain('Alt A')
-    expect(svg).toContain('Rank 1')
-    expect(svg).toContain('%')
+    expect(rendered.svgMarkup).toContain('<svg')
+    expect(rendered.svgMarkup).toContain('Results Heatmap')
+    expect(rendered.svgMarkup).toContain('Alt A')
+    expect(rendered.svgMarkup).toContain('Rank 1')
+    expect(rendered.svgMarkup).toContain('%')
+    expect(rendered.width).toBeGreaterThan(0)
+    expect(rendered.height).toBeGreaterThan(0)
+  })
+
+  it('keeps buildRankingHeatmapSvg dimensions in sync with getRankingHeatmapDimensions', () => {
+    const rendered = buildRankingHeatmapSvg({
+      title: 'Results Heatmap',
+      results: sampleResults,
+    })
+    const dimensions = getRankingHeatmapDimensions(sampleResults)
+
+    expect(rendered.width).toBe(dimensions.width)
+    expect(rendered.height).toBe(dimensions.height)
   })
 
   it('builds CSV output for rank probabilities', () => {
@@ -136,10 +150,10 @@ describe('RunUpMavtPage export helpers', () => {
         [4, 5, 3, 2, 1],
       ],
     }
-    const svg = buildRankingHeatmapSvg({ title: 'Many', results: manyAlternatives })
+    const rendered = buildRankingHeatmapSvg({ title: 'Many', results: manyAlternatives })
     const dimensions = getRankingHeatmapDimensions(manyAlternatives)
 
-    expect(svg).toContain('Rank 5')
+    expect(rendered.svgMarkup).toContain('Rank 5')
     expect(dimensions.width).toBeGreaterThanOrEqual(920)
     expect(dimensions.height).toBeGreaterThan(300)
   })
@@ -257,5 +271,17 @@ describe('RunUpMavtPage export helpers', () => {
     document.body.removeChild(cloneSvg)
     document.body.removeChild(sourceSvg)
     document.head.removeChild(styleTag)
+  })
+
+  it('renames both stepN_ (images) and step_N_ (CSVs) filename bases to their workflow-facing name', () => {
+    // Image filenameBases historically had no underscore before the digit (step5_...), while CSV
+    // filenameBases from buildSimulationCsvExports do (step_5_...) - both must resolve the same way.
+    expect(toWorkflowStepFilenameBase('step5_distribution_0')).toBe('step_3_uncertainty_analysis_distribution_0')
+    expect(toWorkflowStepFilenameBase('step_5_elicitation_1_E1')).toBe('step_3_uncertainty_analysis_elicitation_1_E1')
+    expect(toWorkflowStepFilenameBase('step2_distribution_0')).toBe('step_4_consensus_analysis_distribution_0')
+    expect(toWorkflowStepFilenameBase('step4_wam_aggregation_heatmap')).toBe('step_2_choose_aggregation_method_wam_aggregation_heatmap')
+    expect(toWorkflowStepFilenameBase('step1_declared_computed_ratios')).toBe('step_1_finalize_elicited_data_declared_computed_ratios')
+    expect(toWorkflowStepFilenameBase('step6_results_heatmap')).toBe('step_5_final_results_results_heatmap')
+    expect(toWorkflowStepFilenameBase('unrelated_file')).toBe('unrelated_file')
   })
 })
