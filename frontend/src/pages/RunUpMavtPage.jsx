@@ -51,7 +51,7 @@ import {
   Th,
   Td,
 } from '@chakra-ui/react'
-import { DownloadIcon, ExternalLinkIcon, InfoOutlineIcon, ChevronDownIcon, ChevronRightIcon } from '@chakra-ui/icons'
+import { DownloadIcon, ExternalLinkIcon, InfoOutlineIcon, ChevronDownIcon, ChevronRightIcon, WarningIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import JSZip from 'jszip'
 import PdfModal from '../components/PdfModal'
@@ -1005,8 +1005,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   // ============================================================================
   // HELPERS
   // ============================================================================
+  // Tab indices: 0 = Introduction (always enabled, not gated here), 1 = Step 1 (always enabled),
+  // 2-5 = Steps 2-5 (gated behind weights being computed).
   const isStepDisabled = (stepIndex) => {
-    if (stepIndex === 0) return false
+    if (stepIndex <= 1) return false
     return !weightsComputed || runningStep !== null
   }
 
@@ -1210,6 +1212,102 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       <Text fontSize="xs" color="gray.600">
         α ∈ [-1, 1]. At α = 0 the aggregation is fully compensatory; values toward 1 emphasize poor performance, while values toward -1 emphasize strong performance.
       </Text>
+    </VStack>
+  )
+
+  const renderSessionSelector = ({
+    heading = 'Session Selection',
+    helperText,
+    showManageLink = true,
+    showInfoAlert = true,
+  } = {}) => (
+    <VStack spacing={3} align="stretch">
+      <HStack justify="space-between" align="center">
+        <HStack spacing={2} align="center">
+          <Heading as="h2" size="sm">
+            {heading}
+          </Heading>
+          {showInfoAlert && (
+            <Tooltip
+              label="Only completed and locked sessions can be selected. This ensures data integrity during analysis runs."
+              hasArrow
+            >
+              <Box as="span" display="inline-flex" alignItems="center" cursor="help">
+                <InfoOutlineIcon color="gray.500" boxSize={3.5} />
+              </Box>
+            </Tooltip>
+          )}
+          {incompleteOrUnlockedSessionsExcluded && (
+            <Tooltip
+              label={`Using ${selectedSessions.length} out of ${completedAndLockedCount} available sessions - ${completedAndLockedCount - selectedSessions.length} completed and locked session(s) not selected.`}
+              hasArrow
+            >
+              <Box as="span" display="inline-flex" alignItems="center" cursor="help">
+                <WarningIcon color="orange.400" boxSize={3.5} />
+              </Box>
+            </Tooltip>
+          )}
+        </HStack>
+        {showManageLink && (
+          <Button
+            size="sm"
+            variant="outline"
+            rightIcon={<ExternalLinkIcon />}
+            onClick={() => onNavigate && onNavigate('case-study')}
+          >
+            Manage Sessions
+          </Button>
+        )}
+      </HStack>
+
+      {helperText && (
+        <Text fontSize="sm" color="gray.600">
+          {helperText}
+        </Text>
+      )}
+
+      <VStack pl={2} spacing={2} align="stretch">
+        {sessions.length > 0 ? (
+          sessions.map((session) => {
+            const isComplete = isSessionComplete(session, criteria)
+            const isLocked = session.session_locked === true
+            const canSelect = isComplete && isLocked
+
+            let statusText = ''
+            let tooltipLabel = ''
+
+            if (isComplete && isLocked) {
+              statusText = '(completed and locked)'
+            } else if (isComplete && !isLocked) {
+              statusText = '(completed and unlocked)'
+              tooltipLabel = 'Session is not locked. Lock it from Manage Sessions to ensure data integrity.'
+            } else if (!isComplete && isLocked) {
+              statusText = '(incomplete and locked)'
+              tooltipLabel = 'Session is incomplete. Complete all elicitation steps first.'
+            } else {
+              statusText = '(incomplete and unlocked)'
+              tooltipLabel = 'Session is incomplete and not locked. Complete all steps and lock it from Manage Sessions.'
+            }
+
+            return (
+              <Tooltip key={session._id} label={tooltipLabel} isDisabled={canSelect}>
+                <HStack spacing={3}>
+                  <Checkbox
+                    isChecked={selectedSessions.includes(session._id)}
+                    onChange={() => handleSessionToggle(session._id)}
+                    isDisabled={!canSelect}
+                  >
+                    {getSessionLabel(session, `Session ${session._id}`)}{' '}
+                    <Text as="span" color="gray.500" ml={2}>{statusText}</Text>
+                  </Checkbox>
+                </HStack>
+              </Tooltip>
+            )
+          })
+        ) : (
+          <Text color="gray.500">No sessions found</Text>
+        )}
+      </VStack>
     </VStack>
   )
 
@@ -2332,49 +2430,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     <Box bg="white" p={6} borderRadius="lg" boxShadow="sm">
       <VStack spacing={6} align="stretch">
         {/* Header */}
-        <VStack spacing={3} align="stretch">
+        <HStack justify="space-between" align="center" flexWrap="wrap">
           <Heading as="h1" size="lg">
             Run UP-MAVT
           </Heading>
-          <Text color="gray.700">
-            Uncertainty Propagated - Multi-Attribute Value Theory (UP-MAVT) is an extension of traditional MAVT, developed by Pagliuca et al. (2026 - publications forthcoming) to systematically incorporate uncertainty into the decision analysis process.
-            
-            {/* {' '}
-            <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
-              PLACEHOLDER <ExternalLinkIcon mx="2px" />
-            </Link>
-            ). */}
-            <Link color="blue.600" textDecoration="underline" cursor="pointer" onClick={onUncertaintiesOpen}>
-              This diagram illustrates the sources of uncertainty considered in the framework.
-            </Link>
-          </Text>
-          <Text color="gray.700">
-            The workflow is designed to examine all aspects of the framework, including consensus among multiple opinions,
-            compensatory dynamics for selecting the aggregation model, overall uncertainty assessment, and the final results.
-            The UP-MAVT code implements two Monte Carlo approaches with distinct roles: Strict Monte Carlo (SMC) and Non-Strict Monte Carlo (NSMC).
-            {' '}SMC is used to produce per-decision-maker results, generating a value distribution for each alternative and for each decision maker; these outputs support the analysis phase.
-            {' '}NSMC, in contrast, pools subjective information across decision makers to produce one conservative, aggregated value distribution per alternative.{' '}
-            <Link color="blue.600" textDecoration="underline" cursor="pointer" onClick={onMcModesOpen}>
-              The logic behind these methods is detailed in this image.
-            </Link>
-            {' '}For a comprehensive explanation, an overview of the workflow, and an example case study, please refer to the publication{' '}
-            <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
-              PLACEHOLDER <ExternalLinkIcon mx="2px" />
-            </Link>
-            .
-          </Text>
-        </VStack>
-
-        <Text color="gray.700">
-          To run this study locally, use the <b>Download Data ZIP</b> action in this page. It exports a runnable local bundle with scripts and CSV data for the selected study.
-          {' '}For the full project source code, see the{' '}
-          <Link href="https://github.com/your-repo/elicitation-tools" isExternal color="blue.600" textDecoration="underline">
-            repository <ExternalLinkIcon mx="2px" />
-          </Link>
-          .
-        </Text>
-
-        <HStack>
           <Button
             size="sm"
             colorScheme="blue"
@@ -2389,88 +2448,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
         <Divider />
 
-        {/* Session Selection */}
-        <VStack spacing={3} align="stretch">
-          <HStack justify="space-between" align="center">
-            <Heading as="h2" size="md">
-              Session Selection
-            </Heading>
-            <Button
-              size="sm"
-              variant="outline"
-              rightIcon={<ExternalLinkIcon />}
-              onClick={() => onNavigate && onNavigate('case-study')}
-            >
-              Manage Sessions
-            </Button>
-          </HStack>
-
-          <Alert status="info" borderRadius="md">
-            <AlertIcon />
-            <VStack align="start" spacing={1} ml={3}>
-              <AlertTitle>Session Requirements</AlertTitle>
-              <AlertDescription>
-                Only completed and locked sessions can be selected. This ensures data integrity during analysis runs.
-              </AlertDescription>
-            </VStack>
-          </Alert>
-
-          {incompleteOrUnlockedSessionsExcluded && (
-            <Alert status="warning" borderRadius="md">
-              <AlertIcon />
-              <VStack align="start" spacing={1} ml={3}>
-                <AlertTitle>Using {selectedSessions.length} out of {completedAndLockedCount} available sessions</AlertTitle>
-                <AlertDescription>{completedAndLockedCount - selectedSessions.length} completed and locked session(s) not selected</AlertDescription>
-              </VStack>
-            </Alert>
-          )}
-
-          <VStack pl={2} spacing={2} align="stretch">
-            {sessions.length > 0 ? (
-              sessions.map((session) => {
-                const isComplete = isSessionComplete(session, criteria)
-                const isLocked = session.session_locked === true
-                const canSelect = isComplete && isLocked
-
-                let statusText = ''
-                let tooltipLabel = ''
-
-                if (isComplete && isLocked) {
-                  statusText = '(completed and locked)'
-                } else if (isComplete && !isLocked) {
-                  statusText = '(completed and unlocked)'
-                  tooltipLabel = 'Session is not locked. Lock it from Manage Sessions to ensure data integrity.'
-                } else if (!isComplete && isLocked) {
-                  statusText = '(incomplete and locked)'
-                  tooltipLabel = 'Session is incomplete. Complete all elicitation steps first.'
-                } else {
-                  statusText = '(incomplete and unlocked)'
-                  tooltipLabel = 'Session is incomplete and not locked. Complete all steps and lock it from Manage Sessions.'
-                }
-
-                return (
-                  <Tooltip key={session._id} label={tooltipLabel} isDisabled={canSelect}>
-                    <HStack spacing={3}>
-                      <Checkbox
-                        isChecked={selectedSessions.includes(session._id)}
-                        onChange={() => handleSessionToggle(session._id)}
-                        isDisabled={!canSelect}
-                      >
-                        {getSessionLabel(session, `Session ${session._id}`)}{' '}
-                        <Text as="span" color="gray.500" ml={2}>{statusText}</Text>
-                      </Checkbox>
-                    </HStack>
-                  </Tooltip>
-                )
-              })
-            ) : (
-              <Text color="gray.500">No sessions found</Text>
-            )}
-          </VStack>
-        </VStack>
-
-        <Divider />
-
         {/* Workflow Steps */}
         <VStack spacing={4} align="stretch">
           <Heading as="h2" size="md">
@@ -2478,29 +2455,82 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           </Heading>
 
           <Tabs index={activeStep} onChange={setActiveStep} variant="soft-rounded" colorScheme="blue">
-            <TabList overflowX="auto" pb={2}>
-              <Tab isDisabled={isStepDisabled(0)}>
-                Step 1: Finalize Elicited data {weightsComputed && <Badge ml={2} colorScheme="green">Done</Badge>}
+            <TabList
+              overflowX="auto"
+              pb={2}
+              position="sticky"
+              top={0}
+              zIndex={2}
+              bg="white"
+              borderBottomWidth={1}
+              borderColor="gray.100"
+            >
+              <Tab>
+                Introduction
               </Tab>
               <Tab isDisabled={isStepDisabled(1)}>
-                Step 2: Choose Aggregation Method {getStepStatus(4)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 1: Finalize Elicited data {weightsComputed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
               <Tab isDisabled={isStepDisabled(2)}>
-                Step 3: Uncertainty Analysis {getStepStatus(5)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 2: Choose Aggregation Method {getStepStatus(4)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
               <Tab isDisabled={isStepDisabled(3)}>
-                Step 4: Consensus Analysis {getStepStatus(2)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+                Step 3: Uncertainty Analysis {getStepStatus(5)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
               <Tab isDisabled={isStepDisabled(4)}>
+                Step 4: Consensus Analysis {getStepStatus(2)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+              </Tab>
+              <Tab isDisabled={isStepDisabled(5)}>
                 Step 5: Final Results {getStepStatus(6)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
             </TabList>
 
             <TabPanels>
+              {/* Introduction */}
+              <TabPanel>
+                <VStack spacing={3} align="stretch">
+                  <Text color="gray.700">
+                    Uncertainty Propagated - Multi-Attribute Value Theory (UP-MAVT) is an extension of traditional MAVT, developed by Pagliuca et al. (2026 - publications forthcoming) to systematically incorporate uncertainty into the decision analysis process.
+                    {' '}
+                    <Link color="blue.600" textDecoration="underline" cursor="pointer" onClick={onUncertaintiesOpen}>
+                      This diagram illustrates the sources of uncertainty considered in the framework.
+                    </Link>
+                  </Text>
+                  <Text color="gray.700">
+                    The workflow is designed to examine all aspects of the framework, including consensus among multiple opinions,
+                    compensatory dynamics for selecting the aggregation model, overall uncertainty assessment, and the final results.
+                    The UP-MAVT code implements two Monte Carlo approaches with distinct roles: Strict Monte Carlo (SMC) and Non-Strict Monte Carlo (NSMC).
+                    {' '}SMC is used to produce per-decision-maker results, generating a value distribution for each alternative and for each decision maker; these outputs support the analysis phase.
+                    {' '}NSMC, in contrast, pools subjective information across decision makers to produce one conservative, aggregated value distribution per alternative.{' '}
+                    <Link color="blue.600" textDecoration="underline" cursor="pointer" onClick={onMcModesOpen}>
+                      The logic behind these methods is detailed in this image.
+                    </Link>
+                    {' '}For a comprehensive explanation, an overview of the workflow, and an example case study, please refer to the publication{' '}
+                    <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
+                      PLACEHOLDER <ExternalLinkIcon mx="2px" />
+                    </Link>
+                    .
+                  </Text>
+                  <Text color="gray.700">
+                    To run this study locally, use the <b>Download Data ZIP</b> action above. It exports a runnable local bundle with scripts and CSV data for the selected study.
+                    {' '}For the full project source code, see the{' '}
+                    <Link href="https://github.com/your-repo/elicitation-tools" isExternal color="blue.600" textDecoration="underline">
+                      repository <ExternalLinkIcon mx="2px" />
+                    </Link>
+                    .
+                  </Text>
+                </VStack>
+              </TabPanel>
+
               {/* Step 1: Compute Weights */}
               <TabPanel>
-                <StepSection
-                  title="Compute Weights"
+                <VStack spacing={6} align="stretch">
+                  {renderSessionSelector()}
+
+                  <Divider />
+
+                  <StepSection
+                    title="Compute Weights"
                   description={
                     <VStack spacing={2} align="stretch">
                       <Text>
@@ -3384,7 +3414,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                       )}
                     </VStack>
                   </VStack>
-                </StepSection>
+                  </StepSection>
+                </VStack>
               </TabPanel>
 
               {/* Step 2: Aggregation */}
@@ -3395,7 +3426,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onRun={() => handleRunStep(4, 'Aggregation')}
                   onStop={handleStopExecution}
                   isRunning={runningStep === 'Aggregation'}
-                  isDisabled={isButtonDisabled(1) || selectedSessions.length === 0 || aggregationStepMethods.length === 0}
+                  isDisabled={isButtonDisabled(2) || selectedSessions.length === 0 || aggregationStepMethods.length === 0}
                   showConsole={showConsole}
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
@@ -3501,7 +3532,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onRun={() => handleRunStep(5, 'Uncertainty')}
                   onStop={handleStopExecution}
                   isRunning={runningStep === 'Uncertainty'}
-                  isDisabled={isButtonDisabled(2) || !uncertaintyAggregation || selectedSessions.length === 0}
+                  isDisabled={isButtonDisabled(3) || !uncertaintyAggregation || selectedSessions.length === 0}
                   showConsole={showConsole}
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
@@ -3672,7 +3703,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onRun={() => handleRunStep(2, 'Consensus')}
                   onStop={handleStopExecution}
                   isRunning={runningStep === 'Consensus'}
-                  isDisabled={isButtonDisabled(3) || selectedSessions.length === 0}
+                  isDisabled={isButtonDisabled(4) || selectedSessions.length === 0}
                   showConsole={showConsole}
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
@@ -3685,32 +3716,43 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     ) : null
                   }
                   parameters={
-                    <VStack spacing={3} align="stretch">
-                      {renderAggregationSelector({
-                        selectedMethod: consensusAggregation,
-                        setSelectedMethod: setConsensusAggregation,
-                        alphaValue: consensusAggregationAlpha,
-                        setAlphaValue: setConsensusAggregationAlpha,
-                      })}
-                      <HStack spacing={3}>
-                        <Text fontWeight="bold">MC Iterations:</Text>
-                        <NumberInput
-                          value={mcIterations[2]}
-                          min={100}
-                          max={5000}
-                          step={100}
-                          onChange={(_, val) => updateMcIterations(2, val)}
-                          isDisabled={runningStep !== null}
-                          width="120px"
-                        >
-                          <NumberInputField />
-                          <NumberInputStepper>
-                            <NumberIncrementStepper />
-                            <NumberDecrementStepper />
-                          </NumberInputStepper>
-                        </NumberInput>
-                      </HStack>
-                    </VStack>
+                    <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
+                      <VStack spacing={3} align="stretch">
+                        {renderAggregationSelector({
+                          selectedMethod: consensusAggregation,
+                          setSelectedMethod: setConsensusAggregation,
+                          alphaValue: consensusAggregationAlpha,
+                          setAlphaValue: setConsensusAggregationAlpha,
+                        })}
+                        <HStack spacing={3}>
+                          <Text fontWeight="bold">MC Iterations:</Text>
+                          <NumberInput
+                            value={mcIterations[2]}
+                            min={100}
+                            max={5000}
+                            step={100}
+                            onChange={(_, val) => updateMcIterations(2, val)}
+                            isDisabled={runningStep !== null}
+                            width="120px"
+                          >
+                            <NumberInputField />
+                            <NumberInputStepper>
+                              <NumberIncrementStepper />
+                              <NumberDecrementStepper />
+                            </NumberInputStepper>
+                          </NumberInput>
+                        </HStack>
+                      </VStack>
+
+                      <Box borderLeftWidth={{ base: 0, lg: 1 }} borderColor="gray.200" pl={{ base: 0, lg: 6 }}>
+                        {renderSessionSelector({
+                          heading: 'Included Sessions',
+                          helperText: "If a decision-maker's judgments diverge sharply from the rest in the distributions below, you may want to exclude their session here and re-run the analysis. This selection also carries forward to Step 5: Final Results.",
+                          showManageLink: false,
+                          showInfoAlert: false,
+                        })}
+                      </Box>
+                    </SimpleGrid>
                   }
                 >
                   {step2Results ? (
@@ -3835,7 +3877,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onRun={() => handleRunStep(6, 'Results')}
                   onStop={handleStopExecution}
                   isRunning={runningStep === 'Results'}
-                  isDisabled={isButtonDisabled(4) || !resultsAggregation || selectedSessions.length === 0}
+                  isDisabled={isButtonDisabled(5) || !resultsAggregation || selectedSessions.length === 0}
                   showConsole={showConsole}
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
