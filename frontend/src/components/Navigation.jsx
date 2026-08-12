@@ -1,5 +1,5 @@
-import { Box, Button, Heading, HStack, IconButton, Image, Spacer } from '@chakra-ui/react'
-import { InfoIcon } from '@chakra-ui/icons'
+import { Box, Button, Heading, HStack, IconButton, Image, Spacer, useColorMode } from '@chakra-ui/react'
+import { InfoIcon, SunIcon, MoonIcon } from '@chakra-ui/icons'
 
 function Navigation({
   isLoggedIn,
@@ -13,6 +13,7 @@ function Navigation({
   onDocumentation,
   onLogoClick,
 }) {
+  const { colorMode, toggleColorMode } = useColorMode()
   const baseStakeholderPages = [
     { id: 'recap', label: 'Overview', requiresSession: true },
     { id: 'qualitative', label: 'Qualitative Indicators', requiresSession: true, featureKey: 'qi' },
@@ -111,7 +112,18 @@ function Navigation({
         )}
         
         <Spacer />
-        
+
+        <IconButton
+          aria-label={colorMode === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+          icon={colorMode === 'light' ? <MoonIcon /> : <SunIcon />}
+          variant="ghost"
+          color="white"
+          _hover={{ bg: 'whiteAlpha.200', color: 'white' }}
+          _active={{ bg: 'whiteAlpha.200', color: 'white' }}
+          size="sm"
+          onClick={toggleColorMode}
+        />
+
         {currentRole !== 'admin' && (
           <IconButton
             aria-label="Documentation"

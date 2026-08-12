@@ -50,6 +50,7 @@ import {
   Tr,
   Th,
   Td,
+  useColorModeValue,
 } from '@chakra-ui/react'
 import { DownloadIcon, ExternalLinkIcon, InfoOutlineIcon, ChevronDownIcon, ChevronRightIcon, WarningIcon } from '@chakra-ui/icons'
 import axios from 'axios'
@@ -4904,6 +4905,9 @@ function StepSection({
   children,
 }) {
   const consoleBodyRef = useRef(null)
+  // `green` isn't one of the semantic-token-shadowed color scales (see theme.js), so its
+  // literal light-mode shade needs an explicit dark counterpart here.
+  const statusInfoBg = useColorModeValue('green.50', 'green.900')
 
   useEffect(() => {
     if (showConsole && consoleBodyRef.current) {
@@ -4923,7 +4927,7 @@ function StepSection({
 
       {/* Status Info */}
       {statusInfo && (
-        <Box bg="green.50" p={3} borderRadius="md" borderLeft="3px solid" borderColor="green.400">
+        <Box bg={statusInfoBg} p={3} borderRadius="md" borderLeft="3px solid" borderColor="green.400">
           {statusInfo}
         </Box>
       )}
