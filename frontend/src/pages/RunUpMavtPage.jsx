@@ -14,6 +14,9 @@ import {
   AlertTitle,
   AlertDescription,
   Divider,
+  OrderedList,
+  UnorderedList,
+  ListItem,
   Tabs,
   TabList,
   TabPanels,
@@ -2483,37 +2486,198 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
             <TabPanels>
               {/* Introduction */}
               <TabPanel>
-                <VStack spacing={3} align="stretch">
+                <VStack spacing={5} align="stretch">
                   <Text color="gray.700">
-                    Uncertainty Propagated - Multi-Attribute Value Theory (UP-MAVT) is an extension of traditional MAVT, developed by Pagliuca et al. (2026 - publications forthcoming) to systematically incorporate uncertainty into the decision analysis process.
+                    Uncertainty Propagated - Multi-Attribute Value Theory (UP-MAVT) is an extension of traditional MAVT, developed by Pagliuca et al. (2026 - publication forthcoming) to systematically incorporate uncertainty into the decision analysis process.
                     {' '}
                     <Link color="blue.600" textDecoration="underline" cursor="pointer" onClick={onUncertaintiesOpen}>
-                      This diagram illustrates the sources of uncertainty considered in the framework.
+                      This diagram illustrates the sources of uncertainty considered in the framework.  
+                      The UP-MAVT workflow guides the practitioner through the analysis, in the five steps that are detailed below.
+                      
                     </Link>
                   </Text>
-                  <Text color="gray.700">
-                    The workflow is designed to examine all aspects of the framework, including consensus among multiple opinions,
-                    compensatory dynamics for selecting the aggregation model, overall uncertainty assessment, and the final results.
-                    The UP-MAVT code implements two Monte Carlo approaches with distinct roles: Strict Monte Carlo (SMC) and Non-Strict Monte Carlo (NSMC).
-                    {' '}SMC is used to produce per-decision-maker results, generating a value distribution for each alternative and for each decision maker; these outputs support the analysis phase.
-                    {' '}NSMC, in contrast, pools subjective information across decision makers to produce one conservative, aggregated value distribution per alternative.{' '}
-                    <Link color="blue.600" textDecoration="underline" cursor="pointer" onClick={onMcModesOpen}>
-                      The logic behind these methods is detailed in this image.
-                    </Link>
-                    {' '}For a comprehensive explanation, an overview of the workflow, and an example case study, please refer to the publication{' '}
-                    <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
-                      PLACEHOLDER <ExternalLinkIcon mx="2px" />
-                    </Link>
-                    .
-                  </Text>
-                  <Text color="gray.700">
-                    To run this study locally, use the <b>Download Data ZIP</b> action above. It exports a runnable local bundle with scripts and CSV data for the selected study.
-                    {' '}For the full project source code, see the{' '}
-                    <Link href="https://github.com/your-repo/elicitation-tools" isExternal color="blue.600" textDecoration="underline">
-                      repository <ExternalLinkIcon mx="2px" />
-                    </Link>
-                    .
-                  </Text>
+
+                  <Box>
+                    <Heading as="h3" size="sm" mb={1}>Step 1 — Finalize Elicited Data</Heading>
+                    <Text color="gray.700" mb={2}>
+                      This step reviews the elicited data and runs the preliminary computation needed to derive each session's feasible weight space. It is a hard prerequisite: Steps 2-5 remain disabled until it completes.
+                      It also lets the practitioner adjust each expert's self-declared confidence to correct for over- or under-estimation of their own judgment; the confirmed confidence, which is <b>not</b> shown on the expert's end, is used to determine the uncertainty of their judgment, which is propagated along with the other sources of uncertainty.
+                    </Text>
+                    <Text fontWeight="semibold" color="gray.700" mb={1}>What you do:</Text>
+                    <OrderedList spacing={1} color="gray.700" pl={2}>
+                      <ListItem>Select the completed &amp; locked sessions you want to include.</ListItem>
+                      <ListItem>(Optional) Open <b>Advanced</b> if you need to change the sampling parameters (target valid solutions, restarts, RNG seed, tolerances) — the defaults work for most studies, leave them alone unless you have a specific reason.</ListItem>
+                      <ListItem>Click <b>Run Compute Weights</b>.</ListItem>
+                      <ListItem>Review the <b>Weight Space Plot</b> for each session — it shows the region of feasible criteria weights implied by each expert's answers.</ListItem>
+                      <ListItem>Open <b>Declared vs Computed Ratios</b> to sanity-check that the weight ratios the algorithm derived roughly match what the expert declared. A session with wildly diverging ratios may indicate confused or contradictory input.</ListItem>
+                      <ListItem>In <b>Confidence Review</b>, look at each expert's self-declared confidence and adjust it if you have reason to believe it's over- or under-stated (e.g., you observed hesitation during elicitation, or the consistency check in the previous point flags a problem). Adjustments can be applied overall, to all quantitative indicators, to all value functions, or per criterion — more specific adjustments override general ones. Adjusted values are clipped to the 0-4 scale and are never shown back to the expert.</ListItem>
+                    </OrderedList>
+                  </Box>
+
+                  <Divider />
+
+                  <Box>
+                    <Heading as="h3" size="sm" mb={1}>Step 2 — Choose Aggregation Method</Heading>
+                    <Text color="gray.700" mb={2}>
+                      The original aggregation method for MAVT is WAM (Weighted Arithmetic Mean), a fully compensatory method: poor performance on one indicator can be completely offset by strong performance on another, equally weighted indicator.
+                      This philosophy does not always reflect how a decision-maker actually approaches the problem — for example, a risk-averse decision-maker facing high-stakes choices may want poor-performing indicators to weigh more heavily rather than be offset.
+                      This is why partially compensatory methods such as GEO and HAR exist, and why the more advanced methods expose a parameter that lets the practitioner calibrate the bias toward poor or strong performance.
+                      This step lets you see, side by side, whether the ranking is sensitive to the choice of aggregation method before you commit to one for the rest of the analysis.
+                      {' '}The α-parameterized methods (GEO+offset, WAM+MIN, WPM, WEM) implement the non-additive aggregation approach of{' '}
+                      <Link href="https://doi.org/10.1016/j.omega.2018.05.011" isExternal color="blue.600" textDecoration="underline">
+                        Haag et al. (2019) <ExternalLinkIcon mx="2px" />
+                      </Link>
+                      .
+                    </Text>
+                    <Text fontWeight="semibold" color="gray.700" mb={1}>What you do:</Text>
+                    <OrderedList spacing={1} color="gray.700" pl={2}>
+                      <ListItem>Check one or more of the seven aggregation methods: WAM, GEO, HAR, GEO+offset, WAM+MIN, WPM, WEM.</ListItem>
+                      <ListItem>
+                        For the methods that use it, set <b>α</b> between −1 and 1:
+                        <UnorderedList spacing={1} mt={1}>
+                          <ListItem><InlineMath math={'\\alpha = 0'} /> → fully compensatory (a weak criterion can be offset by a strong one).</ListItem>
+                          <ListItem><InlineMath math={'\\alpha \\to 1'} /> → penalizes poor performance on any single criterion more heavily.</ListItem>
+                          <ListItem><InlineMath math={'\\alpha \\to -1'} /> → rewards strong performance more heavily.</ListItem>
+                        </UnorderedList>
+                      </ListItem>
+                      <ListItem>Set the number of Monte Carlo iterations (the default is fine in most cases).</ListItem>
+                      <ListItem>Click <b>Run</b> and compare the resulting <b>ranking heatmaps</b>, one per method — each shows how often each alternative lands in each rank.</ListItem>
+                    </OrderedList>
+                  </Box>
+
+                  <Divider />
+
+                  <Box>
+                    <Heading as="h3" size="sm" mb={1}>Step 3 — Uncertainty Analysis</Heading>
+                    <Text color="gray.700" mb={2}>
+                      Because SMC keeps each expert's simulation separate, it returns a value distribution for every alternative and lets you assess the degree of uncertainty around it.
+                      If a distribution's uncertainty is too large to draw a meaningful conclusion, that is a signal to go back and review the input data.
+                    </Text>
+                    <Text fontWeight="semibold" color="gray.700" mb={1}>What you do:</Text>
+                    <OrderedList spacing={1} color="gray.700" pl={2}>
+                      <ListItem>Pick a single aggregation method and α (informed by what you saw in Step 2).</ListItem>
+                      <ListItem>Set the Monte Carlo iteration count (the default is fine in most cases) and run SMC.</ListItem>
+                      <ListItem>Inspect the per-alternative value distribution plots, one per expert — look at spread and skew, and watch for unusually wide distributions.</ListItem>
+                      <ListItem>If needed, use the distribution statistics table (mean, median, std. dev., IQR, skewness, kurtosis, percentiles) for a numeric read on how uncertain each alternative's value is.</ListItem>
+                    </OrderedList>
+                  </Box>
+
+                  <Divider />
+
+                  <Box>
+                    <Heading as="h3" size="sm" mb={1}>Step 4 — Consensus Analysis</Heading>
+                    <Text color="gray.700" mb={2}>
+                      This step quantifies expert agreement by evaluating the overlap between expert judgments. The practitioner may use it to identify distinct groups of experts worth analyzing separately, or to identify outliers that should be excluded at this stage.
+                    </Text>
+                    <Text fontWeight="semibold" color="gray.700" mb={1}>What you do:</Text>
+                    <OrderedList spacing={1} color="gray.700" pl={2}>
+                      <ListItem>Pick the aggregation method, α, and iteration count (left column), then run the analysis.</ListItem>
+                      <ListItem>
+                        Read the consensus score <InlineMath math={'C = \\frac{A}{N-1}'} />, where <InlineMath math={'A = \\sum_x \\left|\\max_i p_i(x) - \\sum_i p_i(x)\\right|'} /> is the average absolute gap between each expert's distribution and the group's maximum overlap at each point. Higher values mean the experts agree more; lower values mean their opinions diverge.
+                      </ListItem>
+                      <ListItem>If needed, use the session list on the right to exclude opinions from this step and from the final results, then re-run.</ListItem>
+                    </OrderedList>
+                  </Box>
+
+                  <Divider />
+
+                  <Box>
+                    <Heading as="h3" size="sm" mb={1}>Step 5 — Final Results</Heading>
+                    <Text color="gray.700" mb={2}>
+                      This is the deliverable: a ranking of alternatives produced with NSMC mode using the choices you validated in the previous steps, packaged for reporting.
+                    </Text>
+                    <Text fontWeight="semibold" color="gray.700" mb={1}>What you do:</Text>
+                    <OrderedList spacing={1} color="gray.700" pl={2}>
+                      <ListItem>Pick the previously chosen aggregation method and α if needed; the default MC iteration count is fine in most cases.</ListItem>
+                      <ListItem>Click <b>Run</b> to get the final ranking heatmap.</ListItem>
+                      <ListItem>Click <b>Export Results</b> to choose which artifacts to download.</ListItem>
+                    </OrderedList>
+                  </Box>
+
+                  <Divider />
+
+                  <Box>
+                    <Heading as="h3" size="sm" mb={2}>Quick reference</Heading>
+                    <TableContainer>
+                      <Table size="sm" variant="simple">
+                        <Thead>
+                          <Tr>
+                            <Th>Term</Th>
+                            <Th>Meaning</Th>
+                          </Tr>
+                        </Thead>
+                        <Tbody>
+                          <Tr>
+                            <Td fontWeight="semibold">SMC</Td>
+                            <Td>Strict Monte Carlo — keeps each decision-maker's distribution separate.</Td>
+                          </Tr>
+                          <Tr>
+                            <Td fontWeight="semibold">NSMC</Td>
+                            <Td>Non-Strict Monte Carlo — pools all decision-makers into one distribution per alternative.</Td>
+                          </Tr>
+                          <Tr>
+                            <Td fontWeight="semibold">α (alpha)</Td>
+                            <Td>Compensation dial for aggregation methods, −1 to 1; 0 = fully compensatory.</Td>
+                          </Tr>
+                          <Tr>
+                            <Td fontWeight="semibold">Weight space / z*</Td>
+                            <Td>The region of criteria weights consistent with an expert's answers, and its boundary, computed in Step 1.</Td>
+                          </Tr>
+                          <Tr>
+                            <Td fontWeight="semibold">Confidence adjustment</Td>
+                            <Td>Practitioner-side correction to an expert's self-declared confidence; hierarchical (overall → QI/VF → per-criterion), clipped to 0-4.</Td>
+                          </Tr>
+                          <Tr>
+                            <Td fontWeight="semibold">Consensus (C)</Td>
+                            <Td><InlineMath math={'C = A / (N-1)'} /> — agreement score between decision-makers' distributions, computed in Step 4.</Td>
+                          </Tr>
+                          <Tr>
+                            <Td fontWeight="semibold">Ranking heatmap</Td>
+                            <Td>Chart showing how often each alternative lands in each rank position.</Td>
+                          </Tr>
+                          <Tr>
+                            <Td fontWeight="semibold">MC iterations</Td>
+                            <Td>Number of Monte Carlo samples drawn for a given run; higher = smoother/more stable results, slower run.</Td>
+                          </Tr>
+                        </Tbody>
+                      </Table>
+                    </TableContainer>
+                  </Box>
+
+                  <Divider />
+
+                  <Box>
+                    <Heading as="h3" size="sm" mb={1}>Resources</Heading>
+                    <VStack align="stretch" spacing={1}>
+                      <Text color="gray.700">
+                        <Link color="blue.600" textDecoration="underline" cursor="pointer" onClick={onMcModesOpen}>
+                          The logic behind SMC and NSMC is detailed in this diagram.
+                        </Link>
+                      </Text>
+                      <Text color="gray.700">
+                        Software paper (SoftwareX): <Text as="span" fontStyle="italic" color="gray.500">coming soon.</Text>
+                      </Text>
+                      <Text color="gray.700">
+                        Method paper (European Journal of Operational Research), detailing the UP-MAVT methodology and workflow: <Text as="span" fontStyle="italic" color="gray.500">coming soon.</Text>
+                      </Text>
+                      <Text color="gray.700">
+                        The α-parameterized (partially compensatory) aggregation methods used in Step 2 follow{' '}
+                        <Link href="https://doi.org/10.1016/j.omega.2018.05.011" isExternal color="blue.600" textDecoration="underline">
+                          Haag, F., Lienert, J., Schuwirth, N., &amp; Reichert, P. (2019). Identifying non-additive multi-attribute value functions based on uncertain indifference statements. <i>Omega</i>, 85, 49-67. <ExternalLinkIcon mx="2px" />
+                        </Link>
+                      </Text>
+                      <Text color="gray.700">
+                        For the full project source code, see the{' '}
+                        <Link href="https://github.com/simo-pagliu/UP-MAVT-Suite" isExternal color="blue.600" textDecoration="underline">
+                          repository <ExternalLinkIcon mx="2px" />
+                        </Link>
+                        .
+                      </Text>
+                      <Text color="gray.700">
+                        To run this study locally, use the <b>Download Data ZIP</b> action above. It exports a runnable local bundle with scripts and CSV data for the selected study.
+                      </Text>
+                    </VStack>
+                  </Box>
                 </VStack>
               </TabPanel>
 
@@ -2534,11 +2698,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                         Additional controls are available in the Advanced panel.
                       </Text>
                       <Text>
-                        For background on the general workflow, see{' '}
-                        <Link href="https://www.sciencedirect.com" isExternal color="blue.600" textDecoration="underline">
-                          PLACEHOLDER <ExternalLinkIcon mx="2px" />
-                        </Link>
-                        .
+                        For background on the general workflow, see the forthcoming UP-MAVT method paper: <Text as="span" fontStyle="italic" color="gray.500">coming soon.</Text>
                       </Text>
                       <Alert status="info" borderRadius="md">
                         <AlertIcon />
@@ -3326,7 +3486,16 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
               <TabPanel>
                 <StepSection
                   title="Aggregation Analysis"
-                  description="Select one or more aggregation methods and run NSMC to compare ranking behavior. For methods with α, α = 0 is fully compensatory; moving α toward 1 penalizes poor criterion performance more, while moving α toward -1 rewards strong criterion performance more."
+                  description={(
+                    <Text>
+                      Select one or more aggregation methods and run NSMC to compare ranking behavior. For methods with α, α = 0 is fully compensatory; moving α toward 1 penalizes poor criterion performance more, while moving α toward -1 rewards strong criterion performance more.
+                      {' '}These α-parameterized methods follow{' '}
+                      <Link href="https://doi.org/10.1016/j.omega.2018.05.011" isExternal color="blue.600" textDecoration="underline">
+                        Haag et al. (2019) <ExternalLinkIcon mx="2px" />
+                      </Link>
+                      .
+                    </Text>
+                  )}
                   onRun={() => handleRunStep(4, 'Aggregation')}
                   onStop={handleStopExecution}
                   isRunning={runningStep === 'Aggregation'}

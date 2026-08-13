@@ -404,10 +404,10 @@ function LoginPage({ onLogin, onDocumentation }) {
 
             <VStack align="start" spacing={1}>
               <Text color="gray.400" fontWeight="semibold">
-                Read the publication about this software. (coming soon)
+                Read the software paper about this software. (coming soon)
               </Text>
               <Text color="gray.400" fontWeight="semibold">
-                Read the publication about the UP-MAVT method (work in progress)
+                Read the method paper about the UP-MAVT methodology. (coming soon)
               </Text>
             </VStack>
             <VStack align="start" spacing={2}>

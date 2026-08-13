@@ -130,12 +130,17 @@ Access the admin panel by logging in with the **Admin** option and the password 
 
 The `examples/` folder contains three ready-to-use case studies that can be imported through the Admin panel:
 
-- `example_1.zip` – Case study presented in the software publication (based on PLACEHOLDER)
-- `example_2.zip` – Case study presented in the software publication (based on PLACEHOLDER)
-- `example_3.zip` – Case study with a hierarchical criteria structure, developed alongside the UP-MAVT methodology (PLACEHOLDER)
+- `example_1.zip` – Case study presented in the software paper (coming soon)
+- `example_2.zip` – Case study presented in the software paper (coming soon)
+- `example_3.zip` – Case study with a hierarchical criteria structure, developed alongside the UP-MAVT methodology (method paper, coming soon)
 
 ---
 
 ## Publication
 
-Add the final publication link and DOI here when available.
+Two publications are in preparation:
+
+- **Software paper** (SoftwareX) — describes the UP-MAVT Suite software itself. Coming soon.
+- **Method paper** (European Journal of Operational Research) — details the UP-MAVT methodology and workflow. Coming soon.
+
+Links and DOIs will be added here once available.
