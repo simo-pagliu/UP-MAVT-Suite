@@ -53,7 +53,7 @@ describe('distributionStats', () => {
       { label: 'E2', expertName: 'Bob', values: [0.2, 0.2, 0.25, 0.9] },
     ])
 
-    expect(summary.text).toContain('E1 (Alice)')
+    expect(summary.text).toContain('Alice')
     expect(summary.text).toContain('average=')
     expect(summary.text).toContain('median=')
     expect(summary.text).toContain('std=')
@@ -86,6 +86,6 @@ describe('distributionStats', () => {
 
     expect(csv).toContain('title;Step 5 uncertainty stats')
     expect(csv).toContain('expert;n;average;median;stdDev;iqr;skewness;kurtosis;min;p5;p25;p75;p95;max')
-    expect(csv).toContain('E1 (Alice);3;2;2;')
+    expect(csv).toContain('Alice;3;2;2;')
   })
 })

@@ -209,10 +209,9 @@ export function formatPerElicitationDistributionSummary(expertSeries, options = 
 
   expertSeries.forEach((entry, idx) => {
     const stats = computeDistributionIndicators(entry?.values || [])
-    const label = String(entry?.label || `E${idx + 1}`)
-    const expertName = String(entry?.expertName || label)
+    const expertName = String(entry?.expertName || entry?.label || `E${idx + 1}`)
 
-    lines.push(`${label} (${expertName})`)
+    lines.push(expertName)
     lines.push(
       `n=${stats.n}; average=${formatNumber(stats.average, decimals)}; median=${formatNumber(stats.median, decimals)}; std=${formatNumber(stats.stdDev, decimals)}; var=${formatNumber(stats.variance, decimals)}`
     )
@@ -243,7 +242,7 @@ export function buildDistributionStatsRows(expertSeries) {
   return expertSeries.map((entry, idx) => {
     const stats = computeDistributionIndicators(entry?.values || [])
     return {
-      label: String(entry?.label || `E${idx + 1}`),
+      alternative: entry?.alternative ? String(entry.alternative) : '',
       expertName: String(entry?.expertName || entry?.label || `E${idx + 1}`),
       n: stats.n,
       ...Object.fromEntries(DISTRIBUTION_STAT_COLUMNS.map((column) => [column.key, stats[column.key]])),
@@ -257,14 +256,17 @@ export function buildDistributionStatsCsv(expertSeries, options = {}) {
     options.placeholderMessage || 'No distribution stats available yet.'
   ).trim()
 
+  const rows = buildDistributionStatsRows(expertSeries)
+  const includeAlternativeColumn = rows.some((row) => row.alternative)
+
   const headers = [
+    ...(includeAlternativeColumn ? ['alternative'] : []),
     'expert',
     'n',
     ...DISTRIBUTION_STAT_COLUMNS.map((column) => column.key),
   ]
   const lines = [`title;${title}`, headers.join(';')]
 
-  const rows = buildDistributionStatsRows(expertSeries)
   if (rows.length === 0) {
     lines.push(`;note;${placeholderMessage}`)
     return `${lines.join('\n')}\n`
@@ -272,7 +274,8 @@ export function buildDistributionStatsCsv(expertSeries, options = {}) {
 
   rows.forEach((row) => {
     const values = [
-      String(`${row.label || ''} (${row.expertName || ''})`).replace(/;/g, ','),
+      ...(includeAlternativeColumn ? [String(row.alternative || '').replace(/;/g, ',')] : []),
+      String(row.expertName || '').replace(/;/g, ','),
       Number.isFinite(row.n) ? String(row.n) : '',
       ...DISTRIBUTION_STAT_COLUMNS.map((column) => (
         Number.isFinite(row[column.key]) ? String(row[column.key]) : ''

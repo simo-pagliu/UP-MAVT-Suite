@@ -523,6 +523,22 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     }
   }, [studySessionId])
 
+  // Like fetchWeightSpace, but returns the data instead of writing it into the
+  // on-screen `weightSpaceData` state - used to export every elicitation's
+  // weight-space/consistency plot without disturbing what's shown on screen.
+  const fetchWeightSpaceRaw = useCallback(async (sessionId) => {
+    if (!sessionId || !studySessionId) return null
+    try {
+      const response = await axios.get(
+        `${API_URL}/study-session/${studySessionId}/weight-space/${sessionId}`
+      )
+      return response.data.weight_solutions || response.data.weight_space
+    } catch (error) {
+      console.error('Error fetching weight space for export:', error)
+      return null
+    }
+  }, [studySessionId])
+
   useEffect(() => {
     setRunPrefsHydrated(false)
 
@@ -1617,10 +1633,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                 </Thead>
                 <Tbody>
                   {statsRows.map((row) => (
-                    <Tr key={`${row.label}-${row.expertName}`}>
-                      <Td>{`${row.label} (${row.expertName})`}</Td>
+                    <Tr key={row.expertName}>
+                      <Td>{row.expertName}</Td>
                       {DISTRIBUTION_STAT_COLUMNS.map((column) => (
-                        <Td key={`${row.label}-${row.expertName}-${column.key}`}>
+                        <Td key={`${row.expertName}-${column.key}`}>
                           {formatDistributionStatValue(row[column.key])}
                         </Td>
                       ))}
@@ -1635,10 +1651,11 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     )
   }
 
-  const getConsistencyPlotData = () => {
-    const sessionDoc = sessions.find((session) => session?._id === selectedWeightSession)
+  const getConsistencyPlotData = (sessionIdOverride, weightSpaceDataOverride) => {
+    const targetSessionId = sessionIdOverride ?? selectedWeightSession
+    const sessionDoc = sessions.find((session) => session?._id === targetSessionId)
     const comparisons = Array.isArray(sessionDoc?.bwt?.comparisons) ? sessionDoc.bwt.comparisons : []
-    const weightSamples = normalizeWeightSamples(weightSpaceData)
+    const weightSamples = normalizeWeightSamples(weightSpaceDataOverride ?? weightSpaceData)
 
     if (!sessionDoc || comparisons.length === 0 || weightSamples.length === 0) return { data: [], comparisons: [] }
 
@@ -1951,7 +1968,16 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
   // Self-contained distribution plot builder (no DOM dependency) used for the bulk ZIP export, so
   // charts export correctly regardless of which step tab happens to be active in the browser.
-  const buildDistributionPlotSvg = ({ title, altName, subtitleLines = [], densityData, expertNames, summaryLines = [] }) => {
+  // The alternative name is the primary heading (it's what distinguishes one exported image from
+  // the next); `title` becomes a descriptive subtitle instead.
+  const buildDistributionPlotSvg = ({
+    title,
+    altName,
+    densityData,
+    expertNames,
+    summaryLines = [],
+    summaryBoxTitle = 'Distribution Summary (per elicitation)',
+  }) => {
     if (!Array.isArray(densityData) || densityData.length === 0 || !Array.isArray(expertNames) || expertNames.length === 0) return null
 
     const width = 980
@@ -1987,9 +2013,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     })
     if (currentRow.length > 0) legendRows.push(currentRow)
 
-    const normalizedSubtitleLines = Array.isArray(subtitleLines) ? subtitleLines.filter((line) => typeof line === 'string' && line.length > 0) : []
     const subtitleY = 44
-    const legendStartY = subtitleY + (normalizedSubtitleLines.length > 0 ? 16 : 0) + 12
+    const legendStartY = subtitleY + 16 + 12
     const legendHeight = legendRows.length * legendRowHeight
     const top = legendStartY + legendHeight + 14
 
@@ -1997,7 +2022,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       ? summaryLines.filter((line) => typeof line === 'string')
       : []
     const printableSummaryLines = normalizedSummaryLines.length > 0
-      ? ['Distribution Summary (per elicitation)', '', ...normalizedSummaryLines]
+      ? [summaryBoxTitle, '', ...normalizedSummaryLines]
       : []
 
     const summaryBoxPadding = 12
@@ -2050,8 +2075,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     const svgMarkup = `
       <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
         <rect width="100%" height="100%" fill="#ffffff" />
-        <text x="${left}" y="26" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#1f2937">${escapeSvgText(title)}</text>
-        <text x="${left}" y="${subtitleY}" font-family="Arial, sans-serif" font-size="12" fill="#6b7280">${escapeSvgText([altName, ...normalizedSubtitleLines].filter(Boolean).join('  ·  '))}</text>
+        <text x="${left}" y="26" font-family="Arial, sans-serif" font-size="20" font-weight="700" fill="#1f2937">${escapeSvgText(altName || title)}</text>
+        <text x="${left}" y="${subtitleY}" font-family="Arial, sans-serif" font-size="12" fill="#6b7280">${escapeSvgText(title || '')}</text>
 
         ${legendMarkup}
 
@@ -2292,7 +2317,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
             const distData = getDistributionDataForAlternative(step5Results, altIndex)
             if (!distData) return []
             return distData.expertSeries.map((entry) => ({
-              label: `${altName} - ${entry.label}`,
+              alternative: altName,
               expertName: entry.expertName,
               values: entry.values,
             }))
@@ -2343,61 +2368,86 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       if (exportIncludePlotImages) {
         const imageTargets = []
 
-        const consistencyData = getConsistencyPlotData()
-        const consistencyRendered = buildConsistencyPlotSvg({
-          title: 'Declared vs Computed Ratios',
-          comparisons: consistencyData.comparisons,
-          data: consistencyData.data,
-        })
-        if (consistencyRendered?.svgMarkup) {
-          imageTargets.push({
-            filenameBase: 'step1_declared_computed_ratios',
-            svgMarkup: consistencyRendered.svgMarkup,
-            width: consistencyRendered.width,
-            height: consistencyRendered.height,
+        // One weight-space + consistency plot per selected elicitation session, not just
+        // whichever one happens to be selected in the Step 1 dropdown right now.
+        const orderedCriteriaNames = (criteria || [])
+          .map((criterion) => criterion?.criterion_name)
+          .filter((name) => typeof name === 'string' && name.length > 0)
+
+        for (const sessionId of selectedSessions) {
+          const sessionDoc = sessions.find((session) => session?._id === sessionId)
+          const sessionLabel = getSessionLabel(sessionDoc, sessionId)
+          const sessionSlug = sanitizeFilename(sessionLabel)
+          const sessionWeightData = sessionId === selectedWeightSession
+            ? weightSpaceData
+            : await fetchWeightSpaceRaw(sessionId)
+
+          const consistencyData = getConsistencyPlotData(sessionId, sessionWeightData)
+          const consistencyRendered = buildConsistencyPlotSvg({
+            title: `Declared vs Computed Ratios — ${sessionLabel}`,
+            comparisons: consistencyData.comparisons,
+            data: consistencyData.data,
           })
+          if (consistencyRendered?.svgMarkup) {
+            imageTargets.push({
+              filenameBase: `step1_declared_computed_ratios_${sessionSlug}`,
+              svgMarkup: consistencyRendered.svgMarkup,
+              width: consistencyRendered.width,
+              height: consistencyRendered.height,
+            })
+          }
+
+          const sessionWeightSamples = normalizeWeightSamples(sessionWeightData)
+          const weightSpaceRendered = sessionWeightSamples.length > 0
+            ? buildWeightSpacePlotSvg({
+              data: sessionWeightData,
+              orderedCriteria: orderedCriteriaNames,
+              isNonLinearModel: useNonLinearModel,
+              isHierarchicalStudy,
+              solutionCount: sessionWeightSamples.length,
+              sessionLabel,
+            })
+            : null
+
+          if (weightSpaceRendered?.svgMarkup) {
+            imageTargets.push({
+              filenameBase: `step1_weight_space_plot_${sessionSlug}`,
+              svgMarkup: weightSpaceRendered.svgMarkup,
+              width: weightSpaceRendered.width,
+              height: weightSpaceRendered.height,
+            })
+          }
         }
 
-        const weightSpaceRendered = weightSpaceData
-          ? buildWeightSpacePlotSvg({
-            data: weightSpaceData,
-            orderedCriteria: (criteria || [])
-              .map((criterion) => criterion?.criterion_name)
-              .filter((name) => typeof name === 'string' && name.length > 0),
-            isNonLinearModel: useNonLinearModel,
-            isHierarchicalStudy,
-            solutionCount: weightSpaceSolutionCount,
-          })
-          : null
-
-        if (weightSpaceRendered?.svgMarkup) {
-          imageTargets.push({
-            filenameBase: 'step1_weight_space_plot',
-            svgMarkup: weightSpaceRendered.svgMarkup,
-            width: weightSpaceRendered.width,
-            height: weightSpaceRendered.height,
-          })
+        // Consensus is a property of agreement across elicitations, not of any one elicitation, so
+        // it gets its own summary block instead of the per-elicitation mean/median/etc. table (that
+        // table is what Step 3's Uncertainty export uses, since per-elicitation spread is exactly
+        // what that step is about).
+        const buildConsensusSummaryLines = (consensus) => {
+          if (!consensus) return []
+          return [
+            `Elicitations = ${consensus.elicitationCount}`,
+            `Difference area = ${Number(consensus.differenceArea || 0).toFixed(4)}`,
+            `Consensus ratio = ${Number(consensus.consensusRatio || 0).toFixed(4)}`,
+            `Consensus = ${Number(consensus.consensusPercent || 0).toFixed(2)}%`,
+          ]
         }
 
         // Built from step-result data directly (not captured from the live DOM) so these images
         // export correctly even when their step's tab isn't the one currently open in the browser.
-        const appendDistributionTargets = (stepResults, stepPrefix, plotTitle, includeConsensus) => {
+        const appendDistributionTargets = (stepResults, stepPrefix, plotTitle, summaryBoxTitle, getSummaryLines) => {
           if (!stepResults?.alternative_names) return
           stepResults.alternative_names.forEach((altName, altIndex) => {
             const distData = getDistributionDataForAlternative(stepResults, altIndex)
             if (!distData) return
 
-            const subtitleLines = includeConsensus
-              ? [`Consensus = ${Number(distData.consensus?.consensusPercent || 0).toFixed(2)}%`]
-              : []
-
             const rendered = buildDistributionPlotSvg({
               title: plotTitle,
               altName,
-              subtitleLines,
               densityData: distData.densityData,
               expertNames: distData.expertNames,
-              summaryLines: distData.summaryLines,
+              summaryBoxTitle,
+              summaryLines: getSummaryLines(distData),
             })
             if (!rendered?.svgMarkup) return
 
@@ -2410,8 +2460,20 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           })
         }
 
-        appendDistributionTargets(step2Results, 'step2', 'Distribution of Values', true)
-        appendDistributionTargets(step5Results, 'step5', 'Uncertainty Distribution', false)
+        appendDistributionTargets(
+          step2Results,
+          'step2',
+          'Distribution of Values',
+          'Consensus Quantification',
+          (distData) => buildConsensusSummaryLines(distData.consensus)
+        )
+        appendDistributionTargets(
+          step5Results,
+          'step5',
+          'Uncertainty Distribution',
+          'Distribution Summary (per elicitation)',
+          (distData) => distData.summaryLines
+        )
 
         const heatmapTargets = buildPipelineHeatmapExports({
           step4Results,
@@ -3725,7 +3787,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   opacity={0.45}
                                   borderRadius="sm"
                                 />
-                                <Text fontSize="sm">{item.label}</Text>
+                                <Text fontSize="sm">{item.expertName}</Text>
                               </HStack>
                             ))}
                           </HStack>
@@ -3735,10 +3797,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                         {step5Results.alternative_names?.map((altName, altIndex) => {
                           const distData = getDistributionDataForAlternative(step5Results, altIndex)
                           if (!distData) return null
-                          const legendItems = getLegendItems(step5Results)
-                          const legendLabelByExpert = Object.fromEntries(
-                            legendItems.map((item) => [item.expertName, item.label])
-                          )
                           return (
                             <Box key={`${altName}-${altIndex}`} borderWidth={1} borderRadius="md" p={3} bg="gray.50" position="relative" data-export-id={`step5_distribution_${altIndex}`}>
                               <Tooltip label="Download image as PNG" hasArrow>
@@ -3802,7 +3860,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                       type="monotone"
                                       dot={false}
                                       isAnimationActive={false}
-                                      name={legendLabelByExpert[expertName] || expertName}
+                                      name={expertName}
                                     />
                                   ))}
                                 </AreaChart>
@@ -3899,7 +3957,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   opacity={0.45}
                                   borderRadius="sm"
                                 />
-                                <Text fontSize="sm">{item.label}</Text>
+                                <Text fontSize="sm">{item.expertName}</Text>
                               </HStack>
                             ))}
                           </HStack>
@@ -3909,10 +3967,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                         {step2Results.alternative_names?.map((altName, altIndex) => {
                           const distData = getDistributionDataForAlternative(step2Results, altIndex)
                           if (!distData) return null
-                          const legendItems = getLegendItems(step2Results)
-                          const legendLabelByExpert = Object.fromEntries(
-                            legendItems.map((item) => [item.expertName, item.label])
-                          )
                           return (
                             <Box key={`${altName}-${altIndex}`} borderWidth={1} borderRadius="md" p={3} bg="gray.50" position="relative" data-export-id={`step2_distribution_${altIndex}`}>
                               <Tooltip label="Download image as PNG" hasArrow>
@@ -3979,7 +4033,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                       type="monotone"
                                       dot={false}
                                       isAnimationActive={false}
-                                      name={legendLabelByExpert[expertName] || expertName}
+                                      name={expertName}
                                     />
                                   ))}
                                 </AreaChart>
@@ -4734,9 +4788,11 @@ function buildWeightSpacePlotSvg({
   isNonLinearModel = false,
   isHierarchicalStudy = false,
   solutionCount = 0,
+  sessionLabel = '',
 }) {
   const normalized = normalizeWeightSpaceRows(data, orderedCriteria)
   if (!normalized || normalized.criteria.length === 0) return null
+  const titleText = sessionLabel ? `Weight Space Plot — ${sessionLabel}` : 'Weight Space Plot'
 
   const methodLabel = isHierarchicalStudy ? 'PILE-BWT' : 'BWT'
   const explanationText = isNonLinearModel
@@ -4783,7 +4839,7 @@ function buildWeightSpacePlotSvg({
     svgMarkup: `
       <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
         <rect x="0" y="0" width="${width}" height="${height}" fill="#FFFFFF" />
-        <text x="16" y="24" font-size="16" font-weight="700" fill="#1A202C">Weight Space Plot</text>
+        <text x="16" y="24" font-size="16" font-weight="700" fill="#1A202C">${escapeSvgText(titleText)}</text>
         <text x="16" y="42" font-size="12" fill="#4A5568">${escapeSvgText(explanationText)}</text>
         ${rowsMarkup}
         <text x="${leftLabel}" y="${height - 16}" font-size="11" fill="#718096">0</text>
