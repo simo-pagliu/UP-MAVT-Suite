@@ -96,6 +96,25 @@ Navigate to [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
+## Architecture notes
+
+### Worker concurrency
+
+Computation (weight-space solving, Monte Carlo simulation for each UP-MAVT step) runs in the separate `worker` service rather than in the Flask backend itself. The backend only writes a task document (`status: pending`) to MongoDB when a practitioner launches a step; the worker is responsible for actually running it.
+
+By default, `docker-compose.yml` starts a **single** `worker` container running a single-threaded polling loop (`worker/worker.py`): it repeatedly claims the oldest pending task with an atomic `find_one_and_update({'status': 'pending'}, {'$set': {'status': 'running', ...}})`, runs it to completion in-process, then polls for the next one. There is no queue framework (no Celery/RQ) and no threading/multiprocessing inside the worker — one task runs at a time, start to finish, before the next one begins.
+
+**Practical implication:** if two practitioners on different study sessions launch a computation at nearly the same time, both tasks are queued in MongoDB, but only one actually executes at once — the second waits for the first to finish (plus up to the worker's poll interval), even though the two jobs are for entirely unrelated studies. Each task is CPU-bound, single-core Python/NumPy work (Monte Carlo runs with up to a few thousand iterations), so this queuing is noticeable under concurrent practitioner load, though it does not affect correctness — tasks never collide or overwrite each other's results.
+
+**Scaling to multiple workers later:** the task-claiming logic already uses MongoDB's atomic `find_one_and_update`, which guarantees two workers can never pick up the same task — so this is safe to scale horizontally without any code changes to the claiming logic. To run multiple workers concurrently:
+
+1. In `docker-compose.yml`, remove the fixed `container_name: elicitation-worker` from the `worker` service (a fixed name prevents running more than one instance of it).
+2. Either add a `deploy.replicas: N` block under `worker` (if using Docker Swarm), or run `docker compose up --build -d --scale worker=N` for a plain multi-container Compose deployment.
+
+No other changes are required — every additional worker container will independently poll the same `tasks` collection and safely pick up whatever is still `pending`.
+
+---
+
 ## User Guide
 
 ### Practitioner workflow
