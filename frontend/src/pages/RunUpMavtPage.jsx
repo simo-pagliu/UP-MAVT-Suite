@@ -9,6 +9,7 @@ import {
   IconButton,
   Select,
   Checkbox,
+  Radio,
   Alert,
   AlertIcon,
   AlertTitle,
@@ -285,6 +286,53 @@ function getAggregationPlotLabel(backendMethod, alphaMap = null, fallbackAlpha =
   return `${label} (alpha = ${formattedAlpha})`
 }
 
+// Controlled NumberInput whose displayed text is a local edit buffer, not a
+// direct reflection of the (clamped, rounded) committed value. Chakra's
+// NumberInput reformats a numeric `value` prop on every render, which fights
+// the user mid-keystroke (e.g. typing "0." gets reverted to "0", so the next
+// keystroke "5" is read as "05" and clamped to the max). Clamping/formatting
+// here only happens on blur, once the user is done typing.
+function AlphaNumberInput({ value, onChange, min = -1, max = 1, step = 0.01, precision = 2, isDisabled, width = '100px' }) {
+  const [text, setText] = useState(() => formatAlphaValue(value) ?? '0')
+  const isFocusedRef = useRef(false)
+
+  useEffect(() => {
+    if (isFocusedRef.current) return
+    setText(formatAlphaValue(value) ?? '0')
+  }, [value])
+
+  return (
+    <NumberInput
+      value={text}
+      min={min}
+      max={max}
+      step={step}
+      precision={precision}
+      width={width}
+      isDisabled={isDisabled}
+      onFocus={() => {
+        isFocusedRef.current = true
+      }}
+      onBlur={() => {
+        isFocusedRef.current = false
+        setText(formatAlphaValue(value) ?? '0')
+      }}
+      onChange={(valueString, valueAsNumber) => {
+        setText(valueString)
+        if (Number.isFinite(valueAsNumber)) {
+          onChange(Math.max(min, Math.min(max, valueAsNumber)))
+        }
+      }}
+    >
+      <NumberInputField />
+      <NumberInputStepper>
+        <NumberIncrementStepper />
+        <NumberDecrementStepper />
+      </NumberInputStepper>
+    </NumberInput>
+  )
+}
+
 function inlineSvgComputedStyles(sourceNode, cloneNode) {
   if (
     typeof window === 'undefined'
@@ -346,15 +394,11 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     1: 1000, 2: 1000, 3: 1000, 4: 200, 5: 1000, 6: 10000,
   })
 
-  // Aggregation method per step
-  const [consensusAggregation, setConsensusAggregation] = useState('WAM')
+  // Aggregation method: compared/checked methods in Step 2, and the one
+  // chosen among them to carry forward (read-only) into Steps 3-5.
   const [aggregationStepMethods, setAggregationStepMethods] = useState(DEFAULT_AGGREGATION_STEP_METHODS)
-  const [uncertaintyAggregation, setUncertaintyAggregation] = useState('WAM')
-  const [resultsAggregation, setResultsAggregation] = useState('WAM')
   const [aggregationStepAlphas, setAggregationStepAlphas] = useState({})
-  const [uncertaintyAggregationAlpha, setUncertaintyAggregationAlpha] = useState(0)
-  const [consensusAggregationAlpha, setConsensusAggregationAlpha] = useState(0)
-  const [resultsAggregationAlpha, setResultsAggregationAlpha] = useState(0)
+  const [chosenAggregationMethod, setChosenAggregationMethod] = useState(DEFAULT_AGGREGATION_STEP_METHODS[0])
 
   // Weight space plot state
   const [selectedWeightSession, setSelectedWeightSession] = useState('')
@@ -396,6 +440,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   // Derived state
   const weightsComputed = workflowStatus?.weights?.computed === true
   const weightsTimestamp = workflowStatus?.weights?.timestamp
+  const chosenAggregationMeta = chosenAggregationMethod ? getAggregationMeta(chosenAggregationMethod) : null
+  const chosenAggregationAlpha = chosenAggregationMeta?.usesAlpha
+    ? Number(aggregationStepAlphas[chosenAggregationMethod] ?? 0)
+    : 0
 
   // ============================================================================
   // LOAD DATA
@@ -538,6 +586,18 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       setSelectedSessions(restoredSelected)
     }
 
+    if (Array.isArray(runPrefs.aggregation_step_methods) && runPrefs.aggregation_step_methods.length > 0) {
+      setAggregationStepMethods(runPrefs.aggregation_step_methods)
+    }
+
+    if (runPrefs.aggregation_step_alphas && typeof runPrefs.aggregation_step_alphas === 'object') {
+      setAggregationStepAlphas(runPrefs.aggregation_step_alphas)
+    }
+
+    if (runPrefs.chosen_aggregation_method) {
+      setChosenAggregationMethod(runPrefs.chosen_aggregation_method)
+    }
+
     setRunPrefsHydrated(true)
   }, [studySessionId, sessions, criteria, workflowStatus?.preferences?.run_page, runPrefsHydrated])
 
@@ -550,6 +610,29 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     if (!runPrefsHydrated) return
     saveRunPagePreferences({ selected_session_ids: selectedSessions })
   }, [runPrefsHydrated, selectedSessions, saveRunPagePreferences])
+
+  useEffect(() => {
+    if (!runPrefsHydrated) return
+    saveRunPagePreferences({ aggregation_step_methods: aggregationStepMethods })
+  }, [runPrefsHydrated, aggregationStepMethods, saveRunPagePreferences])
+
+  useEffect(() => {
+    if (!runPrefsHydrated) return
+    saveRunPagePreferences({ aggregation_step_alphas: aggregationStepAlphas })
+  }, [runPrefsHydrated, aggregationStepAlphas, saveRunPagePreferences])
+
+  useEffect(() => {
+    if (!runPrefsHydrated) return
+    saveRunPagePreferences({ chosen_aggregation_method: chosenAggregationMethod || '' })
+  }, [runPrefsHydrated, chosenAggregationMethod, saveRunPagePreferences])
+
+  // If the chosen method gets unchecked from the comparison list, it can no
+  // longer be carried into the following steps - clear it.
+  useEffect(() => {
+    if (chosenAggregationMethod && !aggregationStepMethods.includes(chosenAggregationMethod)) {
+      setChosenAggregationMethod(null)
+    }
+  }, [chosenAggregationMethod, aggregationStepMethods])
 
   useEffect(() => {
     if (workflowStatus?.weights?.phase3_tolerance_pct !== undefined) {
@@ -877,6 +960,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       toast({ title: 'Select at least one aggregation method', status: 'warning', duration: 3000 })
       return
     }
+    if ([2, 5, 6].includes(stepNumber) && !chosenAggregationMethod) {
+      toast({ title: 'Choose an aggregation method in Step 2 first', status: 'warning', duration: 3000 })
+      return
+    }
 
     const selectedAggregationMethodIds = aggregationStepMethods.length > 0
       ? aggregationStepMethods
@@ -894,8 +981,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     const stepConfigs = {
       2: {
         mc_mode: 'strict',
-        aggregation_method: toBackendAggregationMethod(consensusAggregation),
-        aggregation_alpha: consensusAggregationAlpha,
+        aggregation_method: toBackendAggregationMethod(chosenAggregationMethod),
+        aggregation_alpha: chosenAggregationAlpha,
         use_random_weights: false,
       },
       4: {
@@ -908,14 +995,14 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       },
       5: {
         mc_mode: 'strict',
-        aggregation_method: toBackendAggregationMethod(uncertaintyAggregation),
-        aggregation_alpha: uncertaintyAggregationAlpha,
+        aggregation_method: toBackendAggregationMethod(chosenAggregationMethod),
+        aggregation_alpha: chosenAggregationAlpha,
         use_random_weights: false,
       },
       6: {
         mc_mode: 'non_strict',
-        aggregation_method: toBackendAggregationMethod(resultsAggregation),
-        aggregation_alpha: resultsAggregationAlpha,
+        aggregation_method: toBackendAggregationMethod(chosenAggregationMethod),
+        aggregation_alpha: chosenAggregationAlpha,
         use_random_weights: false,
       },
     }
@@ -1032,67 +1119,41 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     setMcIterations((prev) => ({ ...prev, [step]: v }))
   }
 
-  const renderAggregationSelector = ({
-    selectedMethod,
-    setSelectedMethod,
-    alphaValue,
-    setAlphaValue,
-  }) => {
-    const meta = getAggregationMeta(selectedMethod)
+  // Read-only summary of the aggregation method chosen in Step 2, used by
+  // Steps 3-5. It cannot be edited here - the user must go back to Step 2.
+  const renderChosenAggregationSummary = () => {
+    if (!chosenAggregationMethod || !chosenAggregationMeta) {
+      return (
+        <Alert status="warning" borderRadius="md" alignItems="flex-start">
+          <AlertIcon />
+          <Box flex={1}>
+            <AlertTitle fontSize="sm">No aggregation method chosen yet</AlertTitle>
+            <AlertDescription fontSize="sm" display="block">
+              Go to Step 2, compare the methods you're interested in, and mark one as the method to use for the rest of the workflow.
+            </AlertDescription>
+          </Box>
+          <Button size="sm" flexShrink={0} onClick={() => setActiveStep(2)}>Go to Step 2</Button>
+        </Alert>
+      )
+    }
+
+    const meta = chosenAggregationMeta
 
     return (
       <VStack spacing={3} align="stretch">
-        <HStack spacing={3} align="center" flexWrap="wrap">
-          <Text fontWeight="bold">Aggregation:</Text>
-          <Select
-            value={selectedMethod}
-            onChange={(e) => setSelectedMethod(e.target.value)}
-            width="220px"
-            isDisabled={runningStep !== null}
-          >
-            {AGGREGATION_METHODS.map((method) => (
-              <option key={method.id} value={method.id}>{method.label}</option>
-            ))}
-          </Select>
-          {meta.usesAlpha && (
-            <HStack spacing={2} minW="340px" flex={1}>
-              <Text fontWeight="medium">α:</Text>
-              <Slider
-                value={alphaValue}
-                min={-1}
-                max={1}
-                step={0.01}
-                isDisabled={runningStep !== null}
-                onChange={(value) => setAlphaValue(Number(value))}
-                flex={1}
-              >
-                <SliderTrack>
-                  <SliderFilledTrack />
-                </SliderTrack>
-                <SliderThumb />
-              </Slider>
-              <NumberInput
-                value={alphaValue}
-                min={-1}
-                max={1}
-                step={0.01}
-                precision={2}
-                width="100px"
-                isDisabled={runningStep !== null}
-                onChange={(_, valueAsNumber) => {
-                  if (!Number.isFinite(valueAsNumber)) return
-                  setAlphaValue(Math.max(-1, Math.min(1, valueAsNumber)))
-                }}
-              >
-                <NumberInputField />
-                <NumberInputStepper>
-                  <NumberIncrementStepper />
-                  <NumberDecrementStepper />
-                </NumberInputStepper>
-              </NumberInput>
-            </HStack>
-          )}
+        <HStack spacing={3} align="center" flexWrap="wrap" justify="space-between">
+          <HStack spacing={3} align="center" flexWrap="wrap">
+            <Text fontWeight="bold">Aggregation:</Text>
+            <Badge colorScheme="blue" fontSize="sm" px={2} py={1}>{meta.label}</Badge>
+            {meta.usesAlpha && (
+              <Text fontSize="sm" color="gray.700">α = {formatAlphaValue(chosenAggregationAlpha) ?? '0'}</Text>
+            )}
+          </HStack>
+          <Button size="xs" variant="link" onClick={() => setActiveStep(2)}>Change in Step 2</Button>
         </HStack>
+        <Text fontSize="xs" color="gray.600">
+          This is the method chosen in Step 2. Go back to Step 2 to compare other methods or change the selection.
+        </Text>
         <VStack spacing={1} align="stretch">
           <Text fontSize="sm" color="gray.700">
             <strong>{meta.label}</strong> = {meta.fullName}
@@ -1111,11 +1172,6 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           >
             <BlockMath math={meta.formula} />
           </Box>
-          {meta.usesAlpha && (
-            <Text fontSize="xs" color="gray.600">
-              α ∈ [-1, 1]. At α = 0 the aggregation is fully compensatory; values toward 1 emphasize poor performance, while values toward -1 emphasize strong performance.
-            </Text>
-          )}
         </VStack>
       </VStack>
     )
@@ -1123,33 +1179,58 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
   const renderAggregationChecklist = () => (
     <VStack spacing={3} align="stretch">
-      <Text fontWeight="bold">Aggregation methods (select one or more):</Text>
+      <Text fontWeight="bold">Aggregation methods (select one or more to compare):</Text>
+      <Text fontSize="xs" color="gray.600">
+        Mark one of the checked methods as "Use for next steps" - that choice (and its α) is carried, read-only, into Steps 3-5.
+      </Text>
       <SimpleGrid columns={{ base: 1, md: 2 }} spacing={3}>
         {AGGREGATION_METHODS.map((method) => {
           const isSelected = aggregationStepMethods.includes(method.id)
+          const isChosen = chosenAggregationMethod === method.id
           const alphaValue = Number(aggregationStepAlphas[method.id] ?? 0)
           return (
-            <Box key={method.id} bg="white" borderWidth={1} borderColor="gray.200" borderRadius="md" p={3}>
+            <Box
+              key={method.id}
+              bg="white"
+              borderWidth={isChosen ? 2 : 1}
+              borderColor={isChosen ? 'blue.400' : 'gray.200'}
+              borderRadius="md"
+              p={3}
+            >
               <VStack spacing={2} align="stretch">
-                <HStack spacing={3} align="center" flexWrap="wrap">
-                  <Checkbox
-                    isChecked={isSelected}
-                    isDisabled={runningStep !== null}
-                    onChange={(e) => {
-                      const checked = e.target.checked
-                      setAggregationStepMethods((prev) => {
-                        if (checked) {
-                          return prev.includes(method.id) ? prev : [...prev, method.id]
-                        }
-                        return prev.filter((id) => id !== method.id)
-                      })
-                    }}
-                  >
-                    <Text fontWeight="semibold">{method.label}</Text>
-                  </Checkbox>
-                  <Text fontSize="sm" color="gray.700">
-                    {method.fullName}
-                  </Text>
+                <HStack spacing={3} align="center" flexWrap="wrap" justify="space-between">
+                  <HStack spacing={3} align="center" flexWrap="wrap">
+                    <Checkbox
+                      isChecked={isSelected}
+                      isDisabled={runningStep !== null}
+                      onChange={(e) => {
+                        const checked = e.target.checked
+                        setAggregationStepMethods((prev) => {
+                          if (checked) {
+                            return prev.includes(method.id) ? prev : [...prev, method.id]
+                          }
+                          return prev.filter((id) => id !== method.id)
+                        })
+                      }}
+                    >
+                      <Text fontWeight="semibold">{method.label}</Text>
+                    </Checkbox>
+                    <Text fontSize="sm" color="gray.700">
+                      {method.fullName}
+                    </Text>
+                  </HStack>
+                  {isSelected && (
+                    <Tooltip label="Use this method (and its α) for Steps 3-5" hasArrow>
+                      <HStack spacing={1} as="label" cursor={runningStep !== null ? 'not-allowed' : 'pointer'}>
+                        <Radio
+                          isChecked={isChosen}
+                          isDisabled={runningStep !== null}
+                          onChange={() => setChosenAggregationMethod(method.id)}
+                        />
+                        <Text fontSize="xs" color="gray.600">Use for next steps</Text>
+                      </HStack>
+                    </Tooltip>
+                  )}
                 </HStack>
                 <Box
                   borderWidth={1}
@@ -1180,26 +1261,11 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                       </SliderTrack>
                       <SliderThumb />
                     </Slider>
-                    <NumberInput
+                    <AlphaNumberInput
                       value={alphaValue}
-                      min={-1}
-                      max={1}
-                      step={0.01}
-                      precision={2}
-                      width="100px"
+                      onChange={(clamped) => setAggregationStepAlphas((prev) => ({ ...prev, [method.id]: clamped }))}
                       isDisabled={runningStep !== null}
-                      onChange={(_, valueAsNumber) => {
-                        if (!Number.isFinite(valueAsNumber)) return
-                        const clamped = Math.max(-1, Math.min(1, valueAsNumber))
-                        setAggregationStepAlphas((prev) => ({ ...prev, [method.id]: clamped }))
-                      }}
-                    >
-                      <NumberInputField />
-                      <NumberInputStepper>
-                        <NumberIncrementStepper />
-                        <NumberDecrementStepper />
-                      </NumberInputStepper>
-                    </NumberInput>
+                    />
                   </HStack>
                 )}
               </VStack>
@@ -3556,12 +3622,14 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                               step4Results?.aggregation_alpha
                             )
                             const fileBase = `step4_${sanitizeFilename(backendMethod)}_aggregation_heatmap`
+                            const isChosen = chosenAggregationMeta?.backendMethod === backendMethod
+                            const heatmapTitle = `${plotLabel} Aggregation Heatmap${isChosen ? ' — chosen for next steps' : ''}`
                             return (
                               <RankingHeatmap
                                 key={backendMethod}
-                                title={`${plotLabel} Aggregation Heatmap`}
+                                title={heatmapTitle}
                                 results={result}
-                                onDownloadPng={() => handleDownloadHeatmapPng(result, `${plotLabel} Aggregation Heatmap`, fileBase)}
+                                onDownloadPng={() => handleDownloadHeatmapPng(result, heatmapTitle, fileBase)}
                               />
                             )
                           })}
@@ -3605,7 +3673,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onRun={() => handleRunStep(5, 'Uncertainty')}
                   onStop={handleStopExecution}
                   isRunning={runningStep === 'Uncertainty'}
-                  isDisabled={isButtonDisabled(3) || !uncertaintyAggregation || selectedSessions.length === 0}
+                  isDisabled={isButtonDisabled(3) || !chosenAggregationMethod || selectedSessions.length === 0}
                   showConsole={showConsole}
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
@@ -3619,15 +3687,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   }
                   parameters={
                     <VStack spacing={3} align="stretch">
-                      {renderAggregationSelector({
-                        selectedMethod: uncertaintyAggregation,
-                        setSelectedMethod: (methodId) => {
-                          setUncertaintyAggregation(methodId)
-                          if (!resultsAggregation) setResultsAggregation(methodId)
-                        },
-                        alphaValue: uncertaintyAggregationAlpha,
-                        setAlphaValue: setUncertaintyAggregationAlpha,
-                      })}
+                      {renderChosenAggregationSummary()}
                       <HStack spacing={3}>
                         <Text fontWeight="bold">MC Iterations:</Text>
                         <NumberInput
@@ -3776,7 +3836,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onRun={() => handleRunStep(2, 'Consensus')}
                   onStop={handleStopExecution}
                   isRunning={runningStep === 'Consensus'}
-                  isDisabled={isButtonDisabled(4) || selectedSessions.length === 0}
+                  isDisabled={isButtonDisabled(4) || !chosenAggregationMethod || selectedSessions.length === 0}
                   showConsole={showConsole}
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
@@ -3791,12 +3851,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   parameters={
                     <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
                       <VStack spacing={3} align="stretch">
-                        {renderAggregationSelector({
-                          selectedMethod: consensusAggregation,
-                          setSelectedMethod: setConsensusAggregation,
-                          alphaValue: consensusAggregationAlpha,
-                          setAlphaValue: setConsensusAggregationAlpha,
-                        })}
+                        {renderChosenAggregationSummary()}
                         <HStack spacing={3}>
                           <Text fontWeight="bold">MC Iterations:</Text>
                           <NumberInput
@@ -3950,7 +4005,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onRun={() => handleRunStep(6, 'Results')}
                   onStop={handleStopExecution}
                   isRunning={runningStep === 'Results'}
-                  isDisabled={isButtonDisabled(5) || !resultsAggregation || selectedSessions.length === 0}
+                  isDisabled={isButtonDisabled(5) || !chosenAggregationMethod || selectedSessions.length === 0}
                   showConsole={showConsole}
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
@@ -3964,12 +4019,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   }
                   parameters={
                     <VStack spacing={3} align="stretch">
-                      {renderAggregationSelector({
-                        selectedMethod: resultsAggregation,
-                        setSelectedMethod: setResultsAggregation,
-                        alphaValue: resultsAggregationAlpha,
-                        setAlphaValue: setResultsAggregationAlpha,
-                      })}
+                      {renderChosenAggregationSummary()}
                       <HStack spacing={3}>
                         <Text fontWeight="bold">MC Iterations:</Text>
                         <NumberInput

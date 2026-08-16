@@ -924,6 +924,9 @@ def update_run_page_preferences(study_session_id):
         use_non_linear_model=data.get('use_non_linear_model'),
         selected_session_ids=data.get('selected_session_ids'),
         confidence_adjustments_by_session=data.get('confidence_adjustments_by_session'),
+        aggregation_step_methods=data.get('aggregation_step_methods'),
+        aggregation_step_alphas=data.get('aggregation_step_alphas'),
+        chosen_aggregation_method=data.get('chosen_aggregation_method'),
     )
     return jsonify(result), 200
 

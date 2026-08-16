@@ -478,6 +478,17 @@ class WorkflowService:
                         for k, v in (run_page.get('confidence_adjustments_by_session') or {}).items()
                         if v is not None
                     },
+                    'aggregation_step_methods': [
+                        str(method_id)
+                        for method_id in (run_page.get('aggregation_step_methods') or [])
+                        if method_id is not None
+                    ],
+                    'aggregation_step_alphas': {
+                        str(k): max(-1.0, min(1.0, float(v)))
+                        for k, v in (run_page.get('aggregation_step_alphas') or {}).items()
+                        if v is not None
+                    },
+                    'chosen_aggregation_method': run_page.get('chosen_aggregation_method'),
                 }
             },
         }
@@ -488,6 +499,9 @@ class WorkflowService:
         use_non_linear_model=None,
         selected_session_ids=None,
         confidence_adjustments_by_session=None,
+        aggregation_step_methods=None,
+        aggregation_step_alphas=None,
+        chosen_aggregation_method=None,
     ):
         """Persist run-page preferences to the study session document."""
         study = self._studies.find_by_id(study_session_id)
@@ -515,6 +529,27 @@ class WorkflowService:
                 for k, v in confidence_adjustments_by_session.items()
                 if v is not None
             }
+
+        if aggregation_step_methods is not None:
+            if not isinstance(aggregation_step_methods, list):
+                raise ValidationError('aggregation_step_methods must be a list')
+            updates['workflow_preferences.run_page.aggregation_step_methods'] = [
+                str(method_id) for method_id in aggregation_step_methods
+            ]
+
+        if aggregation_step_alphas is not None:
+            if not isinstance(aggregation_step_alphas, dict):
+                raise ValidationError('aggregation_step_alphas must be a dict')
+            updates['workflow_preferences.run_page.aggregation_step_alphas'] = {
+                str(k): max(-1.0, min(1.0, float(v)))
+                for k, v in aggregation_step_alphas.items()
+                if v is not None
+            }
+
+        if chosen_aggregation_method is not None:
+            updates['workflow_preferences.run_page.chosen_aggregation_method'] = (
+                str(chosen_aggregation_method) if chosen_aggregation_method else None
+            )
 
         if updates:
             self._studies.update(study_session_id, updates)
