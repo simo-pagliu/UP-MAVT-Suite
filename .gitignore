@@ -9,3 +9,4 @@ frontend/.vite/
 secrets/
 webhosting_dmz/
 docker-compose.yml.psi
+/UP-MAVT-old
