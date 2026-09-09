@@ -2,15 +2,9 @@
 
 Open-source web application for Multi-Criteria Decision Analysis (MCDA) under uncertainty, based on the UP-MAVT methodology.
 
-## What is UP-MAVT Suite?
+UP-MAVT Suite guides a group of stakeholders through a structured elicitation process to assign weights and preferences to a set of criteria, then runs a Monte Carlo simulation to produce robust, uncertainty-aware rankings of alternatives. The software supports three user roles: **Stakeholder** (participates in the elicitation workflow: qualitative indicators, value functions, pairwise weight comparison), **Practitioner** (sets up the case study, manages stakeholder sessions, and launches the analysis), and **Admin** (manages all studies and sessions through an administration panel).
 
-UP-MAVT Suite guides a group of stakeholders through a structured elicitation process to assign weights and preferences to a set of criteria. It then runs a Monte Carlo simulation to produce robust multi-criteria rankings of alternatives under uncertainty.
-
-The application supports three user roles:
-
-- **Stakeholder** – participates in the elicitation workflow (qualitative indicators, value functions, pairwise weight comparison)
-- **Practitioner** – sets up the case study, manages stakeholder sessions, and launches the analysis
-- **Admin** – manages all studies and sessions through an administration panel
+For a complete, start-to-finish walkthrough of using the software, see the [**User Manual**](USER_MANUAL/README.md). This README covers deployment.
 
 ---
 
@@ -92,32 +86,13 @@ docker compose up --build -d
 
 **6. Open the application**
 
-Navigate to [http://localhost:3000](http://localhost:3000) in your browser.
+Navigate to [http://localhost:3000](http://localhost:3000) in your browser. From there, follow the [User Manual](USER_MANUAL/README.md) to create your first case study.
 
 ---
 
-## User Guide
+## Administration
 
-### Practitioner workflow
-
-1. **Log in** – On the login page, enter your study session ID in the *Practitioner* section and click **Login**.
-2. **Define the case study** – Use the *Input Definition* page to configure alternatives, criteria, and enable the elicitation modules (Qualitative Indicators, Value Functions, Pairwise Weight Comparison).
-3. **Create stakeholder sessions** – From the same page, generate individual sessions for each stakeholder. Each session gets a unique ID that you share with the participant.
-4. **Send invitations** – If email is configured, invitations are sent automatically. Otherwise, share session IDs manually.
-5. **Monitor progress** – Track how many stakeholders have completed each step.
-6. **Run the analysis** – Once all sessions are complete, go to the *Run UP-MAVT* page and launch the computation. Results appear when the worker finishes.
-
-### Stakeholder workflow
-
-1. **Log in** – On the login page, enter your session ID in the *Stakeholder* section, provide your email address, and complete the email verification step.
-2. **Qualitative Indicators** *(if enabled)* – Provide your assessments for qualitative criteria using the guided input form.
-3. **Value Functions** *(if enabled)* – Define your preference curves for each criterion.
-4. **Pairwise Weight Comparison** *(if enabled)* – Compare pairs of criteria to indicate their relative importance.
-5. **Review & Submit** – Check your answers on the recap page and submit when ready.
-
-### Admin panel
-
-Access the admin panel by logging in with the **Admin** option and the password stored in `secrets/admin_password.txt`. From there you can:
+Log in with the **Admin** option on the landing page, using the password you configured in step 3 above. From the admin panel you can:
 
 - View all study sessions and their stakeholder sessions
 - Download session data
@@ -128,11 +103,19 @@ Access the admin panel by logging in with the **Admin** option and the password 
 
 ## Example case studies
 
-The `examples/` folder contains three ready-to-use case studies that can be imported through the Admin panel:
+The [`examples/`](examples/) folder contains five case studies, see
+[`examples/README.md`](examples/README.md) for the full index. Three are ready to import through
+the login page's "Upload a case study (.zip file)" button:
 
-- `example_1.zip` – Case study presented in the software publication (based on PLACEHOLDER)
-- `example_2.zip` – Case study presented in the software publication (based on PLACEHOLDER)
-- `example_3.zip` – Case study with a hierarchical criteria structure, developed alongside the UP-MAVT methodology (PLACEHOLDER)
+- [`01-port-selection-liang-et-al/`](examples/01-port-selection-liang-et-al/): reference case study, 7 ports, 6 criteria, from Liang, Brunelli & Rezaei (2022), https://doi.org/10.1016/j.ins.2022.07.097
+- [`02-port-selection-uncertainty-two-decision-makers/`](examples/02-port-selection-uncertainty-two-decision-makers/): the same problem, extended with input uncertainty, a qualitative criterion, and a second decision-maker
+- [`03-nuclear-reactor-hierarchical-uncertain/`](examples/03-nuclear-reactor-hierarchical-uncertain/): a large, self-produced case study, 6 reactor designs, 14 criteria in 4 groups, 3 decision-makers
+
+Two more validate the software's computational engine against published results and
+hand-checkable mathematics:
+
+- [`04-tradeoff-elicitation-sun-kroesen-rezaei-2026/`](examples/04-tradeoff-elicitation-sun-kroesen-rezaei-2026/): replicates a published worked example from Sun, Kroesen & Rezaei (2026), https://doi.org/10.1002/bdm.70069
+- [`05-analytically-tractable-verification/`](examples/05-analytically-tractable-verification/): a small, self-produced problem with a closed-form expected result
 
 ---
 
