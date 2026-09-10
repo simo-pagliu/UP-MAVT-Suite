@@ -1,0 +1,4 @@
+# Test dependencies (install with: pip install -r requirements-test.txt)
+# The worker production deps (requirements.txt) must also be installed.
+pytest>=9.0
+pytest-cov>=4.1
