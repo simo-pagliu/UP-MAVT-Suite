@@ -1,0 +1,12 @@
+Alternative,Cost,Quality
+Group,single-group,single-group
+Description,"Purchase price of the component (EUR)","Supplier quality score (0-10, higher is better)"
+is_qi,FALSE,FALSE
+vf_method,TRUE,TRUE
+Min,100,0
+Max,200,10
+Supplier A,105±5,2
+Supplier B,150±5,6
+Supplier C,195±5,9
+Supplier D,125±5,8
+Unit,EUR,score

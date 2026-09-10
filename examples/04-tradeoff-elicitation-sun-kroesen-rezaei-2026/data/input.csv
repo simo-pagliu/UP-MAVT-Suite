@@ -1,0 +1,10 @@
+Alternative,Rent,CommuteDistance,ShoppingDistance
+Group,single-group,single-group,single-group
+Description,"Monthly rent (EUR)","Commute distance to workplace (km)","Distance to nearest shopping center (m)"
+is_qi,FALSE,FALSE,FALSE
+vf_method,TRUE,TRUE,TRUE
+Min,600,5,100
+Max,1500,15,500
+Apartment A (cheap, far),650,14,480
+Apartment B (expensive, close),1450,6,120
+Unit,EUR,km,m
