@@ -5,6 +5,12 @@ __pycache__/
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/coverage/
+
+# Test coverage artifacts (backend/worker)
+.coverage
+coverage.json
+htmlcov/
 .env
 secrets/
 webhosting_dmz/
