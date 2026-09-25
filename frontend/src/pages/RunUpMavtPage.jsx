@@ -91,6 +91,7 @@ import {
 import { downloadCSVFile } from '../utils/csvExport'
 import {
   normalizeConfidenceAdjustment,
+  normalizeOverallWeightValue,
   normalizePractitionerSettings,
 } from '../utils/practitionerSettings'
 
@@ -198,6 +199,16 @@ const DISTRIBUTION_STAT_TOOLTIPS = {
   p95: 'Upper-tail quantile: 95% of sampled values are below this point.',
   max: 'Largest observed value in the sampled distribution.',
 }
+const OPINION_WEIGHT_TOOLTIP = (
+  'The opinion weight sets how often each expert\'s elicitation is drawn when NSMC pools all experts into a single '
+  + 'distribution. Weights are relative: they are normalised to sum to 1. The opinion weight is independent of '
+  + 'confidence, which only widens or narrows the uncertainty bands of an expert\'s value functions and qualitative '
+  + 'indicators and never changes how often that expert is sampled. Keep all weights equal (the default) unless you '
+  + 'have a documented reason to give some opinions more or less influence, e.g. differing expertise or '
+  + 'accountability, stakeholder-group representation, or several experts from one organisation who should count as '
+  + 'a single voice. A weight of 0 excludes the expert from NSMC pooling without deselecting them. SMC steps keep '
+  + 'experts separate and ignore these weights.'
+)
 function toConfidenceNumber(value, fallback = null) {
   const numericValue = Number(value)
   if (!Number.isFinite(numericValue)) return fallback
@@ -292,14 +303,30 @@ function getAggregationPlotLabel(backendMethod, alphaMap = null, fallbackAlpha =
 // the user mid-keystroke (e.g. typing "0." gets reverted to "0", so the next
 // keystroke "5" is read as "05" and clamped to the max). Clamping/formatting
 // here only happens on blur, once the user is done typing.
-function AlphaNumberInput({ value, onChange, min = -1, max = 1, step = 0.01, precision = 2, isDisabled, width = '100px' }) {
-  const [text, setText] = useState(() => formatAlphaValue(value) ?? '0')
+function formatOpinionWeightValue(weightValue) {
+  const numericValue = Number(weightValue)
+  if (!Number.isFinite(numericValue)) return null
+  return Number(Math.max(0, numericValue).toFixed(2)).toString()
+}
+
+function AlphaNumberInput({
+  value,
+  onChange,
+  min = -1,
+  max = 1,
+  step = 0.01,
+  precision = 2,
+  format = formatAlphaValue,
+  isDisabled,
+  width = '100px',
+}) {
+  const [text, setText] = useState(() => format(value) ?? '0')
   const isFocusedRef = useRef(false)
 
   useEffect(() => {
     if (isFocusedRef.current) return
-    setText(formatAlphaValue(value) ?? '0')
-  }, [value])
+    setText(format(value) ?? '0')
+  }, [value, format])
 
   return (
     <NumberInput
@@ -315,7 +342,7 @@ function AlphaNumberInput({ value, onChange, min = -1, max = 1, step = 0.01, pre
       }}
       onBlur={() => {
         isFocusedRef.current = false
-        setText(formatAlphaValue(value) ?? '0')
+        setText(format(value) ?? '0')
       }}
       onChange={(valueString, valueAsNumber) => {
         setText(valueString)
@@ -1294,6 +1321,118 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       </Text>
     </VStack>
   )
+
+  const renderOpinionWeightSettings = () => {
+    const rows = selectedSessions
+      .map((sessionId) => {
+        const session = sessions.find((entry) => entry._id === sessionId)
+        if (!session) return null
+        const settings = normalizePractitionerSettings(
+          criteria,
+          practitionerSettingsById[sessionId] || session.practitioner_settings
+        )
+        return { sessionId, session, settings, weight: settings.overall_weight }
+      })
+      .filter(Boolean)
+    const totalWeight = rows.reduce((sum, row) => sum + row.weight, 0)
+    const allDefault = rows.every((row) => row.weight === 1)
+
+    // Update all sessions in one state change and save each directly: several
+    // handlePractitionerSettingsChange calls in one tick would only schedule the first save.
+    const handleResetOpinionWeights = () => {
+      const updates = {}
+      rows.forEach((row) => {
+        updates[row.sessionId] = { ...row.settings, overall_weight: 1 }
+      })
+      setPractitionerSettingsById((prev) => ({ ...prev, ...updates }))
+      Object.entries(updates).forEach(([sessionId, settings]) => handleSavePractitionerSettings(sessionId, settings))
+    }
+
+    return (
+      <Box as="details">
+        <Box as="summary" fontWeight="semibold" cursor="pointer" userSelect="none">
+          Advanced (NSMC)
+        </Box>
+        <VStack spacing={2} align="stretch" mt={3}>
+          <HStack justify="space-between" align="center">
+            <HStack spacing={2} align="center">
+              <Text fontWeight="bold">Opinion weights</Text>
+              <Tooltip label={OPINION_WEIGHT_TOOLTIP} hasArrow maxW="420px">
+                <Box as="span" display="inline-flex" alignItems="center" cursor="help">
+                  <InfoOutlineIcon color="gray.500" boxSize={3.5} />
+                </Box>
+              </Tooltip>
+            </HStack>
+            <Button
+              size="xs"
+              variant="outline"
+              isDisabled={runningStep !== null || rows.length === 0 || allDefault}
+              onClick={handleResetOpinionWeights}
+            >
+              Reset to equal
+            </Button>
+          </HStack>
+          <Text fontSize="xs" color="gray.600">
+            How often each expert is drawn when NSMC pools all experts (Steps 2 and 5). Independent of confidence. Equal by default.
+          </Text>
+          {rows.length > 0 ? (
+            <TableContainer>
+              <Table size="sm" variant="simple" bg="white">
+                <Thead>
+                  <Tr>
+                    <Th>Expert</Th>
+                    <Th isNumeric>Opinion weight</Th>
+                    <Th isNumeric>Sampling share</Th>
+                  </Tr>
+                </Thead>
+                <Tbody>
+                  {rows.map(({ sessionId, session, weight }) => {
+                    const saveState = practitionerSettingsSaveStateById[sessionId]
+                    const share = totalWeight > 0 ? weight / totalWeight : 1 / rows.length
+                    return (
+                      <Tr key={sessionId}>
+                        <Td>
+                          <HStack spacing={2}>
+                            <Text fontSize="sm" noOfLines={1}>{getSessionLabel(session, sessionId)}</Text>
+                            {saveState === 'saving' && <Spinner size="xs" />}
+                            {saveState === 'error' && <Text fontSize="xs" color="red.500">Save failed</Text>}
+                          </HStack>
+                        </Td>
+                        <Td isNumeric>
+                          <Box display="inline-block">
+                            <AlphaNumberInput
+                              value={weight}
+                              min={0}
+                              max={100}
+                              step={0.1}
+                              format={formatOpinionWeightValue}
+                              isDisabled={runningStep !== null}
+                              onChange={(valueAsNumber) => handlePractitionerSettingsChange(sessionId, (current) => ({
+                                ...current,
+                                overall_weight: normalizeOverallWeightValue(valueAsNumber, current.overall_weight),
+                              }))}
+                            />
+                          </Box>
+                        </Td>
+                        <Td isNumeric fontSize="sm" color="gray.700">{(share * 100).toFixed(1)}%</Td>
+                      </Tr>
+                    )
+                  })}
+                </Tbody>
+              </Table>
+            </TableContainer>
+          ) : (
+            <Text fontSize="sm" color="gray.500">Select at least one session to set opinion weights.</Text>
+          )}
+          {rows.length > 0 && totalWeight <= 0 && (
+            <Text fontSize="xs" color="orange.600">
+              All opinion weights are 0; equal weights will be used.
+            </Text>
+          )}
+        </VStack>
+      </Box>
+    )
+  }
 
   const renderSessionSelector = ({
     heading = 'Session Selection',
@@ -2756,6 +2895,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                             <Td>Practitioner-side correction to an expert's self-declared confidence; hierarchical (overall → QI/VF → per-criterion), clipped to 0-4.</Td>
                           </Tr>
                           <Tr>
+                            <Td fontWeight="semibold">Opinion weight</Td>
+                            <Td>Relative probability of drawing each expert when NSMC pools opinions; independent of confidence, equal by default.</Td>
+                          </Tr>
+                          <Tr>
                             <Td fontWeight="semibold">Consensus (C)</Td>
                             <Td><InlineMath math={'C = A / (N-1)'} /> — agreement score between decision-makers' distributions, computed in Step 4.</Td>
                           </Tr>
@@ -3343,7 +3486,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                           Confidence Review
                         </Heading>
                         <Box color="gray.600">
-                          Review the self-declared confidence reported by each expert and apply practitioner-side corrections for underestimation or overestimation. Adjustments are applied hierarchically, the resulting confidence values are clipped to the 0-4 range, and these corrections are not shown in the expert-facing interface.
+                          Review the self-declared confidence reported by each expert and apply practitioner-side corrections for underestimation or overestimation. Adjustments are applied hierarchically, the resulting confidence values are clipped to the 0-4 range, and these corrections are not shown in the expert-facing interface. Confidence only sets the width of the uncertainty bands; it does not change how often an expert is sampled in NSMC, which is controlled separately by the opinion weights in the Advanced (NSMC) settings of Steps 2 and 5.
                         </Box>
                       </VStack>
 
@@ -3660,6 +3803,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                           </NumberInputStepper>
                         </NumberInput>
                       </HStack>
+                      {renderOpinionWeightSettings()}
                     </VStack>
                   }
                 >
@@ -4092,6 +4236,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                           </NumberInputStepper>
                         </NumberInput>
                       </HStack>
+                      {renderOpinionWeightSettings()}
                     </VStack>
                   }
                 >

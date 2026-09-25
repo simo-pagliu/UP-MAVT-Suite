@@ -6,6 +6,7 @@ sessions.
 """
 
 import logging
+import math
 from datetime import datetime, timezone
 from bson.objectid import ObjectId
 
@@ -96,7 +97,7 @@ class SessionService:
             weight = float(value)
         except (TypeError, ValueError):
             return float(default)
-        if weight < 0:
+        if not math.isfinite(weight) or weight < 0:
             return float(default)
         return weight
 

@@ -294,6 +294,12 @@ class TestUpdateFields:
         assert settings['confidence_adjustments']['qi_criteria']['Quality'] == 0.6
         assert settings['confidence_adjustments']['vf_criteria']['Cost'] == -0.5
 
+    @pytest.mark.parametrize('invalid_weight', [float('nan'), float('inf'), -1, 'abc'])
+    def test_update_practitioner_settings_invalid_overall_weight_defaults(self, svc, invalid_weight):
+        sid = svc.create('PRAC-WEIGHT', VALID_CRITERIA)
+        updated = svc.update_practitioner_settings(sid, {'overall_weight': invalid_weight})
+        assert updated['practitioner_settings']['overall_weight'] == 1.0
+
     def test_update_practitioner_settings_invalid_payload_raises(self, svc):
         sid = svc.create('PRAC-INVALID', VALID_CRITERIA)
         with pytest.raises(ValidationError, match='practitioner_settings must be an object'):

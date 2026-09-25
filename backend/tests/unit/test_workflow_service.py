@@ -167,41 +167,95 @@ class TestCreateRunStepTask:
         task = mock_db.tasks.find_one({'_id': ObjectId(task_id)})
         assert task['params']['aggregation_method'] == 'geometric_mean'
 
-    def test_uses_practitioner_opinion_weights(self, mock_db, wf_svc, study_with_weights, session_id):
-        second_session_id = StudySessionService(mock_db).create_elicitation_session(study_with_weights, 'EXP-02')
+    @staticmethod
+    def _add_second_session(mock_db, study_id, session_id):
+        second_session_id = StudySessionService(mock_db).create_elicitation_session(study_id, 'EXP-02')
         mock_db.study_sessions.update_one(
-            {'_id': ObjectId(study_with_weights)},
+            {'_id': ObjectId(study_id)},
             {'$set': {'computed_weights.weight_solutions': {
                 session_id: [{'Cost': 1.0}],
                 second_session_id: [{'Cost': 1.0}],
             }}}
         )
-        # Set VF confidence: session 1 avg = 3.0, session 2 avg = 1.0 → normalized [0.75, 0.25]
-        mock_db.sessions.update_one(
-            {'_id': ObjectId(session_id)},
-            {'$set': {'value_functions': {'criteria': {'Cost': {'confidence': 3}}}}}
-        )
-        mock_db.sessions.update_one(
-            {'_id': ObjectId(second_session_id)},
-            {'$set': {'value_functions': {'criteria': {'Cost': {'confidence': 1}}}}}
-        )
+        return second_session_id
 
+    @staticmethod
+    def _run_nsmc_opinion_weights(mock_db, wf_svc, study_id, session_ids):
         task_id = wf_svc.create_run_step_task(
-            study_with_weights,
-            step_number=2,
-            selected_session_ids=[session_id, second_session_id],
+            study_id,
+            step_number=6,
+            selected_session_ids=session_ids,
             mc_iterations=500,
             aggregation_method='weighted_sum',
             aggregation_alpha=0.0,
             mc_mode='non_strict',
             use_random_weights=False,
         )
-
         task = mock_db.tasks.find_one({'_id': ObjectId(task_id)})
-        weights = task['params']['opinion_weights']
-        assert len(weights) == 2
-        assert abs(weights[0] - 0.75) < 1e-9
-        assert abs(weights[1] - 0.25) < 1e-9
+        return task['params']['opinion_weights']
+
+    def test_default_sessions_give_equal_opinion_weights(self, mock_db, wf_svc, study_with_weights, session_id):
+        second_session_id = self._add_second_session(mock_db, study_with_weights, session_id)
+
+        weights = self._run_nsmc_opinion_weights(
+            mock_db, wf_svc, study_with_weights, [session_id, second_session_id]
+        )
+
+        # None tells the worker to use equal weights.
+        assert weights is None
+
+    def test_confidence_does_not_change_opinion_weights(self, mock_db, wf_svc, study_with_weights, session_id):
+        second_session_id = self._add_second_session(mock_db, study_with_weights, session_id)
+        mock_db.sessions.update_one(
+            {'_id': ObjectId(session_id)},
+            {'$set': {'value_functions': {'criteria': {'Cost': {'confidence': 3}}}}}
+        )
+        mock_db.sessions.update_one(
+            {'_id': ObjectId(second_session_id)},
+            {'$set': {
+                'value_functions': {'criteria': {'Cost': {'confidence': 1}}},
+                'practitioner_settings.confidence_adjustments.overall': -2.0,
+            }}
+        )
+        mock_db.study_sessions.update_one(
+            {'_id': ObjectId(study_with_weights)},
+            {'$set': {'workflow_preferences.run_page.confidence_adjustments_by_session': {session_id: 1.5}}}
+        )
+
+        weights = self._run_nsmc_opinion_weights(
+            mock_db, wf_svc, study_with_weights, [session_id, second_session_id]
+        )
+
+        assert weights is None
+
+    def test_overall_weight_changes_opinion_weights(self, mock_db, wf_svc, study_with_weights, session_id):
+        second_session_id = self._add_second_session(mock_db, study_with_weights, session_id)
+        mock_db.sessions.update_one(
+            {'_id': ObjectId(session_id)},
+            {'$set': {'practitioner_settings.overall_weight': 3.0}}
+        )
+
+        weights = self._run_nsmc_opinion_weights(
+            mock_db, wf_svc, study_with_weights, [session_id, second_session_id]
+        )
+
+        assert weights == pytest.approx([0.75, 0.25])
+
+    @pytest.mark.parametrize('invalid_weight', [-1, 'abc', None])
+    def test_invalid_overall_weight_falls_back_to_default(
+        self, mock_db, wf_svc, study_with_weights, session_id, invalid_weight
+    ):
+        second_session_id = self._add_second_session(mock_db, study_with_weights, session_id)
+        mock_db.sessions.update_one(
+            {'_id': ObjectId(session_id)},
+            {'$set': {'practitioner_settings.overall_weight': invalid_weight}}
+        )
+
+        weights = self._run_nsmc_opinion_weights(
+            mock_db, wf_svc, study_with_weights, [session_id, second_session_id]
+        )
+
+        assert weights is None
 
     def test_study_not_found_raises(self, wf_svc, session_id):
         with pytest.raises(NotFoundError):
