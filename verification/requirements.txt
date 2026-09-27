@@ -1,0 +1,6 @@
+# Analysis-only dependencies for the scripts in this folder (convergence study,
+# scalability benchmark, plotting). The worker's own production dependencies
+# (numpy, scipy, pandas, pymongo -- see worker/requirements.txt) must also be
+# installed, since these scripts import worker/scripts/*.py directly.
+matplotlib>=3.7
+psutil>=5.9

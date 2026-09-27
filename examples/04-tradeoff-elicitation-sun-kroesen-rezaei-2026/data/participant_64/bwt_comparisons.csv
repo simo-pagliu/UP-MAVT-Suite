@@ -1,0 +1,4 @@
+REFERENCE_CRITERION;ADJUSTED_CRITERION;DATA_VALUE;TYPE;GROUP
+CommuteDistance;Rent;1000;best;single-group
+ShoppingDistance;Rent;1200;best;single-group
+ShoppingDistance;CommuteDistance;10;worst;single-group

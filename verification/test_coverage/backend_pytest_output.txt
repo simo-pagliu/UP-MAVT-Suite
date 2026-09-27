@@ -1,0 +1,179 @@
+============================= test session starts =============================
+platform win32 -- Python 3.12.6, pytest-9.0.3, pluggy-1.6.0
+rootdir: D:\Documents\GitHub\UP-MAVT-Suite\backend
+configfile: pytest.ini
+testpaths: tests
+plugins: anyio-4.14.2, cov-7.1.0, flask-1.3.0
+collected 378 items
+
+tests\integration\test_api_admin.py ...........................          [  7%]
+tests\integration\test_api_email_verification.py ..                      [  7%]
+tests\integration\test_api_sessions.py ...............................   [ 15%]
+tests\integration\test_api_study_sessions.py ..........................F [ 23%]
+.F..F......F.                                                            [ 26%]
+tests\integration\test_api_workflow.py .....................             [ 32%]
+tests\unit\test_authentication_service.py .............................. [ 39%]
+..........                                                               [ 42%]
+tests\unit\test_email_service.py ..................                      [ 47%]
+tests\unit\test_exceptions.py .........                                  [ 49%]
+tests\unit\test_export_service.py FF..FFFFF.FF.F................F.FFFFF. [ 59%]
+...F..                                                                   [ 61%]
+tests\unit\test_reset_admin_password.py ....                             [ 62%]
+tests\unit\test_session_service.py ..................................... [ 72%]
+..........                                                               [ 74%]
+tests\unit\test_study_session_service.py ............................... [ 83%]
+...........................                                              [ 90%]
+tests\unit\test_workflow_service.py .................................... [ 99%]
+.                                                                        [100%]
+
+================================== FAILURES ===================================
+_ TestCreateStudySessionWithEmail.test_create_with_creator_email_returns_email_status _
+tests\integration\test_api_study_sessions.py:306: in test_create_with_creator_email_returns_email_status
+    assert resp.status_code == 201
+E   assert 400 == 201
+E    +  where 400 = <WrapperTestResponse streamed [400 BAD REQUEST]>.status_code
+______ TestCreateStudySessionWithEmail.test_create_stores_creator_email _______
+tests\integration\test_api_study_sessions.py:321: in test_create_stores_creator_email
+    study_id = resp.json['study_session_id']
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'study_session_id'
+_ TestCompleteElicitationSession.test_complete_sends_email_when_creator_email_set _
+tests\integration\test_api_study_sessions.py:372: in test_complete_sends_email_when_creator_email_set
+    sid = resp.json['study_session_id']
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'study_session_id'
+_ TestNotifyInactiveStudySessions.test_inactive_sessions_with_email_are_notified _
+tests\integration\test_api_study_sessions.py:447: in test_inactive_sessions_with_email_are_notified
+    sid = create_resp.json['study_session_id']
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'study_session_id'
+____________________ TestBuildInputRawCsv.test_header_row _____________________
+tests\unit\test_export_service.py:63: in test_header_row
+    assert 'Criterion' in rows[0]
+E   AssertionError: assert 'Criterion' in {'Criterion;Unit;Alternative;Value': 'Cost;EUR;A;100'}
+_____________________ TestBuildInputRawCsv.test_data_rows _____________________
+tests\unit\test_export_service.py:71: in test_data_rows
+    assert rows[0]['Alternative'] == 'A'
+           ^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'Alternative'
+_______ TestBuildAlternativesCsv.test_quantitative_uses_original_value ________
+tests\unit\test_export_service.py:95: in test_quantitative_uses_original_value
+    assert rows[0]['Value'] == '100.0'
+           ^^^^^^^^^^^^^^^^
+E   KeyError: 'Value'
+__________ TestBuildAlternativesCsv.test_qualitative_uses_x_position __________
+tests\unit\test_export_service.py:101: in test_qualitative_uses_x_position
+    values = [float(r['Value']) for r in rows]
+                    ^^^^^^^^^^
+E   KeyError: 'Value'
+__________ TestBuildAlternativesCsv.test_rounds_to_3_decimal_places ___________
+tests\unit\test_export_service.py:108: in test_rounds_to_3_decimal_places
+    assert float(rows[0]['Value']) == 100.0
+                 ^^^^^^^^^^^^^^^^
+E   KeyError: 'Value'
+___________________ TestBuildQualitativeCsv.test_header_row ___________________
+tests\unit\test_export_service.py:119: in test_header_row
+    assert 'CRITERION_NAME' in rows[0]
+E   AssertionError: assert 'CRITERION_NAME' in {'CRITERION_NAME;ALTERNATIVE;RANK;VALUE;CONFIDENCE': 'Quality;A;1;0.8;3'}
+___________________ TestBuildQualitativeCsv.test_data_rows ____________________
+tests\unit\test_export_service.py:127: in test_data_rows
+    names = {r['ALTERNATIVE'] for r in rows}
+             ^^^^^^^^^^^^^^^^
+E   KeyError: 'ALTERNATIVE'
+__________________ TestBuildPileBwtCsv.test_header_and_data ___________________
+tests\unit\test_export_service.py:156: in test_header_and_data
+    assert rows[0]['REFERENCE_CRITERION'] == 'Cost'
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'REFERENCE_CRITERION'
+_________________ TestBuildPileBwtCsv.test_rounds_data_value __________________
+tests\unit\test_export_service.py:173: in test_rounds_data_value
+    assert rows[0]['DATA_VALUE'] == '1.235'
+           ^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'DATA_VALUE'
+_ TestBuildPileBwtDebugCsv.test_decreasing_vf_clamps_to_endpoint_y_by_x_bounds _
+tests\unit\test_export_service.py:223: in test_decreasing_vf_clamps_to_endpoint_y_by_x_bounds
+    assert rows[0]['a_value'] == '1.0'
+           ^^^^^^^^^^^^^^^^^^
+E   KeyError: 'a_value'
+__ TestGenerateQualitativeValueFunction.test_decreasing_function_starts_at_1 __
+tests\unit\test_export_service.py:326: in test_decreasing_function_starts_at_1
+    assert points[0]['y'] == 1
+E   assert 0 == 1
+_________________ TestBuildValueFunctionsCsv.test_header_row __________________
+tests\unit\test_export_service.py:349: in test_header_row
+    assert 'CRITERION_NAME' in rows[0]
+E   assert 'CRITERION_NAME' in {'CRITERION_NAME;CONFIDENCE;LIST OF POINTS': 'Cost;3;"0.0:0.0;1.0:1.0"'}
+_______ TestBuildValueFunctionsCsv.test_data_row_has_serialized_points ________
+tests\unit\test_export_service.py:358: in test_data_row_has_serialized_points
+    assert '0.0:0.0' in rows[0]['LIST OF POINTS']
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'LIST OF POINTS'
+___ TestBuildValueFunctionsCsv.test_qualitative_criterion_generates_points ____
+tests\unit\test_export_service.py:365: in test_qualitative_criterion_generates_points
+    assert rows[0]['CRITERION_NAME'] == 'Quality'
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'CRITERION_NAME'
+__ TestBuildValueFunctionsCsv.test_fallback_to_criteria_map_when_no_criteria __
+tests\unit\test_export_service.py:371: in test_fallback_to_criteria_map_when_no_criteria
+    assert rows[0]['CRITERION_NAME'] == 'Cost'
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'CRITERION_NAME'
+____________ TestExportServiceWithDb.test_export_input_raw_csv_ok _____________
+tests\unit\test_export_service.py:406: in test_export_input_raw_csv_ok
+    assert rows[0]['Criterion'] == 'Cost'
+           ^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'Criterion'
+_______________ TestExportServiceWithDb.test_export_bwt_csv_ok ________________
+tests\unit\test_export_service.py:464: in test_export_bwt_csv_ok
+    assert rows[0]['REFERENCE_CRITERION'] == 'Cost'
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'REFERENCE_CRITERION'
+=============================== tests coverage ================================
+_______________ coverage: platform win32, python 3.12.6-final-0 _______________
+
+Name                                           Stmts   Miss  Cover   Missing
+----------------------------------------------------------------------------
+app\__init__.py                                   30      6    80%   51-56
+app\exceptions.py                                 10      0   100%
+app\repositories\__init__.py                       6      0   100%
+app\repositories\base.py                          19      1    95%   46
+app\repositories\input_repository.py              20      2    90%   60, 77
+app\repositories\session_repository.py            76     30    61%   71, 109, 123, 139, 153, 172-219
+app\repositories\study_session_repository.py      32      3    91%   72, 86, 124
+app\repositories\task_repository.py               27      5    81%   69-72, 112
+app\repositories\users_repository.py               9      0   100%
+app\routes\__init__.py                             0      0   100%
+app\routes\api.py                                528    118    78%   87-90, 99-104, 113-114, 127, 137, 143, 149, 165-181, 259, 290-310, 350-374, 459-462, 469, 478-480, 487, 494-498, 505, 529-536, 540, 556, 570-571, 583-584, 587, 654-660, 670, 690, 693, 724, 731, 737, 743, 749-750, 755-756, 761-762, 767-768, 773-774, 785-786, 791-792, 797-798, 803-804, 809-810, 815-816, 911-917, 922-923, 928, 933-934
+app\services\__init__.py                           8      0   100%
+app\services\authentication_service.py            94      7    93%   89, 106-111
+app\services\email_service.py                    261     69    74%   117-122, 214, 219, 243, 256, 260, 268-349, 415, 449-456, 513-528
+app\services\email_verification_service.py        71     37    48%   37-41, 46, 79-122, 134-158
+app\services\export_service.py                   524    208    60%   56, 62-69, 89, 92, 95, 98, 108, 131, 163, 182-222, 247, 252, 260-261, 293, 296, 299, 336, 339, 351-352, 354, 358-368, 401, 407-408, 433, 438-439, 475, 478, 480, 492, 496, 510-522, 529, 533, 539-540, 549, 562-563, 570-571, 576-577, 588-589, 631-642, 660-686, 705, 737-744, 763-786, 825-833, 848-854, 872-873, 890, 911-923, 948, 950, 953
+app\services\session_service.py                  296     49    83%   48-49, 88-97, 123, 132, 176-177, 232, 235, 255, 282, 291-292, 310, 312, 338, 340, 351, 375, 501, 548, 568, 578-579, 583-584, 604-614, 655, 673, 678, 697, 702, 718
+app\services\study_session_service.py            433    111    74%   52, 55-59, 78-89, 95, 97, 101, 106-111, 118-126, 133-148, 154-158, 180-182, 192-196, 260, 338, 385, 431, 454-461, 494, 556, 611-643, 653, 662-665, 669, 683, 708-729, 743, 748, 783-810, 872, 909
+app\services\workflow_service.py                 589    243    59%   133-134, 148-149, 162-169, 189, 195, 201, 356, 369-385, 390, 393, 417-437, 455, 461, 494, 501-503, 510, 513, 516, 527, 529, 533-545, 562, 581, 584-585, 607, 617, 624, 636, 669, 672, 685, 701-702, 706, 710-715, 719-749, 756-760, 763-782, 787, 790, 806-807, 813, 838-839, 865, 871-872, 900, 924-930, 934, 939-949, 953, 958-992, 995-1002, 1005-1149
+----------------------------------------------------------------------------
+TOTAL                                           3033    889    71%
+=========================== short test summary info ===========================
+FAILED tests/integration/test_api_study_sessions.py::TestCreateStudySessionWithEmail::test_create_with_creator_email_returns_email_status
+FAILED tests/integration/test_api_study_sessions.py::TestCreateStudySessionWithEmail::test_create_stores_creator_email
+FAILED tests/integration/test_api_study_sessions.py::TestCompleteElicitationSession::test_complete_sends_email_when_creator_email_set
+FAILED tests/integration/test_api_study_sessions.py::TestNotifyInactiveStudySessions::test_inactive_sessions_with_email_are_notified
+FAILED tests/unit/test_export_service.py::TestBuildInputRawCsv::test_header_row
+FAILED tests/unit/test_export_service.py::TestBuildInputRawCsv::test_data_rows
+FAILED tests/unit/test_export_service.py::TestBuildAlternativesCsv::test_quantitative_uses_original_value
+FAILED tests/unit/test_export_service.py::TestBuildAlternativesCsv::test_qualitative_uses_x_position
+FAILED tests/unit/test_export_service.py::TestBuildAlternativesCsv::test_rounds_to_3_decimal_places
+FAILED tests/unit/test_export_service.py::TestBuildQualitativeCsv::test_header_row
+FAILED tests/unit/test_export_service.py::TestBuildQualitativeCsv::test_data_rows
+FAILED tests/unit/test_export_service.py::TestBuildPileBwtCsv::test_header_and_data
+FAILED tests/unit/test_export_service.py::TestBuildPileBwtCsv::test_rounds_data_value
+FAILED tests/unit/test_export_service.py::TestBuildPileBwtDebugCsv::test_decreasing_vf_clamps_to_endpoint_y_by_x_bounds
+FAILED tests/unit/test_export_service.py::TestGenerateQualitativeValueFunction::test_decreasing_function_starts_at_1
+FAILED tests/unit/test_export_service.py::TestBuildValueFunctionsCsv::test_header_row
+FAILED tests/unit/test_export_service.py::TestBuildValueFunctionsCsv::test_data_row_has_serialized_points
+FAILED tests/unit/test_export_service.py::TestBuildValueFunctionsCsv::test_qualitative_criterion_generates_points
+FAILED tests/unit/test_export_service.py::TestBuildValueFunctionsCsv::test_fallback_to_criteria_map_when_no_criteria
+FAILED tests/unit/test_export_service.py::TestExportServiceWithDb::test_export_input_raw_csv_ok
+FAILED tests/unit/test_export_service.py::TestExportServiceWithDb::test_export_bwt_csv_ok
+======================= 21 failed, 357 passed in 15.68s =======================
