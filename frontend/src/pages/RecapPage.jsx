@@ -68,7 +68,7 @@ function RecapPage({ sessionId, onNavigate }) {
   const isAllComplete = missing.length === 0
 
   return (
-    <Box bg="white" p={6} borderRadius="lg" boxShadow="sm">
+    <Box bg="white" p={{ base: 4, md: 6 }} borderRadius="lg" boxShadow="sm">
       <VStack spacing={6} align="stretch">
         <Heading as="h1" size="lg">Overview</Heading>
 
@@ -103,7 +103,7 @@ function RecapPage({ sessionId, onNavigate }) {
             {(studyData?.title || studyData?.description) && (
               <>
                 <Divider />
-                <VStack align="stretch" spacing={2}>
+                <VStack align="stretch" spacing={2} overflowWrap="anywhere">
                   <Text fontWeight="semibold">Case Study</Text>
                   {studyData?.title && <Text><strong>Title:</strong> {studyData.title}</Text>}
                   {studyData?.description && <Text><strong>Description:</strong> {studyData.description}</Text>}
@@ -127,7 +127,7 @@ function RecapPage({ sessionId, onNavigate }) {
         {!loading && !isAllComplete && onNavigate && (
           <HStack spacing={3} flexWrap="wrap">
             {missing.map((item) => (
-              <Button key={item.key} variant="outline" onClick={() => onNavigate(item.page)}>
+              <Button key={item.key} variant="outline" w={{ base: '100%', sm: 'auto' }} onClick={() => onNavigate(item.page)}>
                 Go to {item.label}
               </Button>
             ))}

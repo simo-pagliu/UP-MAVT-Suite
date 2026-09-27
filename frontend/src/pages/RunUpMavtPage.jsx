@@ -5,6 +5,7 @@ import {
   VStack,
   HStack,
   SimpleGrid,
+  Stack,
   Button,
   IconButton,
   Select,
@@ -59,6 +60,8 @@ import { DownloadIcon, ExternalLinkIcon, InfoOutlineIcon, ChevronDownIcon, Chevr
 import axios from 'axios'
 import JSZip from 'jszip'
 import PdfModal from '../components/PdfModal'
+import InfoTip from '../components/InfoTip'
+import { useIsMobile, useCanHover } from '../hooks/useIsMobile'
 import { InlineMath, BlockMath } from 'react-katex'
 import 'katex/dist/katex.min.css'
 
@@ -102,6 +105,15 @@ const DEFAULT_PNG_HEIGHT = 700
 const HEATMAP_CELL_SIZE = 70
 const HEATMAP_CELL_GAP = 4
 const HEATMAP_ROW_LABEL_WIDTH = 90
+// On-screen heatmap on phones (PNG exports keep the sizes above).
+const HEATMAP_CELL_SIZE_MOBILE = 48
+const HEATMAP_ROW_LABEL_WIDTH_MOBILE = 56
+// Pins the first column of a sideways-scrolling table; pair with an explicit bg.
+const STICKY_FIRST_COLUMN = { position: 'sticky', left: 0, zIndex: 1 }
+const truncateLabel = (label, maxLength) => {
+  const text = String(label ?? '')
+  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text
+}
 const HEATMAP_FALLBACK_WIDTH = 920
 const HEATMAP_FALLBACK_HEIGHT = 300
 const SVG_INLINE_STYLE_PROPS = [
@@ -392,6 +404,8 @@ function inlineSvgComputedStyles(sourceNode, cloneNode) {
 // ============================================================================
 function RunUpMavtPage({ studySessionId, onNavigate }) {
   const toast = useToast()
+  const isMobile = useIsMobile()
+  const tabListRef = useRef(null)
 
   // State for sessions
   const [sessions, setSessions] = useState([])
@@ -415,6 +429,14 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
   // Active tab
   const [activeStep, setActiveStep] = useState(0)
+
+  // The tab bar scrolls sideways on narrow screens: keep the active step visible.
+  useEffect(() => {
+    const list = tabListRef.current
+    const tab = list?.children?.[activeStep]
+    if (!list || !tab || list.scrollWidth <= list.clientWidth) return
+    list.scrollTo?.({ left: tab.offsetLeft - (list.clientWidth - tab.clientWidth) / 2, behavior: 'smooth' })
+  }, [activeStep])
 
   // Step parameters - MC iterations per step
   const [mcIterations, setMcIterations] = useState({
@@ -1354,14 +1376,15 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
           Advanced (NSMC)
         </Box>
         <VStack spacing={2} align="stretch" mt={3}>
-          <HStack justify="space-between" align="center">
+          <HStack justify="space-between" align="center" flexWrap="wrap">
             <HStack spacing={2} align="center">
               <Text fontWeight="bold">Opinion weights</Text>
-              <Tooltip label={OPINION_WEIGHT_TOOLTIP} hasArrow maxW="420px">
-                <Box as="span" display="inline-flex" alignItems="center" cursor="help">
-                  <InfoOutlineIcon color="gray.500" boxSize={3.5} />
-                </Box>
-              </Tooltip>
+              <InfoTip
+                label={OPINION_WEIGHT_TOOLTIP}
+                ariaLabel="About opinion weights"
+                icon={<InfoOutlineIcon boxSize={3.5} />}
+                maxW="420px"
+              />
             </HStack>
             <Button
               size="xs"
@@ -1441,30 +1464,24 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     showInfoAlert = true,
   } = {}) => (
     <VStack spacing={3} align="stretch">
-      <HStack justify="space-between" align="center">
+      <HStack justify="space-between" align="center" flexWrap="wrap">
         <HStack spacing={2} align="center">
           <Heading as="h2" size="sm">
             {heading}
           </Heading>
           {showInfoAlert && (
-            <Tooltip
+            <InfoTip
               label="Only completed and locked sessions can be selected. This ensures data integrity during analysis runs."
-              hasArrow
-            >
-              <Box as="span" display="inline-flex" alignItems="center" cursor="help">
-                <InfoOutlineIcon color="gray.500" boxSize={3.5} />
-              </Box>
-            </Tooltip>
+              ariaLabel="About session selection"
+              icon={<InfoOutlineIcon boxSize={3.5} />}
+            />
           )}
           {incompleteOrUnlockedSessionsExcluded && (
-            <Tooltip
+            <InfoTip
               label={`Using ${selectedSessions.length} out of ${completedAndLockedCount} available sessions - ${completedAndLockedCount - selectedSessions.length} completed and locked session(s) not selected.`}
-              hasArrow
-            >
-              <Box as="span" display="inline-flex" alignItems="center" cursor="help">
-                <WarningIcon color="orange.400" boxSize={3.5} />
-              </Box>
-            </Tooltip>
+              ariaLabel="Some available sessions are not selected"
+              icon={<WarningIcon color="orange.400" boxSize={3.5} />}
+            />
           )}
         </HStack>
         {showManageLink && (
@@ -1509,18 +1526,24 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
             }
 
             return (
-              <Tooltip key={session._id} label={tooltipLabel} isDisabled={canSelect}>
-                <HStack spacing={3}>
-                  <Checkbox
-                    isChecked={selectedSessions.includes(session._id)}
-                    onChange={() => handleSessionToggle(session._id)}
-                    isDisabled={!canSelect}
-                  >
-                    {getSessionLabel(session, `Session ${session._id}`)}{' '}
-                    <Text as="span" color="gray.500" ml={2}>{statusText}</Text>
-                  </Checkbox>
-                </HStack>
-              </Tooltip>
+              <Box key={session._id}>
+                <Tooltip label={tooltipLabel} isDisabled={canSelect || isMobile}>
+                  <HStack spacing={3} flexWrap="wrap">
+                    <Checkbox
+                      isChecked={selectedSessions.includes(session._id)}
+                      onChange={() => handleSessionToggle(session._id)}
+                      isDisabled={!canSelect}
+                    >
+                      {getSessionLabel(session, `Session ${session._id}`)}{' '}
+                      <Text as="span" color="gray.500" ml={2}>{statusText}</Text>
+                    </Checkbox>
+                  </HStack>
+                </Tooltip>
+                {/* Touch screens cannot hover, so say why the session is unavailable. */}
+                {isMobile && !canSelect && (
+                  <Text fontSize="xs" color="gray.500" pl={6}>{tooltipLabel}</Text>
+                )}
+              </Box>
             )
           })
         ) : (
@@ -1714,13 +1737,14 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
   const renderDistributionStatsTable = ({ stepPrefix, altIndex, distData, title, filenameBase, defaultOpen = false }) => {
     const statsKey = `${stepPrefix}_${altIndex}`
-    const isOpen = statsKey in showDistributionStats ? showDistributionStats[statsKey] : defaultOpen
+    // Wide 13-column table: start collapsed on phones even where desktop opens it.
+    const isOpen = statsKey in showDistributionStats ? showDistributionStats[statsKey] : (defaultOpen && !isMobile)
     const statsRows = buildDistributionStatsRows(distData?.expertSeries || [])
 
     return (
       <>
-        <HStack justify="space-between" align="center" mb={2} pr={12}>
-          <Text fontWeight="semibold" fontSize="sm">{`Distribution of Values for ${distData?.altName || 'Alternative'}`}</Text>
+        <HStack justify="space-between" align="center" mb={2} pr={12} flexWrap="wrap">
+          <Text fontWeight="semibold" fontSize="sm" minW={0}>{`Distribution of Values for ${distData?.altName || 'Alternative'}`}</Text>
           <Button
             size="sm"
             variant="link"
@@ -1755,16 +1779,16 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
               <Table size="sm" variant="simple">
                 <Thead>
                   <Tr>
-                    <Th>Expert</Th>
+                    <Th {...STICKY_FIRST_COLUMN} bg="app.surfaceStrong">Expert</Th>
                     {DISTRIBUTION_STAT_COLUMNS.map((column) => (
                       <Th key={column.key}>
                         <HStack spacing={1}>
                           <Text as="span">{column.label}</Text>
-                          <Tooltip label={DISTRIBUTION_STAT_TOOLTIPS[column.key] || column.label} hasArrow>
-                            <Box as="span" display="inline-flex" alignItems="center">
-                              <InfoOutlineIcon color="gray.500" boxSize={3} />
-                            </Box>
-                          </Tooltip>
+                          <InfoTip
+                            label={DISTRIBUTION_STAT_TOOLTIPS[column.key] || column.label}
+                            ariaLabel={`About ${column.label}`}
+                            icon={<InfoOutlineIcon boxSize={3} />}
+                          />
                         </HStack>
                       </Th>
                     ))}
@@ -1773,7 +1797,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                 <Tbody>
                   {statsRows.map((row) => (
                     <Tr key={row.expertName}>
-                      <Td>{row.expertName}</Td>
+                      <Td {...STICKY_FIRST_COLUMN} bg="white">{row.expertName}</Td>
                       {DISTRIBUTION_STAT_COLUMNS.map((column) => (
                         <Td key={`${row.expertName}-${column.key}`}>
                           {formatDistributionStatValue(row[column.key])}
@@ -2692,7 +2716,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   const step1ConsistencyComparisons = step1ConsistencyResult.comparisons
 
   return (
-    <Box bg="white" p={6} borderRadius="lg" boxShadow="sm">
+    <Box bg="white" p={{ base: 3, md: 6 }} borderRadius="lg" boxShadow="sm">
       <VStack spacing={6} align="stretch">
         {/* Header */}
         <HStack justify="space-between" align="center" flexWrap="wrap">
@@ -2721,6 +2745,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
           <Tabs index={activeStep} onChange={setActiveStep} variant="soft-rounded" colorScheme="blue">
             <TabList
+              ref={tabListRef}
               overflowX="auto"
               pb={2}
               position="sticky"
@@ -2730,29 +2755,29 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
               borderBottomWidth={1}
               borderColor="gray.100"
             >
-              <Tab>
-                Introduction
+              <Tab flexShrink={{ base: 0, lg: 1 }} whiteSpace={{ base: 'nowrap', lg: 'normal' }}>
+                {isMobile ? 'Intro' : 'Introduction'}
               </Tab>
-              <Tab isDisabled={isStepDisabled(1)}>
-                Step 1: Finalize Elicited data {weightsComputed && <Badge ml={2} colorScheme="green">Done</Badge>}
+              <Tab isDisabled={isStepDisabled(1)} flexShrink={{ base: 0, lg: 1 }} whiteSpace={{ base: 'nowrap', lg: 'normal' }}>
+                {isMobile ? 'Step 1' : 'Step 1: Finalize Elicited data'} {weightsComputed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
-              <Tab isDisabled={isStepDisabled(2)}>
-                Step 2: Choose Aggregation Method {getStepStatus(4)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+              <Tab isDisabled={isStepDisabled(2)} flexShrink={{ base: 0, lg: 1 }} whiteSpace={{ base: 'nowrap', lg: 'normal' }}>
+                {isMobile ? 'Step 2' : 'Step 2: Choose Aggregation Method'} {getStepStatus(4)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
-              <Tab isDisabled={isStepDisabled(3)}>
-                Step 3: Uncertainty Analysis {getStepStatus(5)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+              <Tab isDisabled={isStepDisabled(3)} flexShrink={{ base: 0, lg: 1 }} whiteSpace={{ base: 'nowrap', lg: 'normal' }}>
+                {isMobile ? 'Step 3' : 'Step 3: Uncertainty Analysis'} {getStepStatus(5)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
-              <Tab isDisabled={isStepDisabled(4)}>
-                Step 4: Consensus Analysis {getStepStatus(2)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+              <Tab isDisabled={isStepDisabled(4)} flexShrink={{ base: 0, lg: 1 }} whiteSpace={{ base: 'nowrap', lg: 'normal' }}>
+                {isMobile ? 'Step 4' : 'Step 4: Consensus Analysis'} {getStepStatus(2)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
-              <Tab isDisabled={isStepDisabled(5)}>
-                Step 5: Final Results {getStepStatus(6)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
+              <Tab isDisabled={isStepDisabled(5)} flexShrink={{ base: 0, lg: 1 }} whiteSpace={{ base: 'nowrap', lg: 'normal' }}>
+                {isMobile ? 'Step 5' : 'Step 5: Final Results'} {getStepStatus(6)?.completed && <Badge ml={2} colorScheme="green">Done</Badge>}
               </Tab>
             </TabList>
 
             <TabPanels>
               {/* Introduction */}
-              <TabPanel>
+              <TabPanel px={{ base: 0, md: 4 }}>
                 <VStack spacing={5} align="stretch">
                   <Text color="gray.700">
                     Uncertainty Propagated - Multi-Attribute Value Theory (UP-MAVT) is an extension of traditional MAVT, developed by Pagliuca et al. (2026 - publication forthcoming) to systematically incorporate uncertainty into the decision analysis process.
@@ -2865,7 +2890,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
 
                   <Box>
                     <Heading as="h3" size="sm" mb={2}>Quick reference</Heading>
-                    <TableContainer>
+                    <TableContainer whiteSpace="normal">
                       <Table size="sm" variant="simple">
                         <Thead>
                           <Tr>
@@ -2953,7 +2978,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
               </TabPanel>
 
               {/* Step 1: Compute Weights */}
-              <TabPanel>
+              <TabPanel px={{ base: 0, md: 4 }}>
                 <VStack spacing={6} align="stretch">
                   {renderSessionSelector()}
 
@@ -2994,7 +3019,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   consoleOutput={consoleOutput}
                   onToggleConsole={() => setShowConsole(!showConsole)}
                   controlMeta={weightsComputed ? (
-                    <HStack spacing={2}>
+                    <HStack spacing={2} flexWrap="wrap">
                       <Text fontSize="sm" color="gray.600">
                         Last computed: {formatTimestamp(weightsTimestamp) || '-'}
                       </Text>
@@ -3337,12 +3362,12 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   <VStack spacing={6} align="stretch">
                     {weightsComputed && (
                     <VStack spacing={3} align="stretch">
-                      <HStack spacing={3}>
+                      <Stack direction={{ base: 'column', md: 'row' }} spacing={{ base: 2, md: 3 }} align={{ base: 'stretch', md: 'center' }}>
                         <Text fontWeight="bold">View weight space for:</Text>
                         <Select
                           value={selectedWeightSession}
                           onChange={(e) => setSelectedWeightSession(e.target.value)}
-                          width="300px"
+                          width={{ base: '100%', md: '300px' }}
                         >
                           {selectedSessions.map((sid) => {
                             const s = sessions.find((ss) => ss._id === sid)
@@ -3353,7 +3378,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                             )
                           })}
                         </Select>
-                      </HStack>
+                      </Stack>
 
                       <WeightSpacePlot
                         data={weightSpaceData}
@@ -3407,7 +3432,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   type="number"
                                   dataKey="yPlot"
                                   name="Comparison"
-                                  width={240}
+                                  width={isMobile ? 96 : 240}
                                   tick={{ fontSize: 10 }}
                                   interval={0}
                                   domain={[
@@ -3415,7 +3440,10 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                     Math.max(0, step1ConsistencyComparisons.length - 1) + 0.5,
                                   ]}
                                   ticks={step1ConsistencyComparisons.map((_, idx) => idx)}
-                                  tickFormatter={(value) => step1ConsistencyComparisons[Math.round(value)] || ''}
+                                  tickFormatter={(value) => {
+                                    const label = step1ConsistencyComparisons[Math.round(value)] || ''
+                                    return isMobile ? truncateLabel(label, 16) : label
+                                  }}
                                 />
                                 <RechartsTooltip
                                   cursor={{ strokeDasharray: '3 3' }}
@@ -3439,10 +3467,11 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                     )
                                   }}
                                 />
-                                <RechartsLegend 
+                                <RechartsLegend
                                   verticalAlign="top"
-                                  height={30}
+                                  height={isMobile ? undefined : 30}
                                   iconSize={10}
+                                  wrapperStyle={isMobile ? { fontSize: 11 } : undefined}
                                 />
                                 <Scatter 
                                   name="Computed (w_adj / w_ref)" 
@@ -3621,7 +3650,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                               const isDown = row.effective !== null && row.declared !== null && row.effective < row.declared
                               return (
                                 <Tr key={row.key} bg={bold ? 'gray.50' : undefined}>
-                                  <Td>
+                                  <Td {...STICKY_FIRST_COLUMN} bg={bold ? 'gray.50' : 'white'} maxW={{ base: '130px', md: 'none' }}>
                                     <Text fontSize="sm" fontWeight={bold ? 'semibold' : 'normal'} noOfLines={1}>
                                       {row.scope}
                                     </Text>
@@ -3674,13 +3703,14 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   justify="space-between"
                                   align="center"
                                   spacing={3}
-                                  px={4}
+                                  flexWrap="wrap"
+                                  px={{ base: 3, md: 4 }}
                                   py={3}
                                   cursor="pointer"
                                   _hover={{ bg: 'gray.50' }}
                                   onClick={() => handleToggleConfidenceSection(sessionId, 'session')}
                                 >
-                                  <HStack spacing={2} align="center" minW={0}>
+                                  <HStack spacing={2} align="center" minW={0} flex="1 1 auto">
                                     <ChevronRightIcon
                                       boxSize={4}
                                       color="gray.400"
@@ -3696,7 +3726,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                       ) : null}
                                     </Text>
                                   </HStack>
-                                  <HStack spacing={2} flexShrink={0}>
+                                  <HStack spacing={2} flexShrink={0} flexWrap="wrap">
                                     {Boolean(savingPractitionerSettingsById[sessionId]) && <Spinner size="sm" />}
                                     {saveState === 'saving' && (
                                       <Text fontSize="xs" color="gray.500">Saving changes...</Text>
@@ -3718,12 +3748,12 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                 </HStack>
 
                                 <Collapse in={isOpen} animateOpacity>
-                                  <Box borderTopWidth={1} borderColor="gray.100" px={4} py={3}>
+                                  <Box borderTopWidth={1} borderColor="gray.100" px={{ base: 2, md: 4 }} py={3}>
                                     <TableContainer>
                                       <Table size="sm" variant="simple">
                                         <Thead>
                                           <Tr>
-                                            <Th>Scope</Th>
+                                            <Th {...STICKY_FIRST_COLUMN} bg="app.surfaceStrong">Scope</Th>
                                             <Th>Category</Th>
                                             <Th isNumeric>Declared</Th>
                                             <Th isNumeric>Adjustment</Th>
@@ -3754,7 +3784,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
               </TabPanel>
 
               {/* Step 2: Aggregation */}
-              <TabPanel>
+              <TabPanel px={{ base: 0, md: 4 }}>
                 <StepSection
                   title="Aggregation Analysis"
                   description={(
@@ -3776,7 +3806,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onToggleConsole={() => setShowConsole(!showConsole)}
                   statusInfo={
                     getStepStatus(4)?.completed ? (
-                      <HStack spacing={3}>
+                      <HStack spacing={3} flexWrap="wrap">
                         <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 2 completed</Badge>
                         <Text fontSize="sm" color="gray.500">{formatTimestamp(getStepStatus(4)?.timestamp)}</Text>
                       </HStack>
@@ -3785,7 +3815,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   parameters={
                     <VStack spacing={3} align="stretch">
                       {renderAggregationChecklist()}
-                      <HStack spacing={3}>
+                      <HStack spacing={3} flexWrap="wrap">
                         <Text fontWeight="bold">MC Iterations:</Text>
                         <NumberInput
                           value={mcIterations[4]}
@@ -3872,7 +3902,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
               </TabPanel>
 
               {/* Step 3: Uncertainty (SMC, strict) */}
-              <TabPanel>
+              <TabPanel px={{ base: 0, md: 4 }}>
                 <StepSection
                   title="Uncertainty Analysis"
                   description="By running the SMC with the preferred aggregation method, the practitioner can assess the overall uncertainty of the resulting distributions. This step can reveal insights that might otherwise be obscured by the final aggregated results."
@@ -3885,7 +3915,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onToggleConsole={() => setShowConsole(!showConsole)}
                   statusInfo={
                     getStepStatus(5)?.completed ? (
-                      <HStack spacing={3}>
+                      <HStack spacing={3} flexWrap="wrap">
                         <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 3 completed</Badge>
                         <Text fontSize="sm" color="gray.500">{formatTimestamp(getStepStatus(5)?.timestamp)}</Text>
                       </HStack>
@@ -3894,7 +3924,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   parameters={
                     <VStack spacing={3} align="stretch">
                       {renderChosenAggregationSummary()}
-                      <HStack spacing={3}>
+                      <HStack spacing={3} flexWrap="wrap">
                         <Text fontWeight="bold">MC Iterations:</Text>
                         <NumberInput
                           value={mcIterations[5]}
@@ -3979,7 +4009,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   <YAxis
                                     tickFormatter={(v) => `${(Number(v) * 100).toFixed(1)}%`}
                                     tick={{ fontSize: 11 }}
-                                    label={{ value: 'Probability', angle: -90, position: 'insideLeft' }}
+                                    width={isMobile ? 44 : 60}
+                                    label={isMobile ? undefined : { value: 'Probability', angle: -90, position: 'insideLeft' }}
                                   />
                                   <RechartsTooltip
                                     wrapperStyle={{ pointerEvents: 'auto' }}
@@ -3987,12 +4018,15 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                     formatter={(value, name) => [`${(Number(value) * 100).toFixed(2)}%`, String(name)]}
                                     labelFormatter={(v) => `Value ${Number(v).toFixed(3)}`}
                                   />
-                                  <RechartsLegend
-                                    verticalAlign="top"
-                                    height={22}
-                                    iconSize={8}
-                                    wrapperStyle={{ fontSize: 10 }}
-                                  />
+                                  {/* Phones rely on the shared legend above the grid of charts. */}
+                                  {!isMobile && (
+                                    <RechartsLegend
+                                      verticalAlign="top"
+                                      height={22}
+                                      iconSize={8}
+                                      wrapperStyle={{ fontSize: 10 }}
+                                    />
+                                  )}
                                   {distData.expertNames.map((expertName, idx) => (
                                     <Area
                                       key={`${expertName}-${idx}`}
@@ -4023,7 +4057,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
               </TabPanel>
 
               {/* Step 4: Consensus (SMC, strict) */}
-              <TabPanel>
+              <TabPanel px={{ base: 0, md: 4 }}>
                 <StepSection
                   title="Consensus Analysis"
                   description={(
@@ -4044,7 +4078,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onToggleConsole={() => setShowConsole(!showConsole)}
                   statusInfo={
                     getStepStatus(2)?.completed ? (
-                      <HStack spacing={3}>
+                      <HStack spacing={3} flexWrap="wrap">
                         <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 4 completed</Badge>
                         <Text fontSize="sm" color="gray.500">{formatTimestamp(getStepStatus(2)?.timestamp)}</Text>
                       </HStack>
@@ -4054,7 +4088,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={6}>
                       <VStack spacing={3} align="stretch">
                         {renderChosenAggregationSummary()}
-                        <HStack spacing={3}>
+                        <HStack spacing={3} flexWrap="wrap">
                           <Text fontWeight="bold">MC Iterations:</Text>
                           <NumberInput
                             value={mcIterations[2]}
@@ -4129,8 +4163,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   ])}
                                 />
                               </Tooltip>
-                              <HStack justify="space-between" align="center" mb={2} pr={12}>
-                                <HStack spacing={3}>
+                              <HStack justify="space-between" align="center" mb={2} pr={12} flexWrap="wrap">
+                                <HStack spacing={3} flexWrap="wrap">
                                   <Text fontWeight="semibold" fontSize="sm">{`Distribution of Values for ${altName}`}</Text>
                                   <Badge colorScheme="blue" variant="subtle">
                                     {`Consensus = ${Number(distData.consensus?.consensusPercent || 0).toFixed(2)}%`}
@@ -4152,7 +4186,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   <YAxis
                                     tickFormatter={(v) => `${(Number(v) * 100).toFixed(1)}%`}
                                     tick={{ fontSize: 11 }}
-                                    label={{ value: 'Probability', angle: -90, position: 'insideLeft' }}
+                                    width={isMobile ? 44 : 60}
+                                    label={isMobile ? undefined : { value: 'Probability', angle: -90, position: 'insideLeft' }}
                                   />
                                   <RechartsTooltip
                                     wrapperStyle={{ pointerEvents: 'auto' }}
@@ -4160,12 +4195,15 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                     formatter={(value, name) => [`${(Number(value) * 100).toFixed(2)}%`, String(name)]}
                                     labelFormatter={(v) => `Value ${Number(v).toFixed(3)}`}
                                   />
-                                  <RechartsLegend
-                                    verticalAlign="top"
-                                    height={22}
-                                    iconSize={8}
-                                    wrapperStyle={{ fontSize: 10 }}
-                                  />
+                                  {/* Phones rely on the shared legend above the grid of charts. */}
+                                  {!isMobile && (
+                                    <RechartsLegend
+                                      verticalAlign="top"
+                                      height={22}
+                                      iconSize={8}
+                                      wrapperStyle={{ fontSize: 10 }}
+                                    />
+                                  )}
                                   {distData.expertNames.map((expertName, idx) => (
                                     <Area
                                       key={`${expertName}-${idx}`}
@@ -4196,7 +4234,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
               </TabPanel>
 
               {/* Step 5: Results (NSMC, non-strict) */}
-              <TabPanel>
+              <TabPanel px={{ base: 0, md: 4 }}>
                 <StepSection
                   title="Results"
                   description="The final results are generated using NSMC with the practitioner's chosen aggregation method."
@@ -4209,7 +4247,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   onToggleConsole={() => setShowConsole(!showConsole)}
                   statusInfo={
                     getStepStatus(6)?.completed ? (
-                      <HStack spacing={3}>
+                      <HStack spacing={3} flexWrap="wrap">
                         <Badge colorScheme="green" fontSize="sm" px={2} py={1}>Step 5 completed</Badge>
                         <Text fontSize="sm" color="gray.500">{formatTimestamp(getStepStatus(6)?.timestamp)}</Text>
                       </HStack>
@@ -4218,7 +4256,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                   parameters={
                     <VStack spacing={3} align="stretch">
                       {renderChosenAggregationSummary()}
-                      <HStack spacing={3}>
+                      <HStack spacing={3} flexWrap="wrap">
                         <Text fontWeight="bold">MC Iterations:</Text>
                         <NumberInput
                           value={mcIterations[6]}
@@ -4338,7 +4376,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
               </VStack>
             </ModalBody>
             <ModalFooter>
-              <HStack spacing={3}>
+              <HStack spacing={3} flexWrap="wrap">
                 <Button variant="ghost" onClick={onExportResultsClose} isDisabled={exportingResults}>
                   Cancel
                 </Button>
@@ -4995,6 +5033,7 @@ function buildWeightSpacePlotSvg({
 }
 
 function RankingHeatmap({ title, results, onDownloadPng }) {
+  const isMobile = useIsMobile()
   const matrix = buildRankProbabilityMatrix(results)
 
   if (!matrix) {
@@ -5006,9 +5045,9 @@ function RankingHeatmap({ title, results, onDownloadPng }) {
   }
 
   const { alternatives, probabilities } = matrix
-  const cellSize = HEATMAP_CELL_SIZE
+  const cellSize = isMobile ? HEATMAP_CELL_SIZE_MOBILE : HEATMAP_CELL_SIZE
   const cellGap = HEATMAP_CELL_GAP
-  const rowLabelWidth = HEATMAP_ROW_LABEL_WIDTH
+  const rowLabelWidth = isMobile ? HEATMAP_ROW_LABEL_WIDTH_MOBILE : HEATMAP_ROW_LABEL_WIDTH
   const minGridWidth = rowLabelWidth + alternatives.length * (cellSize + cellGap)
 
   return (
@@ -5062,7 +5101,7 @@ function RankingHeatmap({ title, results, onDownloadPng }) {
                     alignItems="center"
                     justifyContent="center"
                   >
-                    <Text fontSize="xs" color={textColor} fontWeight="semibold">
+                    <Text fontSize={isMobile ? '2xs' : 'xs'} color={textColor} fontWeight="semibold">
                       {(probability * 100).toFixed(1)}%
                     </Text>
                   </Box>
@@ -5079,6 +5118,78 @@ function RankingHeatmap({ title, results, onDownloadPng }) {
 // ============================================================================
 // WEIGHT SPACE PLOT COMPONENT
 // ============================================================================
+const WEIGHT_SPACE_LABEL_WIDTH = { base: '80px', md: '180px' }
+
+/**
+ * One criterion row of the weight space plot: a label and a bar with one marker per solution.
+ * With a mouse each marker shows its value on hover; on touch screens the whole bar is a
+ * tap target that summarises the criterion's weights.
+ */
+function WeightSpaceRow({ criterion, weights, scaleMax }) {
+  const canHover = useCanHover()
+  const markers = weights.map((w, i) => {
+    const marker = (
+      <Box
+        key={i}
+        position="absolute"
+        left={`${(w / scaleMax) * 100}%`}
+        top="2px"
+        width="6px"
+        height="16px"
+        bg="blue.500"
+        borderRadius="sm"
+        opacity={0.7}
+      />
+    )
+    if (!canHover) return marker
+    return (
+      <Tooltip key={i} label={w.toFixed(3)} placement="top" openDelay={0} closeDelay={0} hasArrow>
+        {marker}
+      </Tooltip>
+    )
+  })
+
+  const summary = weights.length === 1
+    ? `${criterion}: ${weights[0].toFixed(3)}`
+    : `${criterion}: ${Math.min(...weights).toFixed(3)} – ${Math.max(...weights).toFixed(3)} across ${weights.length} solutions`
+
+  return (
+    <HStack spacing={3} align="center">
+      <Text
+        fontSize="xs"
+        fontWeight="medium"
+        width={WEIGHT_SPACE_LABEL_WIDTH}
+        textAlign="right"
+        flexShrink={0}
+        isTruncated
+        title={criterion}
+      >
+        {criterion}
+      </Text>
+      {canHover ? (
+        <Box flex={1} h="20px" position="relative" bg="gray.50" borderRadius="sm">
+          {markers}
+        </Box>
+      ) : (
+        <InfoTip label={summary}>
+          <Box
+            as="button"
+            type="button"
+            aria-label={`Weights for ${criterion}`}
+            flex={1}
+            h="20px"
+            position="relative"
+            bg="gray.50"
+            borderRadius="sm"
+          >
+            {markers}
+          </Box>
+        </InfoTip>
+      )}
+    </HStack>
+  )
+}
+
 function WeightSpacePlot({ data, orderedCriteria = [], isNonLinearModel = false, isHierarchicalStudy = false, solutionCount = 0, onDownloadPng }) {
   const reorderCriteria = (detectedCriteria) => {
     const canon = (value) => String(value || '').trim().toLowerCase()
@@ -5130,7 +5241,7 @@ function WeightSpacePlot({ data, orderedCriteria = [], isNonLinearModel = false,
     return (
       <VStack spacing={3} align="stretch">
         {header}
-        <Box bg="white" border="1px" borderColor="gray.200" borderRadius="md" p={4} position="relative">
+        <Box bg="white" border="1px" borderColor="gray.200" borderRadius="md" p={{ base: 3, md: 4 }} pt={{ base: 10, md: 4 }} position="relative">
           {onDownloadPng && (
             <Tooltip label="Download image as PNG" hasArrow>
               <IconButton
@@ -5147,49 +5258,11 @@ function WeightSpacePlot({ data, orderedCriteria = [], isNonLinearModel = false,
             </Tooltip>
           )}
           <VStack spacing={2} align="stretch">
-            {criteria.map((criterion) => {
-              const weights = data[criterion]
-              return (
-                <HStack key={criterion} spacing={3} align="center">
-                  <Text
-                    fontSize="xs"
-                    fontWeight="medium"
-                    width="180px"
-                    textAlign="right"
-                    flexShrink={0}
-                    isTruncated
-                    title={criterion}
-                  >
-                    {criterion}
-                  </Text>
-                  <Box flex={1} h="20px" position="relative" bg="gray.50" borderRadius="sm">
-                    {weights.map((w, i) => (
-                      <Tooltip
-                        key={i}
-                        label={w.toFixed(3)}
-                        placement="top"
-                        openDelay={0}
-                        closeDelay={0}
-                        hasArrow
-                      >
-                        <Box
-                          position="absolute"
-                          left={`${(w / (maxWeight * 1.1)) * 100}%`}
-                          top="2px"
-                          width="6px"
-                          height="16px"
-                          bg="blue.500"
-                          borderRadius="sm"
-                          opacity={0.7}
-                        />
-                      </Tooltip>
-                    ))}
-                  </Box>
-                </HStack>
-              )
-            })}
+            {criteria.map((criterion) => (
+              <WeightSpaceRow key={criterion} criterion={criterion} weights={data[criterion]} scaleMax={maxWeight * 1.1} />
+            ))}
             <HStack spacing={3} mt={2}>
-              <Box width="180px" />
+              <Box width={WEIGHT_SPACE_LABEL_WIDTH} flexShrink={0} />
               <HStack flex={1} justify="space-between">
                 <Text fontSize="xs" color="gray.400">0</Text>
                 <Text fontSize="xs" color="gray.400">{(maxWeight * 1.1).toFixed(2)}</Text>
@@ -5232,7 +5305,7 @@ function WeightSpacePlot({ data, orderedCriteria = [], isNonLinearModel = false,
   return (
     <VStack spacing={3} align="stretch">
       {header}
-      <Box bg="white" border="1px" borderColor="gray.200" borderRadius="md" p={4} position="relative">
+      <Box bg="white" border="1px" borderColor="gray.200" borderRadius="md" p={{ base: 3, md: 4 }} pt={{ base: 10, md: 4 }} position="relative">
         {onDownloadPng && (
           <Tooltip label="Download image as PNG" hasArrow>
             <IconButton
@@ -5249,49 +5322,11 @@ function WeightSpacePlot({ data, orderedCriteria = [], isNonLinearModel = false,
           </Tooltip>
         )}
         <VStack spacing={2} align="stretch">
-          {criteria.map((criterion) => {
-            const weights = criterionToValues[criterion]
-            return (
-              <HStack key={criterion} spacing={3} align="center">
-                <Text
-                  fontSize="xs"
-                  fontWeight="medium"
-                  width="180px"
-                  textAlign="right"
-                  flexShrink={0}
-                  isTruncated
-                  title={criterion}
-                >
-                  {criterion}
-                </Text>
-                <Box flex={1} h="20px" position="relative" bg="gray.50" borderRadius="sm">
-                  {weights.map((w, i) => (
-                    <Tooltip
-                      key={i}
-                      label={w.toFixed(3)}
-                      placement="top"
-                      openDelay={0}
-                      closeDelay={0}
-                      hasArrow
-                    >
-                      <Box
-                        position="absolute"
-                        left={`${(w / (maxWeight * 1.1)) * 100}%`}
-                        top="2px"
-                        width="6px"
-                        height="16px"
-                        bg="blue.500"
-                        borderRadius="sm"
-                        opacity={0.7}
-                      />
-                    </Tooltip>
-                  ))}
-                </Box>
-              </HStack>
-            )
-          })}
+          {criteria.map((criterion) => (
+            <WeightSpaceRow key={criterion} criterion={criterion} weights={criterionToValues[criterion]} scaleMax={maxWeight * 1.1} />
+          ))}
           <HStack spacing={3} mt={2}>
-            <Box width="180px" />
+            <Box width={WEIGHT_SPACE_LABEL_WIDTH} flexShrink={0} />
             <HStack flex={1} justify="space-between">
               <Text fontSize="xs" color="gray.400">0</Text>
               <Text fontSize="xs" color="gray.400">{(maxWeight * 1.1).toFixed(2)}</Text>
@@ -5365,7 +5400,7 @@ function StepSection({
       )}
 
       {/* Control Buttons */}
-      <HStack spacing={3}>
+      <HStack spacing={3} flexWrap="wrap">
         <Button
           colorScheme="blue"
           onClick={onRun}

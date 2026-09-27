@@ -8,6 +8,7 @@ import {
   FormLabel,
   Heading,
   HStack,
+  IconButton,
   Checkbox,
   Grid,
   Input,
@@ -29,16 +30,18 @@ import {
   TagLabel,
   TagRightIcon,
   Text,
-  Tooltip,
   VStack,
   useToast,
 } from '@chakra-ui/react'
-import { CheckCircleIcon, WarningIcon, CloseIcon, QuestionIcon, LockIcon, ArrowUpIcon, ArrowDownIcon } from '@chakra-ui/icons'
+import { CheckCircleIcon, WarningIcon, CloseIcon, LockIcon, ArrowUpIcon, ArrowDownIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { parseDistribution, computeDistributionBounds } from '../utils/distributionUtils'
 import { API_URL } from '../config'
 import QuestionPrompt from '../components/QuestionPrompt'
+import InfoTip from '../components/InfoTip'
+import SidebarLayout from '../components/SidebarLayout'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 const SHAPES = [
   { value: 'linear_increasing', label: 'Piecewise linear increasing', helper: 'Starts at 0 and rises to 1.' },
@@ -131,9 +134,7 @@ function ThresholdLabel({ label, thresholdKey, shape }) {
   return (
     <HStack spacing={1} mb={2}>
       <FormLabel fontSize="sm" m={0} fontWeight="medium">{label}</FormLabel>
-      <Tooltip label={getThresholdHelpText(thresholdKey, shape)} placement="top" hasArrow>
-        <QuestionIcon color="gray.500" boxSize={3} cursor="help" />
-      </Tooltip>
+      <InfoTip label={getThresholdHelpText(thresholdKey, shape)} ariaLabel={`About the ${label.toLowerCase()}`} />
     </HStack>
   )
 }
@@ -238,9 +239,12 @@ function ValueFunctionPlot({ range, points, thresholds, onDrag, draggable, shape
   const clipIdRef = useRef(`plot-clip-${Math.random().toString(36).substr(2, 9)}`)
   const dragOffsetRef = useRef({ x: 0, y: 0 })
   const [dragIndex, setDragIndex] = useState(null)
+  const isMobile = useIsMobile()
 
-  const width = 620
+  // Narrower drawing on phones so the chart keeps a usable height and readable labels.
+  const width = isMobile ? 360 : 620
   const height = 260
+  const labelFontSize = isMobile ? 13 : 11
 
   // Calculate confidence margin based on confidence level
   const getConfidenceMargin = (conf) => {
@@ -289,6 +293,8 @@ function ValueFunctionPlot({ range, points, thresholds, onDrag, draggable, shape
       y: pointerSvg.y - pointSvg.y,
     }
 
+    // Keep receiving moves for this finger/pointer even when it leaves the small handle.
+    event.currentTarget.setPointerCapture?.(event.pointerId)
     setDragIndex(idx)
     event.preventDefault()
   }
@@ -315,9 +321,11 @@ function ValueFunctionPlot({ range, points, thresholds, onDrag, draggable, shape
     if (!draggable) return
     window.addEventListener('pointermove', handlePointerMove)
     window.addEventListener('pointerup', handlePointerUp)
+    window.addEventListener('pointercancel', handlePointerUp)
     return () => {
       window.removeEventListener('pointermove', handlePointerMove)
       window.removeEventListener('pointerup', handlePointerUp)
+      window.removeEventListener('pointercancel', handlePointerUp)
     }
   })
 
@@ -346,10 +354,17 @@ function ValueFunctionPlot({ range, points, thresholds, onDrag, draggable, shape
   const bandPath = margin > 0 ? `${upperPath} ${lowerPath} Z` : ''
 
   const thresholdXs = [thresholds?.low, thresholds?.high].filter((v) => Number.isFinite(v))
+  const dragLabelWidth = isMobile ? 88 : 68
 
   return (
-    <Box border="1px solid" borderColor="gray.200" borderRadius="md" p={4} bg="gray.50">
-      <svg ref={svgRef} width="100%" height={height} viewBox={`0 0 ${width} ${height}`}>
+    <Box border="1px solid" borderColor="gray.200" borderRadius="md" p={{ base: 2, md: 4 }} bg="gray.50">
+      <svg
+        ref={svgRef}
+        width="100%"
+        height={isMobile ? undefined : height}
+        style={isMobile ? { display: 'block', height: 'auto' } : undefined}
+        viewBox={`0 0 ${width} ${height}`}
+      >
         <defs>
           <clipPath id={clipIdRef.current}>
             <rect x={20} y={20} width={width - 40} height={height - 40} />
@@ -379,18 +394,18 @@ function ValueFunctionPlot({ range, points, thresholds, onDrag, draggable, shape
             {draggable && dragIndex === idx && (
               <>
                 <rect
-                  x={toSvgX(p.x) - 34}
-                  y={Math.max(2, toSvgY(p.y) - 30)}
-                  width={68}
-                  height={18}
+                  x={clamp(toSvgX(p.x) - dragLabelWidth / 2, 0, width - dragLabelWidth)}
+                  y={Math.max(2, toSvgY(p.y) - (isMobile ? 34 : 30))}
+                  width={dragLabelWidth}
+                  height={isMobile ? 22 : 18}
                   rx={4}
                   fill="rgba(26, 32, 44, 0.85)"
                 />
                 <text
-                  x={toSvgX(p.x)}
-                  y={Math.max(14, toSvgY(p.y) - 17)}
+                  x={clamp(toSvgX(p.x), dragLabelWidth / 2, width - dragLabelWidth / 2)}
+                  y={Math.max(isMobile ? 17 : 14, toSvgY(p.y) - (isMobile ? 18 : 17))}
                   textAnchor="middle"
-                  fontSize="10"
+                  fontSize={isMobile ? 12 : 10}
                   fill="#F7FAFC"
                   fontWeight="600"
                 >
@@ -405,15 +420,104 @@ function ValueFunctionPlot({ range, points, thresholds, onDrag, draggable, shape
               fill={draggable ? '#3182CE' : '#4A5568'}
               stroke="#fff"
               strokeWidth="1.5"
-              style={{ cursor: draggable ? 'grab' : 'default' }}
+              pointerEvents="none"
+            />
+            {/* Invisible finger-sized grab area; touch-action keeps the page from scrolling instead. */}
+            <circle
+              cx={toSvgX(p.x)}
+              cy={toSvgY(p.y)}
+              r={draggable ? (isMobile ? 22 : 12) : 6}
+              fill="transparent"
+              style={{ cursor: draggable ? 'grab' : 'default', touchAction: draggable ? 'none' : 'auto' }}
               onPointerDown={handlePointerDown(idx)}
             />
           </g>
         ))}
-        <text x={width / 2} y={height - 2} textAnchor="middle" fontSize="11" fill="#718096">X ({range.min} – {range.max})</text>
-        <text x={8} y={14} textAnchor="start" fontSize="11" fill="#718096">Y (0 – 1) [{shape}]</text>
+        <text x={width / 2} y={height - 2} textAnchor="middle" fontSize={labelFontSize} fill="#718096">X ({range.min} – {range.max})</text>
+        <text x={8} y={14} textAnchor="start" fontSize={labelFontSize} fill="#718096">Y (0 – 1) [{shape}]</text>
       </svg>
-      <Text fontSize="xs" color="gray.500" mt={2}>Drag points when free edit is active for linear shapes. Thresholds show as dashed lines.</Text>
+      <Text fontSize="xs" color="gray.500" mt={2}>Drag points (or edit their values) when free edit is active for linear shapes. Thresholds show as dashed lines.</Text>
+    </Box>
+  )
+}
+
+/**
+ * Numeric alternative to dragging free-edit points (useful on touch screens).
+ * The first and last points are anchored to the range ends and stay read-only.
+ * Values are committed on blur, so typing is not clamped mid-way.
+ */
+function PointValuesEditor({ points, isDisabled, onChange, onRemove }) {
+  const isMobile = useIsMobile()
+  const [isOpen, setIsOpen] = useState(isMobile)
+  const format = (value) => Number(value.toFixed(3))
+
+  const commit = (idx, key, rawValue) => {
+    const num = parseFloat(rawValue)
+    const current = points[idx]
+    if (!Number.isFinite(num) || !current || num === format(current[key])) return
+    onChange(idx, { ...current, [key]: num })
+  }
+
+  return (
+    <Box>
+      <Button size="sm" variant="link" onClick={() => setIsOpen((open) => !open)}>
+        {isOpen ? 'Hide point values' : 'Edit point values'}
+      </Button>
+      {isOpen && (
+        <VStack align="stretch" spacing={2} mt={3}>
+          <HStack spacing={2} fontSize="xs" color="gray.600" fontWeight="semibold">
+            <Box w="64px" flexShrink={0}>Point</Box>
+            <Box flex={1}>X</Box>
+            <Box flex={1}>Y (0 – 1)</Box>
+            <Box w="32px" flexShrink={0} />
+          </HStack>
+          {points.map((point, idx) => {
+            const isAnchor = idx === 0 || idx === points.length - 1
+            const isLocked = isDisabled || isAnchor
+            return (
+              <HStack key={idx} spacing={2}>
+                <Text w="64px" flexShrink={0} fontSize="sm" color="gray.700">
+                  {idx + 1}{isAnchor ? ' (end)' : ''}
+                </Text>
+                <Input
+                  key={`x-${idx}-${point.x}`}
+                  type="number"
+                  inputMode="decimal"
+                  size="sm"
+                  flex={1}
+                  minW={0}
+                  aria-label={`Point ${idx + 1} X`}
+                  defaultValue={format(point.x)}
+                  isDisabled={isLocked}
+                  onBlur={(e) => commit(idx, 'x', e.target.value)}
+                />
+                <Input
+                  key={`y-${idx}-${point.y}`}
+                  type="number"
+                  inputMode="decimal"
+                  step="0.01"
+                  size="sm"
+                  flex={1}
+                  minW={0}
+                  aria-label={`Point ${idx + 1} Y`}
+                  defaultValue={format(point.y)}
+                  isDisabled={isLocked}
+                  onBlur={(e) => commit(idx, 'y', e.target.value)}
+                />
+                <IconButton
+                  aria-label={`Remove point ${idx + 1}`}
+                  icon={<CloseIcon boxSize={2} />}
+                  size="sm"
+                  variant="ghost"
+                  flexShrink={0}
+                  isDisabled={isLocked || points.length <= 2}
+                  onClick={() => onRemove(idx)}
+                />
+              </HStack>
+            )
+          })}
+        </VStack>
+      )}
     </Box>
   )
 }
@@ -1137,18 +1241,8 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
     )
   }
 
-  return (
-    <HStack align="stretch" spacing={0} h="100vh" overflow="hidden">
-      {/* Left Sidebar */}
-      <Box
-        w="320px"
-        bg="gray.100"
-        p={4}
-        borderRight="1px"
-        borderColor="gray.300"
-        maxH="100vh"
-        overflowY="auto"
-      >
+  const sidebar = (
+    <>
         <VStack spacing={4} align="stretch" mb={6}>
           <Heading size="md">Quantitative Indicators</Heading>
           <Text fontSize="sm" color="gray.600">
@@ -1205,16 +1299,16 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
             )
           })}
         </VStack>
-      </Box>
+    </>
+  )
 
-      {/* Main Content */}
-      <Box
-        flex={1}
-        bg="white"
-        p={4}
-        maxH="100vh"
-        overflowY="auto"
-      >
+  return (
+    <SidebarLayout
+      title="Quantitative Indicators"
+      sidebar={sidebar}
+      activeKey={active}
+      activeLabel={active ? `${activeCriterionIndex + 1}. ${active}` : ''}
+    >
         {isSessionLocked && (
           <Box bg="yellow.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="yellow.400" mb={4}>
             <HStack spacing={2} align="flex-start">
@@ -1226,7 +1320,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                     : 'Quantitative Indicators are locked by the practitioner.'}
                 </Text>
                 {isBwtLockActive ? (
-                  <Button size="xs" variant="outline" onClick={() => onPageChange?.('pile')}>
+                  <Button size="xs" variant="outline" whiteSpace="normal" h="auto" py={1} textAlign="left" onClick={() => onPageChange?.('pile')}>
                     Go to Weight Elicitation to unlock
                   </Button>
                 ) : (
@@ -1246,7 +1340,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                   const unit = activeCriterion?.unit ? ` [${activeCriterion.unit}]` : ''
                   return (
                     <>
-                      <Heading size="md">{active}{unit}</Heading>
+                      <Heading size="md" overflowWrap="anywhere">{active}{unit}</Heading>
                       {activeCriterion?.description && (
                         <Text fontSize="sm" color="gray.700">{activeCriterion.description}</Text>
                       )}
@@ -1286,7 +1380,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                             </RadioGroup>
                           </VStack>
                         </QuestionPrompt>
-                        <HStack>
+                        <HStack flexWrap="wrap">
                           <Button
                             colorScheme="blue"
                             onClick={handleMidNext}
@@ -1307,7 +1401,8 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                           <Box>
                             <HStack spacing={1} mb={2}>
                               <FormLabel fontSize="sm" m={0} fontWeight="medium">Confidence</FormLabel>
-                              <Tooltip
+                              <InfoTip
+                                ariaLabel="About confidence levels"
                                 label={
                                   <Box>
                                     <Text fontWeight="bold" mb={1}>Confidence Levels:</Text>
@@ -1318,11 +1413,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                                     <Text>4 - Fully confident (no uncertainty)</Text>
                                   </Box>
                                 }
-                                placement="top"
-                                hasArrow
-                              >
-                                <QuestionIcon color="gray.500" boxSize={3} cursor="help" />
-                              </Tooltip>
+                              />
                             </HStack>
                             <Select
                               value={activeData.confidence ?? 4}
@@ -1367,7 +1458,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                         {(clampHint?.field === 'low' || clampHint?.field === 'high') && clampHintText && (
                           <Text fontSize="xs" color="orange.600">{clampHintText}</Text>
                         )}
-                        <HStack>
+                        <HStack flexWrap="wrap">
                           <Button variant="outline" onClick={() => setCurrentMidStep(0)}>Back</Button>
                           <Button
                             colorScheme="blue"
@@ -1406,7 +1497,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                         {clampHint?.field === 'step1' && clampHintText && (
                           <Text fontSize="xs" color="orange.600">{clampHintText}</Text>
                         )}
-                        <HStack>
+                        <HStack flexWrap="wrap">
                           <Button variant="outline" onClick={handleSkipCurrentStep}>Skip</Button>
                           <Button variant="outline" onClick={() => setCurrentMidStep(1)} isDisabled={hasClampWarning}>Back</Button>
                           <Button
@@ -1453,7 +1544,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                         {clampHint?.field === 'step2' && clampHintText && (
                           <Text fontSize="xs" color="orange.600">{clampHintText}</Text>
                         )}
-                        <HStack>
+                        <HStack flexWrap="wrap">
                           <Button variant="outline" onClick={handleSkipCurrentStep} isDisabled={hasClampWarning}>Skip</Button>
                           <Button variant="outline" onClick={() => setCurrentMidStep(2)} isDisabled={hasClampWarning}>Back</Button>
                           <Button
@@ -1500,7 +1591,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                         {clampHint?.field === 'step3' && clampHintText && (
                           <Text fontSize="xs" color="orange.600">{clampHintText}</Text>
                         )}
-                        <HStack>
+                        <HStack flexWrap="wrap">
                           <Button variant="outline" onClick={handleSkipCurrentStep} isDisabled={hasClampWarning}>Skip</Button>
                           <Button variant="outline" onClick={() => setCurrentMidStep(3)} isDisabled={hasClampWarning}>Back</Button>
                           <Button
@@ -1521,7 +1612,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                             Great, you finished this elicitation step for <strong>{active}</strong>. You can go back to modify values or continue to the next criterion.
                           </Text>
                         </QuestionPrompt>
-                        <HStack>
+                        <HStack flexWrap="wrap">
                           <Button variant="outline" onClick={() => setCurrentMidStep(4)}>Back</Button>
                           <Button
                             colorScheme="blue"
@@ -1543,7 +1634,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                     <QuestionPrompt mb={0}>
                       Does the value function for <strong>{active}</strong> increase or decrease as we move from {activeData.range.min} to {activeData.range.max}?
                     </QuestionPrompt>
-                    <HStack spacing={2}>
+                    <HStack spacing={2} flexWrap="wrap">
                       <Button
                         size="sm"
                         variant={activeData.shape === 'linear_increasing' ? 'solid' : 'outline'}
@@ -1586,7 +1677,7 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                   </VStack>
 
                   <QuestionPrompt mb={2}>
-                    Add points and drag them directly on the graph to shape the value function.
+                    Add points and drag them directly on the graph (or edit their values below) to shape the value function.
                   </QuestionPrompt>
                   
                   <HStack spacing={4} wrap="wrap" align="center">
@@ -1633,6 +1724,13 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
                     </FormControl>
                   </HStack>
 
+                  <PointValuesEditor
+                    points={activeData.points}
+                    isDisabled={isSessionLocked || !(activeData.shape === 'linear_increasing' || activeData.shape === 'linear_decreasing')}
+                    onChange={handleDragPoint}
+                    onRemove={handleRemovePoint}
+                  />
+
                   <HStack justify="flex-end" spacing={2}>
                     <Button
                       size="sm"
@@ -1665,15 +1763,14 @@ function ValueFunctionsPage({ sessionId, onPageChange }) {
               />
             </VStack>
           ) : (
-            <VStack spacing={4} align="center" justify="center" minH="60vh">
+            <VStack spacing={4} align="center" justify="center" minH={{ base: 40, lg: '60vh' }}>
               <Heading size="lg">Select a Criterion to Begin</Heading>
-              <Text color="gray.600" fontSize="lg">
-                Click on a criterion in the sidebar to define its value function
+              <Text color="gray.600" fontSize="lg" textAlign="center">
+                Choose a criterion from the list to define its value function
               </Text>
             </VStack>
           )}
-      </Box>
-    </HStack>
+    </SidebarLayout>
   )
 }
 

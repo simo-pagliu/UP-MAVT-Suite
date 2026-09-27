@@ -26,6 +26,7 @@ import {
   Th,
   Thead,
   Spinner,
+  Stack,
   Textarea,
   Tr,
   Text,
@@ -39,6 +40,9 @@ import axios from 'axios'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { API_URL } from '../config'
 import { normalizePractitionerSettings } from '../utils/practitionerSettings'
+
+// Pins the first column of a sideways-scrolling table; pair with an explicit bg.
+const STICKY_FIRST_COLUMN = { position: 'sticky', left: 0, zIndex: 1, borderRightWidth: '1px' }
 
 const getCriteriaSignature = (criteriaList) => {
   const normalized = (criteriaList || []).map((crit) => ({
@@ -727,19 +731,19 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
 
   // If study session accessed, show manage view
   return (
-    <Box bg="white" p={6} borderRadius="lg" boxShadow="sm">
+    <Box bg="white" p={{ base: 3, md: 6 }} borderRadius="lg" boxShadow="sm">
       <VStack spacing={6} align="stretch">
-        <HStack justify="space-between" align="center">
-          <VStack align="start" spacing={1}>
+        <Stack direction={{ base: 'column', md: 'row' }} justify="space-between" align={{ base: 'stretch', md: 'center' }} spacing={3}>
+          <VStack align="start" spacing={1} minW={0}>
             <Heading as="h1" size="lg">Case Study</Heading>
-            <HStack spacing={3}>
-              <HStack spacing={1}>
-                <Text fontSize="sm" color="gray.600">Study code: {studySessionId || '—'}</Text>
+            <HStack spacing={3} flexWrap="wrap">
+              <HStack spacing={1} minW={0}>
+                <Text fontSize="sm" color="gray.600" overflowWrap="anywhere">Study code: {studySessionId || '—'}</Text>
                 <Tooltip label={studySessionId ? 'Copy study code' : 'No study code'} hasArrow>
                   <IconButton
                     aria-label="Copy study link"
                     icon={<CopyIcon />}
-                    size="xs"
+                    size={{ base: 'sm', md: 'xs' }}
                     variant="ghost"
                     onClick={handleCopyStudyLink}
                     isDisabled={!studySessionId}
@@ -751,7 +755,7 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
               </Button>
             </HStack>
           </VStack>
-          <HStack>
+          <HStack flexWrap="wrap">
             <Button
               variant="outline"
               size="sm"
@@ -764,7 +768,7 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
               Refresh
             </Button>
           </HStack>
-        </HStack>
+        </Stack>
 
         <Box borderWidth={1} borderRadius="md" p={4} bg="gray.50">
           <VStack spacing={3} align="stretch">
@@ -790,7 +794,7 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
           <Table variant="simple" size="sm">
             <Thead>
               <Tr>
-                <Th>Session ID</Th>
+                <Th {...STICKY_FIRST_COLUMN} bg="app.surfaceStrong">Session ID</Th>
                 <Th>Friendly Name</Th>
                 <Th>Notes</Th>
                 <Th>Progress</Th>
@@ -808,14 +812,15 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
               const notesValue = practitionerSettings.notes
               return (
               <Tr key={session._id}>
-                <Td>
-                  <HStack spacing={1}>
-                    <Text>{session._id || 'N/A'}</Text>
+                <Td {...STICKY_FIRST_COLUMN} bg="white">
+                  <Stack direction={{ base: 'column', md: 'row' }} spacing={1} align={{ base: 'flex-start', md: 'center' }}>
+                    <Text maxW={{ base: '88px', md: 'none' }} isTruncated title={session._id}>{session._id || 'N/A'}</Text>
+                    <HStack spacing={1}>
                       <Tooltip label={session._id ? 'Copy session link' : 'No session ID'} hasArrow>
                         <IconButton
                           aria-label="Copy session link"
                           icon={<CopyIcon />}
-                          size="xs"
+                          size={{ base: 'sm', md: 'xs' }}
                           variant="ghost"
                           onClick={() => handleCopySessionLink(session._id)}
                           isDisabled={!session._id}
@@ -825,15 +830,16 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
                         <IconButton
                           aria-label="Open elicitation view"
                           icon={<ExternalLinkIcon />}
-                          size="xs"
+                          size={{ base: 'sm', md: 'xs' }}
                           variant="ghost"
                           onClick={() => handleOpenSessionLink(session._id)}
                           isDisabled={!session._id}
                         />
                       </Tooltip>
                     </HStack>
-                  </Td>
-                  <Td>
+                  </Stack>
+                </Td>
+                  <Td minW="160px">
                     <HStack spacing={2}>
                       <Input
                         size="sm"

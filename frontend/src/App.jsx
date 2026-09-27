@@ -333,20 +333,20 @@ function App() {
   const renderStakeholderPage = (pageNode) => {
     if (!isLoggedIn) return <Navigate to="/login" replace />
     if (currentRole !== 'stakeholder') return <Navigate to={routeForRole(currentRole)} replace />
-    return <Box py={8} px={{ base: 4, md: 8 }}>{pageNode}</Box>
+    return <Box py={{ base: 4, md: 8 }} px={{ base: 4, md: 8 }}>{pageNode}</Box>
   }
 
   const renderPractitionerPage = (pageNode) => {
     if (!isLoggedIn) return <Navigate to="/login" replace />
     if (currentRole !== 'practitioner') return <Navigate to={routeForRole(currentRole)} replace />
-    return <Box py={8} px={{ base: 4, md: 8 }}>{pageNode}</Box>
+    return <Box py={{ base: 4, md: 8 }} px={{ base: 4, md: 8 }}>{pageNode}</Box>
   }
 
   const renderAdminPage = () => {
     if (!isLoggedIn) return <Navigate to="/login" replace />
     if (currentRole !== 'admin') return <Navigate to={routeForRole(currentRole)} replace />
     return (
-      <Box py={8} px={{ base: 4, md: 8 }}>
+      <Box py={{ base: 4, md: 8 }} px={{ base: 4, md: 8 }}>
         <AdminPage />
       </Box>
     )
@@ -355,7 +355,7 @@ function App() {
   const renderDocumentationPage = () => {
     if (currentRole === 'admin') return <Navigate to="/admin" replace />
     return (
-      <Box py={8} px={{ base: 4, md: 8 }}>
+      <Box py={{ base: 4, md: 8 }} px={{ base: 4, md: 8 }}>
         <DocumentationPage />
       </Box>
     )

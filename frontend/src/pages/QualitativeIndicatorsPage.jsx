@@ -22,16 +22,19 @@ import {
   Select,
   Radio,
   RadioGroup,
-  Tooltip,
+  Stack,
   Flex,
   FormControl,
   FormLabel,
 } from '@chakra-ui/react'
-import { ArrowBackIcon, ArrowForwardIcon, ArrowUpIcon, ArrowDownIcon, CheckCircleIcon, QuestionIcon, LockIcon, AddIcon } from '@chakra-ui/icons'
+import { ArrowBackIcon, ArrowForwardIcon, ArrowUpIcon, ArrowDownIcon, CheckCircleIcon, LockIcon, AddIcon } from '@chakra-ui/icons'
 import axios from 'axios'
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { API_URL } from '../config'
 import QuestionPrompt from '../components/QuestionPrompt'
+import InfoTip from '../components/InfoTip'
+import SidebarLayout from '../components/SidebarLayout'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 const clamp = (v, min, max) => {
   const num = Number.isFinite(v) ? v : min
@@ -40,13 +43,26 @@ const clamp = (v, min, max) => {
 
 const sortByRank = (pts) => [...pts].sort((a, b) => Number(a.rank) - Number(b.rank))
 
-// Tierlist component for Phase 1 (ranking alternatives)
-function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, onRankingChange }) {
+// Geometry of the "+" new-tier targets: desktop keeps the original compact look,
+// touch layouts get ~40px targets and wider gaps between tiers to hold them.
+const NEW_TIER_ZONE_SIZE = { base: '40px', lg: '24px' }
+const NEW_TIER_COLUMN_WIDTH = { base: '44px', lg: '40px' }
+const NEW_TIER_ZONE_INSET = { base: '2px', lg: '8px' }
+const NEW_TIER_GAP = { base: 10, lg: 6 }
+const NEW_TIER_BETWEEN_OFFSET = { base: '-40px', lg: '-24px' }
+const NEW_TIER_EDGE_ROW_HEIGHT = { base: '40px', lg: '20px' }
+const NEW_TIER_EDGE_ROW_PULL = { base: -7, lg: -4 }
+
+// Tierlist component for Phase 1 (ranking alternatives).
+// Items can be moved by mouse drag-and-drop or, on touch screens and keyboards,
+// by tapping an item to pick it up and then tapping a tier or a "+" zone.
+export function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, onRankingChange }) {
   const [tiers, setTiers] = useState([])
   const [draggedItem, setDraggedItem] = useState(null)
   const [dragSource, setDragSource] = useState(null)
-  const [isDragging, setIsDragging] = useState(false)
+  const [moveMode, setMoveMode] = useState(null) // 'drag' | 'tap' | null
   const [hoverZone, setHoverZone] = useState(null) // 'top', 'bottom', or tier index
+  const isDragging = moveMode !== null
 
   useEffect(() => {
     // Initialize with previous ranking if available, otherwise each alternative in its own tier
@@ -83,15 +99,44 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
     }
   }, [tiers, onRankingChange])
 
-  const handleDragStart = (tierIdx, itemIdx) => {
-    setDraggedItem(alternatives[alternatives.findIndex(a => a === tiers[tierIdx][itemIdx].name)])
-    setDragSource({ tierIdx, itemIdx })
-    setIsDragging(true)
+  // Escape cancels a tap-to-place move
+  useEffect(() => {
+    if (moveMode !== 'tap') return undefined
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') clearMove()
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [moveMode])
+
+  const clearMove = () => {
+    setDraggedItem(null)
+    setDragSource(null)
+    setMoveMode(null)
+    setHoverZone(null)
   }
 
+  const pickUp = (tierIdx, itemIdx, mode) => {
+    setDraggedItem(alternatives[alternatives.findIndex(a => a === tiers[tierIdx][itemIdx].name)])
+    setDragSource({ tierIdx, itemIdx })
+    setMoveMode(mode)
+  }
+
+  const handleDragStart = (tierIdx, itemIdx) => {
+    pickUp(tierIdx, itemIdx, 'drag')
+  }
+
+  // Fires after drop, so it only matters when the item was released outside a target.
   const handleDragEnd = () => {
-    setIsDragging(false)
-    setHoverZone(null)
+    clearMove()
+  }
+
+  const handleItemTap = (tierIdx, itemIdx) => {
+    if (dragSource && dragSource.tierIdx === tierIdx && dragSource.itemIdx === itemIdx) {
+      clearMove()
+      return
+    }
+    pickUp(tierIdx, itemIdx, 'tap')
   }
 
   const handleDragOver = (e) => {
@@ -103,22 +148,22 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
 
     setTiers((prev) => {
       const newTiers = prev.map(t => [...t])
-      
+
       // Check if source tier will become empty
       const sourceTierWillBeEmpty = newTiers[dragSource.tierIdx].length === 1
-      
+
       // Remove from source
       newTiers[dragSource.tierIdx].splice(dragSource.itemIdx, 1)
-      
+
       // Remove empty tiers
       const filteredTiers = newTiers.filter(t => t.length > 0)
-      
+
       // Adjust destination index if source tier was removed and was before destination
       let adjustedTierIdx = tierIdx
       if (sourceTierWillBeEmpty && dragSource.tierIdx < tierIdx) {
         adjustedTierIdx = tierIdx - 1
       }
-      
+
       // Add to destination
       while (filteredTiers.length <= adjustedTierIdx) {
         filteredTiers.push([])
@@ -127,9 +172,7 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
       return filteredTiers
     })
 
-    setDraggedItem(null)
-    setDragSource(null)
-    setHoverZone(null)
+    clearMove()
   }
 
   const handleDropNewTop = () => {
@@ -144,14 +187,12 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
       // Insert new tier at the beginning
       filteredTiers.unshift([{ name: draggedItem, rank: 0 }])
       // Re-index all tiers
-      return filteredTiers.map((tier, idx) => 
+      return filteredTiers.map((tier, idx) =>
         tier.map(item => ({ ...item, rank: idx }))
       )
     })
 
-    setDraggedItem(null)
-    setDragSource(null)
-    setHoverZone(null)
+    clearMove()
   }
 
   const handleDropNewBottom = () => {
@@ -169,9 +210,7 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
       return filteredTiers
     })
 
-    setDraggedItem(null)
-    setDragSource(null)
-    setHoverZone(null)
+    clearMove()
   }
 
   const handleDropBetween = (afterTierIdx) => {
@@ -179,7 +218,7 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
 
     setTiers((prev) => {
       const newTiers = prev.map(t => [...t])
-      
+
       // Remove from source
       const sourceTierIdx = dragSource.tierIdx
       const sourceTierSize = newTiers[sourceTierIdx].length
@@ -191,7 +230,7 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
       if (sourceTierSize === 1 && (afterTierIdx === sourceTierIdx - 1 || afterTierIdx === sourceTierIdx)) {
         return prev
       }
-      
+
       const filteredTiers = newTiers.filter((tier) => tier.length > 0)
 
       // Insert after the target tier in original coordinates.
@@ -204,19 +243,17 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
       }
 
       insertIdx = clamp(insertIdx, 0, filteredTiers.length)
-      
+
       // Insert new tier at the calculated position
       filteredTiers.splice(insertIdx, 0, [{ name: draggedItem, rank: insertIdx }])
-      
+
       // Re-index all tiers
-      return filteredTiers.map((tier, idx) => 
+      return filteredTiers.map((tier, idx) =>
         tier.map(item => ({ ...item, rank: idx }))
       )
     })
 
-    setDraggedItem(null)
-    setDragSource(null)
-    setHoverZone(null)
+    clearMove()
   }
 
   const handleNextPhase = () => {
@@ -229,142 +266,176 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
     onComplete(ranking)
   }
 
+  // "+" target that creates a new tier. Bigger on touch layouts.
+  const renderNewTierZone = (zone, onPlace, label) => {
+    const isHovered = hoverZone === zone
+    return (
+      <Box
+        as="button"
+        type="button"
+        aria-label={label}
+        tabIndex={isDragging ? 0 : -1}
+        boxSize={NEW_TIER_ZONE_SIZE}
+        flexShrink={0}
+        borderRadius="full"
+        border="2px solid"
+        borderColor={isDragging ? (isHovered ? "blue.500" : "blue.300") : "blue.200"}
+        bg={isDragging ? (isHovered ? "blue.200" : "blue.50") : "white"}
+        display="flex"
+        alignItems="center"
+        justifyContent="center"
+        opacity={isDragging ? 1 : 0.4}
+        transition="all 0.2s"
+        transform={isHovered ? "scale(1.1)" : "scale(1)"}
+        cursor={isDragging ? "copy" : "default"}
+        onDragOver={handleDragOver}
+        onDrop={onPlace}
+        onClick={() => {
+          if (moveMode === 'tap') onPlace()
+        }}
+        onMouseEnter={() => setHoverZone(zone)}
+        onMouseLeave={() => setHoverZone(null)}
+      >
+        <AddIcon boxSize="10px" color="blue.500" />
+      </Box>
+    )
+  }
+
   return (
     <VStack spacing={6} align="stretch">
       <Box>
         <Heading size="md" mb={3}>Step 1: Rank the Alternatives</Heading>
-        <QuestionPrompt mb={0}>Drag alternatives to organize them by preference. Alternatives in the same tier have equal rank. Drop on + to add a new tier.</QuestionPrompt>
+        <QuestionPrompt mb={0}>
+          Organize the alternatives by preference: drag them, or tap one and then tap where it should go.
+          Alternatives in the same tier have equal rank. Use + to add a new tier.
+        </QuestionPrompt>
       </Box>
 
-      <VStack spacing={6} align="stretch">
+      {moveMode === 'tap' && (
+        <HStack
+          position="sticky"
+          top={{ base: '48px', lg: 0 }}
+          zIndex={1}
+          bg="blue.50"
+          borderWidth="1px"
+          borderColor="blue.200"
+          borderRadius="md"
+          px={3}
+          py={2}
+          spacing={3}
+          justify="space-between"
+          role="status"
+        >
+          <Text fontSize="sm">
+            Moving <strong>{draggedItem}</strong>: tap a tier to give it the same rank, or tap + to create a new rank.
+          </Text>
+          <Button size="xs" variant="outline" flexShrink={0} onClick={clearMove}>Cancel</Button>
+        </HStack>
+      )}
+
+      <VStack spacing={NEW_TIER_GAP} align="stretch">
         {/* Top + button */}
-        <Box h="20px" display="flex" alignItems="center" pl="8px" mb={-4}>
-          <Box
-            w="24px"
-            h="24px"
-            borderRadius="full"
-            border="2px solid"
-            borderColor={isDragging ? (hoverZone === 'top' ? "blue.500" : "blue.300") : "blue.200"}
-            bg={isDragging ? (hoverZone === 'top' ? "blue.200" : "blue.50") : "white"}
-            display="flex"
-            alignItems="center"
-            justifyContent="center"
-            opacity={isDragging ? 1 : 0.4}
-            transition="all 0.2s"
-            transform={hoverZone === 'top' ? "scale(1.1)" : "scale(1)"}
-            cursor={isDragging ? "copy" : "default"}
-            onDragOver={handleDragOver}
-            onDrop={handleDropNewTop}
-            onMouseEnter={() => setHoverZone('top')}
-            onMouseLeave={() => setHoverZone(null)}
-          >
-            <AddIcon boxSize="10px" color="blue.500" />
-          </Box>
+        <Box h={NEW_TIER_EDGE_ROW_HEIGHT} display="flex" alignItems="center" pl={NEW_TIER_ZONE_INSET} mb={NEW_TIER_EDGE_ROW_PULL}>
+          {renderNewTierZone('top', handleDropNewTop, 'Create a new top rank here')}
         </Box>
 
         {tiers.map((tier, tierIdx) => (
           <Box key={tierIdx}>
             <HStack spacing={2} align="stretch">
               {/* Left spacing column with circle between tiers */}
-              <Box w="40px" position="relative" display="flex" alignItems="center" justifyContent="center" flexShrink={0}>
+              <Box w={NEW_TIER_COLUMN_WIDTH} position="relative" display="flex" alignItems="center" justifyContent="center" flexShrink={0}>
                 {tierIdx < tiers.length - 1 && (
-                  <Box
-                    position="absolute"
-                    bottom="-24px"
-                    left="8px"
-                    w="24px"
-                    h="24px"
-                    borderRadius="full"
-                    border="2px solid"
-                    borderColor={isDragging ? (hoverZone === tierIdx ? "blue.500" : "blue.300") : "blue.200"}
-                    bg={isDragging ? (hoverZone === tierIdx ? "blue.200" : "blue.50") : "white"}
-                    display="flex"
-                    alignItems="center"
-                    justifyContent="center"
-                    opacity={isDragging ? 1 : 0.4}
-                    transition="all 0.2s"
-                    transform={hoverZone === tierIdx ? "scale(1.1)" : "scale(1)"}
-                    cursor={isDragging ? "copy" : "default"}
-                    onDragOver={handleDragOver}
-                    onDrop={() => handleDropBetween(tierIdx)}
-                    onMouseEnter={() => setHoverZone(tierIdx)}
-                    onMouseLeave={() => setHoverZone(null)}
-                  >
-                    <AddIcon boxSize="10px" color="blue.500" />
+                  <Box position="absolute" bottom={NEW_TIER_BETWEEN_OFFSET} left={NEW_TIER_ZONE_INSET}>
+                    {renderNewTierZone(
+                      tierIdx,
+                      () => handleDropBetween(tierIdx),
+                      `Create a new rank between rank ${tierIdx + 1} and rank ${tierIdx + 2}`,
+                    )}
                   </Box>
                 )}
               </Box>
-              
+
               {/* Tier box */}
-              <Box 
+              <Box
                 flex="1"
-                minH="60px" 
-                border="2px dashed" 
-                borderColor="gray.300" 
-                borderRadius="md" 
-                p={3} 
-                onDragOver={handleDragOver} 
+                minW={0}
+                minH="60px"
+                border="2px dashed"
+                borderColor={moveMode === 'tap' ? "blue.300" : "gray.300"}
+                borderRadius="md"
+                p={3}
+                onDragOver={handleDragOver}
                 onDrop={() => handleDrop(tierIdx)}
+                onClick={() => {
+                  if (moveMode === 'tap') handleDrop(tierIdx)
+                }}
+                onKeyDown={(e) => {
+                  if (moveMode === 'tap' && e.key === 'Enter') handleDrop(tierIdx)
+                }}
+                tabIndex={moveMode === 'tap' ? 0 : undefined}
+                cursor={moveMode === 'tap' ? "pointer" : "default"}
+                role="group"
+                aria-label={`Rank ${tierIdx + 1}`}
                 bg="white"
-                _hover={{ bg: "gray.50", borderColor: "gray.400" }}
+                _hover={{ bg: "gray.50", borderColor: moveMode === 'tap' ? "blue.500" : "gray.400" }}
                 transition="all 0.2s"
               >
                 <HStack spacing={2} wrap="wrap">
                   {tier.length === 0 ? (
                     <Text fontSize="sm" color="gray.400">Drop here for rank {tierIdx}</Text>
                   ) : (
-                    tier.map((item, itemIdx) => (
-                      <Box
-                        key={`${tierIdx}-${itemIdx}`}
-                        bg="blue.50"
-                        border="1px solid"
-                        borderColor="blue.200"
-                        px={3}
-                        py={2}
-                        borderRadius="md"
-                        draggable
-                        onDragStart={() => handleDragStart(tierIdx, itemIdx)}
-                        onDragEnd={handleDragEnd}
-                        cursor="move"
-                        _hover={{ bg: "blue.100", transform: "translateY(-1px)", shadow: "sm" }}
-                        transition="all 0.2s"
-                      >
-                        <Text fontSize="sm" fontWeight="medium">{item.name}</Text>
-                      </Box>
-                    ))
+                    tier.map((item, itemIdx) => {
+                      const isPicked = moveMode === 'tap' && dragSource?.tierIdx === tierIdx && dragSource?.itemIdx === itemIdx
+                      return (
+                        <Box
+                          key={`${tierIdx}-${itemIdx}`}
+                          role="button"
+                          tabIndex={0}
+                          aria-pressed={isPicked}
+                          bg={isPicked ? "blue.500" : "blue.50"}
+                          color={isPicked ? "white" : "inherit"}
+                          border="1px solid"
+                          borderColor={isPicked ? "blue.600" : "blue.200"}
+                          boxShadow={isPicked ? "0 0 0 3px rgba(49, 130, 206, 0.35)" : "none"}
+                          px={3}
+                          py={2}
+                          maxW="100%"
+                          borderRadius="md"
+                          draggable
+                          onDragStart={() => handleDragStart(tierIdx, itemIdx)}
+                          onDragEnd={handleDragEnd}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleItemTap(tierIdx, itemIdx)
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              handleItemTap(tierIdx, itemIdx)
+                            }
+                          }}
+                          cursor="move"
+                          _hover={isPicked ? undefined : { bg: "blue.100", transform: "translateY(-1px)", shadow: "sm" }}
+                          transition="all 0.2s"
+                        >
+                          <Text fontSize="sm" fontWeight="medium" overflowWrap="anywhere">{item.name}</Text>
+                        </Box>
+                      )
+                    })
                   )}
                 </HStack>
               </Box>
             </HStack>
-            
+
             {/* Spacing between tiers */}
             {tierIdx < tiers.length - 1 && <Box h="1px" />}
           </Box>
         ))}
 
         {/* Bottom + button */}
-        <Box h="20px" display="flex" alignItems="center" pl="8px" mt={-4}>
-          <Box
-            w="24px"
-            h="24px"
-            borderRadius="full"
-            border="2px solid"
-            borderColor={isDragging ? (hoverZone === 'bottom' ? "blue.500" : "blue.300") : "blue.200"}
-            bg={isDragging ? (hoverZone === 'bottom' ? "blue.200" : "blue.50") : "white"}
-            display="flex"
-            alignItems="center"
-            justifyContent="center"
-            opacity={isDragging ? 1 : 0.4}
-            transition="all 0.2s"
-            transform={hoverZone === 'bottom' ? "scale(1.1)" : "scale(1)"}
-            cursor={isDragging ? "copy" : "default"}
-            onDragOver={handleDragOver}
-            onDrop={handleDropNewBottom}
-            onMouseEnter={() => setHoverZone('bottom')}
-            onMouseLeave={() => setHoverZone(null)}
-          >
-            <AddIcon boxSize="10px" color="blue.500" />
-          </Box>
+        <Box h={NEW_TIER_EDGE_ROW_HEIGHT} display="flex" alignItems="center" pl={NEW_TIER_ZONE_INSET} mt={NEW_TIER_EDGE_ROW_PULL}>
+          {renderNewTierZone('bottom', handleDropNewBottom, 'Create a new bottom rank here')}
         </Box>
       </VStack>
     </VStack>
@@ -374,8 +445,10 @@ function TierlistPhase({ alternatives, onComplete, isDisabled, initialRanking, o
 // Plot component for Phase 2 (value function visualization)
 function QualitativeValuePlot({ ranking, isIncreasing, adjustedValues, confidences = {} }) {
   const svgRef = useRef(null)
-  const width = 480
-  const height = 480
+  const isMobile = useIsMobile()
+  // A smaller drawing on phones keeps labels near their nominal font size once scaled down.
+  const width = isMobile ? 320 : 480
+  const height = isMobile ? 320 : 480
 
   const getConfidenceMargin = (conf) => {
     if (conf === 4) return 0
@@ -451,8 +524,14 @@ function QualitativeValuePlot({ ranking, isIncreasing, adjustedValues, confidenc
     .join(' ')
 
   return (
-    <Box border="1px solid" borderColor="gray.200" borderRadius="lg" p={4} bg="gray.50">
-      <svg ref={svgRef} width="100%" height={height} viewBox={`0 0 ${width} ${height}`}>
+    <Box border="1px solid" borderColor="gray.200" borderRadius="lg" p={{ base: 2, md: 4 }} bg="gray.50">
+      <svg
+        ref={svgRef}
+        width="100%"
+        height={isMobile ? undefined : height}
+        style={isMobile ? { display: 'block', height: 'auto' } : undefined}
+        viewBox={`0 0 ${width} ${height}`}
+      >
         <rect x={0} y={0} width={width} height={height} fill="transparent" />
         {/* Axes */}
         <line x1={50} y1={height - 40} x2={width - 20} y2={height - 40} stroke="#A0AEC0" strokeWidth="2" />
@@ -556,6 +635,7 @@ function QualitativeValuePlot({ ranking, isIncreasing, adjustedValues, confidenc
 
 // Phase 2: Slider adjustment
 function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, initialValues, initialIsIncreasing, onValuesChange, onConfidencesChange }) {
+  const isMobile = useIsMobile()
   const [isIncreasing, setIsIncreasing] = useState(initialIsIncreasing !== null ? initialIsIncreasing : true)
   const [adjustedValues, setAdjustedValues] = useState({})
   const [confidences, setConfidences] = useState({})
@@ -729,18 +809,25 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
         </RadioGroup>
       </HStack>
 
-      <HStack spacing={6} align="flex-start">
-        <Box minW="400px" maxH="700px">
+      <Stack direction={{ base: 'column', lg: 'row' }} spacing={6} align={{ base: 'stretch', lg: 'flex-start' }}>
+        <Box minW={{ base: 0, lg: '400px' }} maxH="700px">
           <QualitativeValuePlot ranking={ranking} isIncreasing={isIncreasing} adjustedValues={adjustedValues} confidences={confidences} />
         </Box>
 
-        <VStack spacing={6} align="stretch" flex="1" minW="400px" maxH="700px" overflowY="auto">
+        <VStack
+          spacing={6}
+          align="stretch"
+          flex="1"
+          minW={{ base: 0, lg: '400px' }}
+          maxH={{ base: 'none', lg: '700px' }}
+          overflowY={{ base: 'visible', lg: 'auto' }}
+        >
           {uniqueRanks.map((rank, idx) => {
             const alts = alternativesByRank[rank]
             return (
               <Box key={rank} pb={2} borderBottomWidth="1px" borderBottomColor="gray.200">
                 <HStack spacing={4} mb={3} justify="space-between">
-                  <Text fontSize="sm" fontWeight="semibold">{alts.join(', ')}</Text>
+                  <Text fontSize="sm" fontWeight="semibold" minW={0} overflowWrap="anywhere">{alts.join(', ')}</Text>
                   <NumberInput
                     value={(adjustedValues[rank] !== undefined ? adjustedValues[rank] : 0.5).toFixed(2)}
                     min={0}
@@ -755,6 +842,7 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
                     }}
                     size="md"
                     maxW="90px"
+                    flexShrink={0}
                   >
                     <NumberInputField textAlign="right" />
                     <NumberInputStepper>
@@ -764,22 +852,25 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
                   </NumberInput>
                 </HStack>
                 <HStack spacing={3}>
-                  <Text fontSize="xs" color="gray.600" minW="35px">0</Text>
+                  <Text fontSize="xs" color="gray.600" minW={{ base: 'auto', lg: '35px' }}>0</Text>
                   <input
                     type="range"
                     min="0"
                     max="1"
                     step="0.01"
+                    aria-label={`Value for ${alts.join(', ')}`}
                     value={adjustedValues[rank] !== undefined ? adjustedValues[rank] : 0.5}
                     onChange={(e) => handleSliderChange(rank, e.target.value)}
-                    style={{ flex: 1 }}
+                    style={{ flex: 1, minWidth: 0, height: isMobile ? '32px' : undefined }}
                   />
-                  <Text fontSize="xs" color="gray.600" minW="35px">1</Text>
+                  <Text fontSize="xs" color="gray.600" minW={{ base: 'auto', lg: '35px' }}>1</Text>
                 </HStack>
                 <FormControl mt={3}>
                   <HStack spacing={1} mb={1}>
                     <FormLabel fontSize="xs" m={0} fontWeight="medium">Confidence</FormLabel>
-                    <Tooltip
+                    <InfoTip
+                      ariaLabel="About confidence levels"
+                      placement="right"
                       label={
                         <Box>
                           <Text fontWeight="bold" mb={1}>Confidence Levels:</Text>
@@ -790,11 +881,7 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
                           <Text>4 - Fully confident</Text>
                         </Box>
                       }
-                      placement="right"
-                      hasArrow
-                    >
-                      <QuestionIcon color="gray.500" boxSize={3} cursor="help" />
-                    </Tooltip>
+                    />
                   </HStack>
                   <Select
                     value={confidences[rank] ?? 4}
@@ -820,7 +907,7 @@ function SliderPhase({ ranking, alternatives, onComplete, onBack, isDisabled, in
             )
           })}
         </VStack>
-      </HStack>
+      </Stack>
     </VStack>
   )
 }
@@ -1209,18 +1296,8 @@ function QualitativeIndicatorsPage({ sessionId, onPageChange }) {
     )
   }
 
-  return (
-    <HStack align="stretch" spacing={0} h="100vh" overflow="hidden">
-      {/* Left Sidebar */}
-      <Box
-        w="320px"
-        bg="gray.100"
-        p={4}
-        borderRight="1px"
-        borderColor="gray.300"
-        maxH="100vh"
-        overflowY="auto"
-      >
+  const sidebar = (
+    <>
         <VStack spacing={4} align="stretch" mb={6}>
           <Heading size="md">Qualitative Indicators</Heading>
           <Text fontSize="sm" color="gray.600">
@@ -1261,16 +1338,16 @@ function QualitativeIndicatorsPage({ sessionId, onPageChange }) {
               )
             })}
           </VStack>
-      </Box>
+    </>
+  )
 
-      {/* Right Main Area */}
-      <Box
-        flex={1}
-        bg="white"
-        p={4}
-        maxH="100vh"
-        overflowY="auto"
-      >
+  return (
+    <SidebarLayout
+      title="Qualitative Indicators"
+      sidebar={sidebar}
+      activeKey={activeIndicator ? `${activeIndicatorIdx}-${phase}` : null}
+      activeLabel={activeIndicator ? `${activeIndicatorIdx + 1}. ${activeIndicator.criterion_name}` : ''}
+    >
           {isSessionLocked && (
             <Box bg="yellow.50" p={3} borderRadius="md" borderLeft="4px" borderLeftColor="yellow.400" mb={4}>
               <HStack spacing={2} align="flex-start">
@@ -1282,7 +1359,7 @@ function QualitativeIndicatorsPage({ sessionId, onPageChange }) {
                       : 'Qualitative Indicators are locked by the practitioner.'}
                   </Text>
                   {isBwtLockActive ? (
-                    <Button size="xs" variant="outline" onClick={() => onPageChange?.('pile')}>
+                    <Button size="xs" variant="outline" whiteSpace="normal" h="auto" py={1} textAlign="left" onClick={() => onPageChange?.('pile')}>
                       Go to Weight Elicitation to unlock
                     </Button>
                   ) : (
@@ -1296,17 +1373,17 @@ function QualitativeIndicatorsPage({ sessionId, onPageChange }) {
           )}
 
           {qualitativeCriteria.length === 0 ? (
-            <VStack spacing={4} align="center" justify="center" minH="60vh">
+            <VStack spacing={4} align="center" justify="center" minH={{ base: 40, lg: '60vh' }}>
               <Heading size="lg">No Qualitative Indicators</Heading>
               <Text color="gray.600" fontSize="lg">
                 Please add qualitative criteria from the Input page
               </Text>
             </VStack>
           ) : !activeIndicator ? (
-            <VStack spacing={4} align="center" justify="center" minH="60vh">
+            <VStack spacing={4} align="center" justify="center" minH={{ base: 40, lg: '60vh' }}>
               <Heading size="lg">Select an Indicator</Heading>
-              <Text color="gray.600" fontSize="lg">
-                Click on an indicator in the sidebar to start elicitation
+              <Text color="gray.600" fontSize="lg" textAlign="center">
+                Choose an indicator from the list to start elicitation
               </Text>
             </VStack>
           ) : (
@@ -1315,7 +1392,7 @@ function QualitativeIndicatorsPage({ sessionId, onPageChange }) {
 
               <VStack spacing={6} align="stretch">
                 <Box>
-                  <Heading size="lg">{activeIndicator.criterion_name}</Heading>
+                  <Heading size="lg" overflowWrap="anywhere">{activeIndicator.criterion_name}</Heading>
                   <Text fontSize="sm" color="gray.600" mt={1}>{activeIndicator.description}</Text>
                 </Box>
 
@@ -1351,7 +1428,7 @@ function QualitativeIndicatorsPage({ sessionId, onPageChange }) {
                   />
                 )}
 
-                <HStack spacing={2} justify="flex-end">
+                <HStack spacing={2} justify="flex-end" flexWrap="wrap">
                   {phase === 'ranking' ? (
                     <>
                       <Button
@@ -1418,8 +1495,7 @@ function QualitativeIndicatorsPage({ sessionId, onPageChange }) {
               </VStack>
             </>
           )}
-      </Box>
-    </HStack>
+    </SidebarLayout>
   )
 }
 

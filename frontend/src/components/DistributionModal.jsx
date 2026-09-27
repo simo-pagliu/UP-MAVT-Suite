@@ -25,6 +25,7 @@ import {
   getDistributionTypeLabel,
   isValidDistribution,
 } from '../utils/distributionUtils'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 /**
  * DistributionModal Component
@@ -37,6 +38,7 @@ export function DistributionModal({
   onSave,
   title = 'Edit Distribution',
 }) {
+  const isMobile = useIsMobile()
   const [distType, setDistType] = useState('certain')
   const [params, setParams] = useState({})
   
@@ -156,7 +158,12 @@ export function DistributionModal({
   const plotData = generatePlotData(params)
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} size="lg">
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      size={isMobile ? 'full' : 'lg'}
+      scrollBehavior={isMobile ? 'inside' : 'outside'}
+    >
       <ModalOverlay />
       <ModalContent>
         <ModalHeader>{title}</ModalHeader>
@@ -603,7 +610,11 @@ function SimplePlotPreview({ plotData, bounds }) {
 
   return (
     <Box borderWidth={1} borderRadius="md" p={2} bg="white">
-      <svg width={width} height={height} style={{ border: '1px solid #e2e8f0' }}>
+      <svg
+        width="100%"
+        viewBox={`0 0 ${width} ${height}`}
+        style={{ border: '1px solid #e2e8f0', display: 'block', maxWidth: `${width}px`, height: 'auto' }}
+      >
         {/* Grid lines */}
         <line x1={padding} y1={height - padding} x2={width - padding} y2={height - padding} stroke="#e2e8f0" />
         <line x1={padding} y1={padding} x2={padding} y2={height - padding} stroke="#e2e8f0" />

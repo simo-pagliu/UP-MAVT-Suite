@@ -64,6 +64,9 @@ const detectHierarchicalInputFromCriteria = (items) => {
   return !(allSingleGroup || allBlank)
 }
 
+// Pins the first column of a sideways-scrolling table; pair with an explicit bg.
+const STICKY_FIRST_COLUMN = { position: 'sticky', left: 0, zIndex: 1, borderRightWidth: '1px' }
+
 function InputPage({ studySessionId }, ref) {
   const [name, setName] = useState('')
   const [metadataValues, setMetadataValues] = useState({ title: '', description: '' })
@@ -852,7 +855,7 @@ function InputPage({ studySessionId }, ref) {
   }
 
   return (
-    <Box bg="white" p={6} borderRadius="lg" boxShadow="sm">
+    <Box bg="white" p={{ base: 3, md: 6 }} borderRadius="lg" boxShadow="sm">
       <VStack spacing={6} align="stretch">
         <Heading as="h1" size="lg">Input Definition</Heading>
         <Text fontSize="sm" color="gray.600">
@@ -984,7 +987,7 @@ function InputPage({ studySessionId }, ref) {
                 </Button>
               </HStack>
 
-              <HStack spacing={2}>
+              <HStack spacing={2} flexWrap="wrap">
                 <Button
                   leftIcon={<AddIcon />}
                   size="sm"
@@ -1008,9 +1011,9 @@ function InputPage({ studySessionId }, ref) {
               <Table size="sm" variant="simple">
                 <Thead bg="gray.50">
                   <Tr>
-                    <Th minW="150px">Alternative</Th>
+                    <Th minW={{ base: '120px', md: '150px' }} {...STICKY_FIRST_COLUMN} bg="app.surfaceStrong">Alternative</Th>
                     {criteria.map((criterion, idx) => (
-                      <Th key={idx} minW="220px">
+                      <Th key={idx} minW={{ base: '180px', md: '220px' }}>
                         <VStack spacing={2} align="stretch">
                           <Input
                             value={criterion.criterion_name}
@@ -1107,7 +1110,7 @@ function InputPage({ studySessionId }, ref) {
                 <Tbody>
                   {criteria[0]?.alternatives.map((_, altIdx) => (
                     <Tr key={altIdx}>
-                      <Td minW="150px">
+                      <Td minW={{ base: '120px', md: '150px' }} {...STICKY_FIRST_COLUMN} bg="white">
                         <Input
                           value={criteria[0].alternatives[altIdx].name}
                           onChange={(e) => handleAlternativeNameChange(altIdx, e.target.value)}
@@ -1158,6 +1161,11 @@ function InputPage({ studySessionId }, ref) {
                             ) : (
                               // Non-qualitative and unlocked: clickable distribution editor
                               <HStack
+                                as="button"
+                                type="button"
+                                aria-label={`Edit value of ${criteria[0].alternatives[altIdx]?.name || `alternative ${altIdx + 1}`} for ${criterion.criterion_name || `criterion ${critIdx + 1}`}`}
+                                w="100%"
+                                textAlign="left"
                                 spacing={1}
                                 p={2}
                                 borderWidth={1}
@@ -1182,7 +1190,7 @@ function InputPage({ studySessionId }, ref) {
                                   color="blue.600"
                                   flexShrink={0}
                                 >
-                                  <SettingsIcon boxSize={3} />
+                                  <SettingsIcon boxSize={{ base: 4, md: 3 }} />
                                 </Box>
                               </HStack>
                             )}

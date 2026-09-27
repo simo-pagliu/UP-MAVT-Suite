@@ -21,6 +21,7 @@ import {
   AlertDialogOverlay,
   useDisclosure,
   HStack,
+  Stack,
   VStack,
   Input,
   FormControl,
@@ -34,6 +35,10 @@ import { DeleteIcon, DownloadIcon, ArrowUpIcon, ChevronDownIcon, ChevronRightIco
 import { useRef, Fragment } from 'react'
 import axios from 'axios'
 import { API_URL } from '../config'
+import InfoTip from '../components/InfoTip'
+
+// Keeps the case study / session name visible while the table scrolls sideways.
+const STICKY_NAME_COLUMN = { position: 'sticky', left: 0, zIndex: 1, maxW: { base: '160px', md: 'none' } }
 
 /**
  * Axios instance that always sends credentials (cookies) so the admin
@@ -520,9 +525,9 @@ function AdminPage(props, ref) {
   }
 
   return (
-    <Box p={8}>
-      <HStack justify="space-between" mb={6}>
-        <Heading>Admin - Manage Sessions</Heading>
+    <Box p={{ base: 0, md: 8 }}>
+      <Stack direction={{ base: 'column', md: 'row' }} justify="space-between" align={{ base: 'flex-start', md: 'center' }} spacing={3} mb={6}>
+        <Heading size={{ base: 'lg', md: 'xl' }}>Admin - Manage Sessions</Heading>
         <Button
           leftIcon={<ArrowUpIcon />}
           colorScheme="blue"
@@ -537,17 +542,17 @@ function AdminPage(props, ref) {
           display="none"
           onChange={handleUploadClick}
         />
-      </HStack>
+      </Stack>
       
       {studySessions.length === 0 ? (
         <Text>No study sessions found.</Text>
       ) : (
         <Box overflowX="auto">
-          <Table variant="simple" size="md">
+          <Table variant="simple" size={{ base: 'sm', md: 'md' }}>
             <Thead>
               <Tr>
                 <Th width="40px"></Th>
-                <Th>Case Study ID</Th>
+                <Th {...STICKY_NAME_COLUMN} bg="app.surfaceStrong">Case Study ID</Th>
                 <Th>Date Created</Th>
                 <Th>Status</Th>
                 <Th>Progress</Th>
@@ -574,10 +579,10 @@ function AdminPage(props, ref) {
                           isDisabled={!study.sessions || study.sessions.length === 0}
                         />
                       </Td>
-                      <Td>
+                      <Td {...STICKY_NAME_COLUMN} bg="white">
                         <VStack align="start" spacing={0}>
-                          <HStack spacing={1}>
-                            <Text fontWeight="bold">{study._id || 'N/A'}</Text>
+                          <HStack spacing={1} maxW="100%">
+                            <Text fontWeight="bold" isTruncated title={study._id}>{study._id || 'N/A'}</Text>
                             <Tooltip label={study._id ? 'Copy case study link' : 'No case study ID'} hasArrow>
                               <IconButton
                                 aria-label="Copy case study link"
@@ -591,7 +596,7 @@ function AdminPage(props, ref) {
                           </HStack>
                           {study.title ? <Text fontSize="sm">{study.title}</Text> : null}
                           {study.description ? (
-                            <Text fontSize="xs" color="gray.600" noOfLines={2} maxW="360px">
+                            <Text fontSize="xs" color="gray.600" noOfLines={2} maxW={{ base: '140px', md: '360px' }}>
                               {study.description}
                             </Text>
                           ) : null}
@@ -618,7 +623,7 @@ function AdminPage(props, ref) {
                         </Tooltip>
                       </Td>
                       <Td>
-                        <Tooltip 
+                        <InfoTip
                           label={
                             <VStack align="stretch" spacing={1}>
                               {(Array.isArray(progress?.sessionDetails) ? progress.sessionDetails : []).map((session, idx) => (
@@ -632,11 +637,9 @@ function AdminPage(props, ref) {
                                 </Box>
                               ))}
                             </VStack>
-                          } 
-                          hasArrow 
-                          placement="top"
+                          }
                         >
-                          <Box>
+                          <Box as="button" type="button" aria-label="Show case study progress details" textAlign="left">
                             <HStack spacing={2}>
                               <Progress
                                 value={progress.percentage}
@@ -650,7 +653,7 @@ function AdminPage(props, ref) {
                               </Text>
                             </HStack>
                           </Box>
-                        </Tooltip>
+                        </InfoTip>
                       </Td>
                       <Td>
                         <HStack spacing={2}>
@@ -692,10 +695,10 @@ function AdminPage(props, ref) {
                           borderColor="blue.300"
                         >
                           <Td></Td>
-                          <Td pl={8} fontSize="sm">
+                          <Td pl={{ base: 4, md: 8 }} fontSize="sm" {...STICKY_NAME_COLUMN} bg="gray.50">
                             <VStack align="start" spacing={0}>
-                              <Text color="gray.700">↳ {session.friendly_name || 'Unnamed session'}</Text>
-                              <Text color="gray.500" fontSize="xs">ID: {session._id}</Text>
+                              <Text color="gray.700" noOfLines={2}>↳ {session.friendly_name || 'Unnamed session'}</Text>
+                              <Text color="gray.500" fontSize="xs" maxW="100%" isTruncated title={session._id}>ID: {session._id}</Text>
                             </VStack>
                           </Td>
                           <Td fontSize="sm">{formatDate(session.created_at)}</Td>
@@ -719,7 +722,7 @@ function AdminPage(props, ref) {
                             </Tooltip>
                           </Td>
                           <Td>
-                            <Tooltip 
+                            <InfoTip
                               label={
                                 <VStack align="stretch" spacing={0}>
                                   {sessionProgress.steps.map((step, idx) => (
@@ -728,11 +731,9 @@ function AdminPage(props, ref) {
                                     </Text>
                                   ))}
                                 </VStack>
-                              } 
-                              hasArrow 
-                              placement="top"
+                              }
                             >
-                              <Box>
+                              <Box as="button" type="button" aria-label="Show session progress details" textAlign="left">
                                 <HStack spacing={2}>
                                   <Progress
                                     value={sessionProgress.percentage}
@@ -746,7 +747,7 @@ function AdminPage(props, ref) {
                                   </Text>
                                 </HStack>
                               </Box>
-                            </Tooltip>
+                            </InfoTip>
                           </Td>
                           <Td>
                             <HStack spacing={2}>
@@ -777,9 +778,10 @@ function AdminPage(props, ref) {
         isOpen={isOpen}
         leastDestructiveRef={cancelRef}
         onClose={onClose}
+        isCentered
       >
         <AlertDialogOverlay>
-          <AlertDialogContent>
+          <AlertDialogContent mx={4}>
             <AlertDialogHeader fontSize="lg" fontWeight="bold">
               Delete {deleteType === 'study' ? 'Case Study' : 'Elicitation Session'}
             </AlertDialogHeader>

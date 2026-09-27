@@ -10,6 +10,8 @@ import {
   useToast,
   Badge,
   Grid,
+  SimpleGrid,
+  Stack,
   Slider,
   SliderTrack,
   SliderFilledTrack,
@@ -48,6 +50,8 @@ import {
 import { parseDistribution, computeDistributionBounds } from '../utils/distributionUtils'
 import { API_URL } from '../config'
 import QuestionPrompt from '../components/QuestionPrompt'
+import SidebarLayout from '../components/SidebarLayout'
+import { useIsMobile } from '../hooks/useIsMobile'
 
 function PileBwtPage({ sessionId, onPageChange }, ref) {
   const CONSISTENCY_EPSILON = 1e-10
@@ -86,6 +90,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   const { isOpen: isResetOpen, onOpen: onResetOpen, onClose: onResetClose } = useDisclosure()
   const cancelRef = useRef()
   const mainContentRef = useRef(null)
+  const isMobile = useIsMobile()
   const [showUnlockConfirm, setShowUnlockConfirm] = useState(false)
   const toast = useToast()
   const isReadOnlyLockedSession = isSessionLocked
@@ -1506,7 +1511,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
   const renderContent = () => {
     if (qualitativeIncomplete) {
       return (
-        <Box display="flex" justifyContent="center" alignItems="center" minH="60vh">
+        <Box display="flex" justifyContent="center" alignItems="center" minH={{ base: 40, lg: '60vh' }}>
           <VStack spacing={4} textAlign="center" maxW="500px">
             <Heading size="lg" color="orange.600">Qualitative Indicators Required</Heading>
             <Text color="gray.700" fontSize="md">
@@ -1537,7 +1542,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     }
     if (step === 'idle') {
       return (
-        <Box display="flex" justifyContent="center" alignItems="center" minH="60vh">
+        <Box display="flex" justifyContent="center" alignItems="center" minH={{ base: 40, lg: '60vh' }}>
           <VStack spacing={4} textAlign="center">
             {criteriaMismatch && (
               <Alert status="error" borderRadius="md" textAlign="left" w="100%">
@@ -1571,7 +1576,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             )}
             <Heading size="lg">Select a Group to Start</Heading>
             <Text color="gray.600" fontSize="lg">
-              Click on a group in the sidebar to view or complete its comparisons
+              Choose a group from the list to view or complete its comparisons
             </Text>
           </VStack>
         </Box>
@@ -1631,7 +1636,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               </Alert>
             )}
 
-            <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
               <Heading size="lg">{isSelectingBest ? 'Select Best Criterion' : 'Select Worst Criterion'}</Heading>
               <Badge colorScheme="blue">
                 Group {selectedGroupIndex + 1} of {allGroups.length}: {selectedGroup.name}
@@ -1640,9 +1645,9 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
 
             <QuestionPrompt>{question}</QuestionPrompt>
 
-            <HStack align="stretch" spacing={4} flex={1}>
+            <Stack direction={{ base: 'column', lg: 'row' }} align="stretch" spacing={4} flex={1}>
               {/* Left: Bar Chart with Min/Max Labels */}
-              <Box flex={2} border="1px" borderColor="gray.200" borderRadius="md" p={4}>
+              <Box flex={{ base: 'none', lg: 2 }} minW={0} border="1px" borderColor="gray.200" borderRadius="md" p={{ base: 3, md: 4 }}>
                 <Heading size="sm" mb={3}>Criteria Ranges</Heading>
                 <ResponsiveContainer width="100%" height={barData.length * 60 + 80}>
                   <BarChart
@@ -1723,8 +1728,8 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                   </BarChart>
                 </ResponsiveContainer>
               </Box>
-              {/* Right: Clickable List */}
-              <Box flex={1} border="1px" borderColor="gray.200" borderRadius="md" p={4}>
+              {/* Right: Clickable List (first on mobile) */}
+              <Box flex={{ base: 'none', lg: 1 }} minW={0} order={{ base: -1, lg: 0 }} border="1px" borderColor="gray.200" borderRadius="md" p={{ base: 3, md: 4 }}>
                 <Heading size="sm" mb={4}>
                   Select
                 </Heading>
@@ -1771,7 +1776,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                       >
                         {crit.criterion_name}
                       </Text>
-                      <Text fontSize="xs" color={isDisabled ? 'gray.400' : 'gray.600'}>
+                      <Text fontSize="xs" color={isDisabled ? 'gray.400' : 'gray.600'} overflowWrap="anywhere">
                         {isDisabled ? '(Already selected as best)' : crit.unit}
                       </Text>
                     </Box>
@@ -1779,10 +1784,10 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                   })}
                 </VStack>
               </Box>
-            </HStack>
+            </Stack>
 
             {/* Navigation Buttons */}
-            <HStack spacing={4} justify="space-between" pt={4}>
+            <HStack spacing={4} justify="space-between" pt={4} flexWrap="wrap">
               <HStack spacing={2}>
                 <Button
                   variant="outline"
@@ -1864,9 +1869,9 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               </HStack>
             </Alert>
           )}
-          <Box display="flex" justifyContent="space-between" alignItems="center">
+          <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
             <Heading size="lg">Select Best and Worst Criteria</Heading>
-            <Badge colorScheme="blue">
+            <Badge colorScheme="blue" whiteSpace="normal">
               Group {selectedGroupIndex + 1} of {allGroups.length}: {selectedGroup.name}
             </Badge>
           </Box>
@@ -1976,7 +1981,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               </HStack>
             </Alert>
           )}
-          <Box display="flex" justifyContent="space-between" alignItems="center">
+          <Box display="flex" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={2}>
             <Heading size="lg">
               Pair {currentPairIndex + 1} of {pairs.length}
             </Heading>
@@ -2028,14 +2033,21 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                 )}
                 <SliderFilledTrack bg={sliderTrackColor} />
               </SliderTrack>
-              <SliderThumb w="20px" h="20px" bg={sliderThumbColor} borderRadius="full" border="2px solid white" boxShadow="0 2px 4px rgba(0,0,0,0.2)" />
+              <SliderThumb w={{ base: '28px', md: '20px' }} h={{ base: '28px', md: '20px' }} bg={sliderThumbColor} borderRadius="full" border="2px solid white" boxShadow="0 2px 4px rgba(0,0,0,0.2)" />
             </Slider>
-            <HStack spacing={2} mt={3} fontSize="sm" color="gray.600" justify="space-between">
+            {isMobile && (
+              <FormLabel mt={4} mb={0} fontSize="sm" fontWeight="semibold" color="gray.600" textAlign="center">
+                "{pair.adjusted.criterion_name}" [{pair.adjusted.unit}]
+              </FormLabel>
+            )}
+            <HStack spacing={2} mt={isMobile ? 2 : 3} fontSize="sm" color="gray.600" justify="space-between">
               <Text>{(isAdjustedIncreasing ? adjustedRange.min : adjustedRange.max).toFixed(2)}</Text>
               <HStack spacing={3}>
-                <FormLabel mb={0} fontWeight="semibold">
-                  "{pair.adjusted.criterion_name}" [{pair.adjusted.unit}]: <strong>{sliderInputValue}</strong>
-                </FormLabel>
+                {!isMobile && (
+                  <FormLabel mb={0} fontWeight="semibold">
+                    "{pair.adjusted.criterion_name}" [{pair.adjusted.unit}]: <strong>{sliderInputValue}</strong>
+                  </FormLabel>
+                )}
                 <NumberInput
                   value={sliderInputValue}
                   min={adjustedRange.min}
@@ -2082,7 +2094,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             </HStack>
           </Box>
 
-          <HStack spacing={4} justify="flex-end" pt={2}>
+          <HStack spacing={4} justify="flex-end" pt={2} flexWrap="wrap">
             <Button
               leftIcon={<ChevronLeftIcon />}
               isDisabled={currentPairIndex === 0}
@@ -2220,7 +2232,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             </Box>
           )}
 
-          <HStack spacing={4} align="stretch">
+          <Stack direction={{ base: 'column', md: 'row' }} spacing={4} align="stretch">
             <Box border="1px" borderColor="gray.200" borderRadius="md" p={3} flex={1} bg="white">
               <Text fontSize="sm" color="gray.700" mb={1}>
                 <strong>Baseline:</strong> {pair.reference.criterion_name} [{referenceRange.min.toFixed(2)}-{referenceRange.max.toFixed(2)}] {pair.reference.unit}
@@ -2241,12 +2253,12 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                 </Text>
               )}
             </Box>
-          </HStack>
+          </Stack>
 
-          <HStack spacing={4} align="stretch">
-            <Box border="1px" borderColor="gray.200" borderRadius="md" p={4} flex={1}>
+          <SimpleGrid columns={{ base: 1, lg: 2 }} spacing={4}>
+            <Box border="1px" borderColor="gray.200" borderRadius="md" p={{ base: 2, md: 4 }} minW={0}>
               <Heading size="sm" mb={2} textAlign="center">Baseline scenario</Heading>
-              <ResponsiveContainer width="100%" height={400}>
+              <ResponsiveContainer width="100%" height={isMobile ? 300 : 400}>
                 <BarChart data={plot1Data} margin={{ top: 10, right: 10, bottom: 20, left: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis 
@@ -2257,7 +2269,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                     interval={0}
                     tick={{ fontSize: 12 }}
                   />
-                  <YAxis domain={[0, 1]} tick={{ fontSize: 12 }} />
+                  <YAxis domain={[0, 1]} tick={{ fontSize: 12 }} width={isMobile ? 36 : 60} />
                   <Bar dataKey="value" fill="#2b6cb0">
                     {plot1Data.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.isReference ? '#2c5282' : '#cbd5e0'} />
@@ -2267,9 +2279,9 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
               </ResponsiveContainer>
             </Box>
 
-            <Box border="1px" borderColor="gray.200" borderRadius="md" p={4} flex={1}>
+            <Box border="1px" borderColor="gray.200" borderRadius="md" p={{ base: 2, md: 4 }} minW={0}>
               <Heading size="sm" mb={2} textAlign="center">Compensated scenario</Heading>
-              <ResponsiveContainer width="100%" height={400}>
+              <ResponsiveContainer width="100%" height={isMobile ? 300 : 400}>
                 <BarChart data={plot2Data} margin={{ top: 10, right: 10, bottom: 20, left: 10 }}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis 
@@ -2280,7 +2292,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                     interval={0}
                     tick={{ fontSize: 12 }}
                   />
-                  <YAxis domain={[0, 1]} tick={{ fontSize: 12 }} />
+                  <YAxis domain={[0, 1]} tick={{ fontSize: 12 }} width={isMobile ? 36 : 60} />
                   <Bar dataKey="value" fill="#63b3ed">
                     {plot2Data.map((entry, index) => (
                       <Cell key={`cell-${index}`} fill={entry.isAdjusted ? '#2b6cb0' : '#cbd5e0'} />
@@ -2289,12 +2301,12 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                 </BarChart>
               </ResponsiveContainer>
             </Box>
-          </HStack>
+          </SimpleGrid>
 
-          <Box border="1px" borderColor="gray.200" borderRadius="md" p={4}>
+          <Box border="1px" borderColor="gray.200" borderRadius="md" p={{ base: 2, md: 4 }}>
             <Heading size="sm" mb={2} textAlign="center">Value Function: {pair.adjusted.criterion_name}</Heading>
             {vfData.length > 0 ? (
-              <ResponsiveContainer width="100%" height={350}>
+              <ResponsiveContainer width="100%" height={isMobile ? 280 : 350}>
                 <LineChart data={vfData} margin={{ top: 20, right: 30, bottom: 60, left: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" />
                   <XAxis
@@ -2304,7 +2316,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                     tick={{ fontSize: 12 }}
                     allowDataOverflow
                   />
-                  <YAxis domain={[0, 1]} tick={{ fontSize: 12 }} />
+                  <YAxis domain={[0, 1]} tick={{ fontSize: 12 }} width={isMobile ? 36 : 60} />
                   <Line type="linear" dataKey="y" stroke="#2b6cb0" dot strokeWidth={2} />
                   <ReferenceDot
                     x={sliderValue}
@@ -2335,18 +2347,11 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
     return null
   }
 
-  return (
-    <HStack align="stretch" spacing={0} h="100vh" overflow="hidden">
-      {/* Sidebar */}
-      <Box
-        w="320px"
-        bg="gray.100"
-        p={4}
-        borderRight="1px"
-        borderColor="gray.300"
-        maxH="100vh"
-        overflowY="auto"
-      >
+  const activeGroup = selectedGroupIndex !== null ? allGroups[selectedGroupIndex] : null
+  const isEvaluatingPairs = step === 'evaluate-pairs' && pairs.length > 0
+
+  const sidebar = (
+    <>
         <VStack spacing={4} align="stretch" mb={6}>
           <Heading size="md">Weight Elicitation</Heading>
           <Text fontSize="sm" color="gray.600">
@@ -2532,8 +2537,11 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
             </Button>
           </Box>
         )}
-      </Box>
+    </>
+  )
 
+  return (
+    <>
       {/* Reset Group Confirmation Dialog */}
       <AlertDialog
         isOpen={isResetOpen}
@@ -2570,14 +2578,14 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
         </AlertDialogOverlay>
       </AlertDialog>
 
-      {/* Main Content */}
-      <Box
-        ref={mainContentRef}
-        flex={1}
-        bg="white"
-        p={4}
-        maxH="100vh"
-        overflowY="auto"
+      <SidebarLayout
+        title="Weight Elicitation"
+        sidebar={sidebar}
+        mainRef={mainContentRef}
+        activeKey={activeGroup ? `${selectedGroupIndex}-${step}-${selectionStep}-${isEvaluatingPairs ? currentPairIndex : ''}` : null}
+        activeLabel={activeGroup
+          ? `${activeGroup.name}${isEvaluatingPairs ? ` · Pair ${currentPairIndex + 1} of ${pairs.length}` : ''}`
+          : ''}
       >
         {/* Persistent lock status banner */}
         {!bwtLockActive && !isSessionLocked ? (
@@ -2588,7 +2596,7 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                 <Text fontSize="sm" color="blue.800" fontWeight="semibold">
                   To work on Weight Elicitation, you need to lock Qualitative Indicators and Quantitative Indicators pages. Weight Elicitation remains editable while locked.
                 </Text>
-                <Button size="xs" colorScheme="blue" onClick={handleLockForBwt} isLoading={saving}>
+                <Button size="xs" colorScheme="blue" whiteSpace="normal" h="auto" py={1} textAlign="left" onClick={handleLockForBwt} isLoading={saving}>
                   Lock Qualitative and Quantitative Indicators to continue
                 </Button>
               </VStack>
@@ -2603,11 +2611,11 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
                   Qualitative Indicators and Quantitative Indicators are locked. You can now work on Weight Elicitation.
                 </Text>
                 {!showUnlockConfirm ? (
-                  <Button size="xs" variant="outline" colorScheme="green" onClick={() => setShowUnlockConfirm(true)} isLoading={saving}>
+                  <Button size="xs" variant="outline" colorScheme="green" whiteSpace="normal" h="auto" py={1} textAlign="left" onClick={() => setShowUnlockConfirm(true)} isLoading={saving}>
                     Unlock for Qualitative and Quantitative edits
                   </Button>
                 ) : (
-                  <HStack spacing={2}>
+                  <HStack spacing={2} flexWrap="wrap">
                     <Text fontSize="xs" color="green.800">
                       This will re-enable Qualitative Indicators and Quantitative Indicators editing. Continue?
                     </Text>
@@ -2658,8 +2666,8 @@ function PileBwtPage({ sessionId, onPageChange }, ref) {
           </Alert>
         )}
         {renderContent()}
-      </Box>
-    </HStack>
+      </SidebarLayout>
+    </>
   )
 }
 

@@ -1,8 +1,9 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ChakraProvider } from '@chakra-ui/react'
 import Navigation from '../components/Navigation'
+import { setViewportWidth } from '../test/matchMedia'
 
 const renderNavigation = (props = {}) => {
   const defaults = {
@@ -206,5 +207,61 @@ describe('Navigation – documentation button', () => {
     })
     await userEvent.click(screen.getByRole('button', { name: /documentation/i }))
     expect(onDocumentation).toHaveBeenCalledOnce()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Mobile layout (below the lg breakpoint)
+// ---------------------------------------------------------------------------
+describe('Navigation – mobile menu', () => {
+  const desktopWidth = window.innerWidth
+
+  beforeEach(() => {
+    setViewportWidth(375)
+  })
+
+  afterEach(() => {
+    setViewportWidth(desktopWidth)
+  })
+
+  const stakeholderProps = {
+    isLoggedIn: true,
+    currentRole: 'stakeholder',
+    sessionId: 'sess-1',
+    features: { qi: true, vf: true, bwt: true },
+  }
+
+  it('hides page buttons behind a menu button', () => {
+    renderNavigation(stakeholderProps)
+    expect(screen.getByRole('button', { name: /open menu/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /overview/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /logout/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /documentation/i })).toBeInTheDocument()
+  })
+
+  it('shows pages and Logout in the drawer', async () => {
+    renderNavigation(stakeholderProps)
+    await userEvent.click(screen.getByRole('button', { name: /open menu/i }))
+    expect(await screen.findByRole('button', { name: /overview/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /qualitative indicators/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /weights/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument()
+  })
+
+  it('navigates and closes the drawer when a page is chosen', async () => {
+    const onPageChange = vi.fn()
+    renderNavigation({ ...stakeholderProps, onPageChange })
+    await userEvent.click(screen.getByRole('button', { name: /open menu/i }))
+    await userEvent.click(await screen.findByRole('button', { name: /weights/i }))
+    expect(onPageChange).toHaveBeenCalledWith('pile')
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /weights/i })).not.toBeInTheDocument()
+    })
+  })
+
+  it('keeps an inline Logout button for admin', () => {
+    renderNavigation({ isLoggedIn: true, currentRole: 'admin' })
+    expect(screen.queryByRole('button', { name: /open menu/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument()
   })
 })

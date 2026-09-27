@@ -7,6 +7,7 @@ import {
   GridItem,
   Heading,
   HStack,
+  Stack,
   Input,
   Link,
   SimpleGrid,
@@ -369,7 +370,7 @@ function LoginPage({ onLogin, onDocumentation }) {
 
   return (
     <Box minH={{ base: 'calc(100vh - 68px)', md: 'calc(100vh - 72px)' }} display="flex" flexDirection="column">
-      <Grid templateColumns={{ base: '1fr', lg: '1.2fr 1fr' }} flex="1">
+      <Grid templateColumns={{ base: 'minmax(0, 1fr)', lg: '1.2fr 1fr' }} flex="1">
         <GridItem p={{ base: 6, md: 10 }} bg="white">
           <VStack align="stretch" spacing={6}>
             <VStack align="stretch" spacing={3}>
@@ -446,7 +447,7 @@ function LoginPage({ onLogin, onDocumentation }) {
           </VStack>
         </GridItem>
 
-        <GridItem p={{ base: 6, md: 10 }} bg="white">
+        <GridItem p={{ base: 6, md: 10 }} bg="white" order={{ base: -1, lg: 0 }}>
           <VStack spacing={6} align="stretch">
             <VStack spacing={4} align="stretch">
               <Box>
@@ -460,6 +461,10 @@ function LoginPage({ onLogin, onDocumentation }) {
                   colorScheme="blue"
                   size="lg"
                   w="full"
+                  whiteSpace="normal"
+                  h="auto"
+                  minH={12}
+                  py={3}
                   onClick={() => handleFlowSelection('access')}
                 >
                   Access an existing session
@@ -469,6 +474,10 @@ function LoginPage({ onLogin, onDocumentation }) {
                   colorScheme="blue"
                   size="lg"
                   w="full"
+                  whiteSpace="normal"
+                  h="auto"
+                  minH={12}
+                  py={3}
                   onClick={() => handleFlowSelection('create')}
                 >
                   Create a new empty case study
@@ -478,6 +487,10 @@ function LoginPage({ onLogin, onDocumentation }) {
                   colorScheme="blue"
                   size="lg"
                   w="full"
+                  whiteSpace="normal"
+                  h="auto"
+                  minH={12}
+                  py={3}
                   onClick={() => handleFlowSelection('upload')}
                 >
                   Upload a case study (.zip file)
@@ -501,7 +514,7 @@ function LoginPage({ onLogin, onDocumentation }) {
                   <FormLabel fontWeight="medium" mb={2}>
                     Session code
                   </FormLabel>
-                  <HStack spacing={3}>
+                  <Stack direction={{ base: 'column', sm: 'row' }} spacing={3}>
                     <Input
                       placeholder="Enter session code"
                       value={code}
@@ -509,12 +522,12 @@ function LoginPage({ onLogin, onDocumentation }) {
                       onKeyDown={(e) => e.key === 'Enter' && handleDetectAndLogin()}
                       isDisabled={loading}
                       bg="white"
-                      w="50%"
+                      w={{ base: '100%', sm: '50%' }}
                     />
-                    <Button colorScheme="blue" isLoading={loading} onClick={handleDetectAndLogin} w="50%">
+                    <Button colorScheme="blue" isLoading={loading} onClick={handleDetectAndLogin} w={{ base: '100%', sm: '50%' }}>
                       Access session
                     </Button>
-                  </HStack>
+                  </Stack>
                 </Box>
               </>
             )}
@@ -536,7 +549,7 @@ function LoginPage({ onLogin, onDocumentation }) {
                     </Link>
                     .
                   </Text>
-                  <HStack spacing={3}>
+                  <Stack direction={{ base: 'column', sm: 'row' }} spacing={3}>
                     <Button
                       variant={emailConsent === true ? 'solid' : 'outline'}
                       colorScheme="blue"
@@ -558,7 +571,7 @@ function LoginPage({ onLogin, onDocumentation }) {
                     >
                       No, continue without email
                     </Button>
-                  </HStack>
+                  </Stack>
 
                   {emailConsent !== null && (
                     <>

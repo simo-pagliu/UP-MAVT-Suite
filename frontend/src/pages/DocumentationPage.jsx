@@ -5,6 +5,7 @@ import {
   Divider,
   Heading,
   HStack,
+  Stack,
   Tab,
   TabList,
   TabPanel,
@@ -62,31 +63,34 @@ function BulletList({ items }) {
 
 function ApiRow({ method, path, description }) {
   const colorMap = { GET: 'green', POST: 'blue', PUT: 'orange', PATCH: 'purple', DELETE: 'red' }
+  // Phones: method + path on one line, description underneath.
   return (
-    <HStack align="start" spacing={3} py={1}>
-      <Badge colorScheme={colorMap[method] ?? 'gray'} minW="55px" textAlign="center">
-        {method}
-      </Badge>
-      <Code fontSize="xs" colorScheme="gray" whiteSpace="pre-wrap" flex="1">
-        {path}
-      </Code>
-      <Text fontSize="xs" color="gray.600" flex="2">
+    <Stack direction={{ base: 'column', md: 'row' }} align={{ base: 'stretch', md: 'start' }} spacing={{ base: 1, md: 3 }} py={1}>
+      <HStack align="start" spacing={3} flex={{ md: 1 }} minW={0}>
+        <Badge colorScheme={colorMap[method] ?? 'gray'} minW="55px" textAlign="center" flexShrink={0}>
+          {method}
+        </Badge>
+        <Code fontSize="xs" colorScheme="gray" whiteSpace="pre-wrap" overflowWrap="anywhere" flex="1" minW={0}>
+          {path}
+        </Code>
+      </HStack>
+      <Text fontSize="xs" color="gray.600" flex={{ md: 2 }}>
         {description}
       </Text>
-    </HStack>
+    </Stack>
   )
 }
 
 function SchemaField({ name, type, description }) {
   return (
-    <HStack align="start" spacing={3} py={1}>
-      <Code fontSize="xs" colorScheme="blue" minW="180px">
+    <HStack align="start" spacing={3} py={1} flexWrap={{ base: 'wrap', md: 'nowrap' }}>
+      <Code fontSize="xs" colorScheme="blue" minW={{ base: 0, md: '180px' }} overflowWrap="anywhere">
         {name}
       </Code>
       <Tag size="sm" colorScheme="purple" minW="80px" justifyContent="center">
         {type}
       </Tag>
-      <Text fontSize="xs" color="gray.600" flex="1">
+      <Text fontSize="xs" color="gray.600" flex="1" flexBasis={{ base: '100%', md: 'auto' }}>
         {description}
       </Text>
     </HStack>
@@ -548,7 +552,7 @@ function FileStructurePanel() {
 
 function DocumentationPage() {
   return (
-    <Box bg="white" p={8} borderRadius="lg" boxShadow="sm">
+    <Box bg="white" p={{ base: 4, md: 8 }} borderRadius="lg" boxShadow="sm">
       <Heading as="h1" size="lg" mb={1}>
         Documentation
       </Heading>
@@ -557,7 +561,12 @@ function DocumentationPage() {
       </Text>
 
       <Tabs colorScheme="blue" variant="enclosed" isLazy>
-        <TabList flexWrap="wrap">
+        <TabList
+          flexWrap={{ base: 'nowrap', md: 'wrap' }}
+          overflowX={{ base: 'auto', md: 'visible' }}
+          overflowY={{ base: 'hidden', md: 'visible' }}
+          sx={{ '& > button': { flexShrink: 0 } }}
+        >
           <Tab fontSize="sm">Overview</Tab>
           <Tab fontSize="sm">Architecture</Tab>
           <Tab fontSize="sm">User Roles</Tab>
