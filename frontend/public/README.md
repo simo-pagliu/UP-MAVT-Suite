@@ -6,6 +6,7 @@ The included analysis scripts are aligned with the server implementation:
 
 - `scripts/weight_space_definition.py`
 - `scripts/upmavt.py`
+- `scripts/session_inputs.py`
 
 ## Prerequisites
 
@@ -52,15 +53,28 @@ Outputs (CSV + plots) are written to `results/`.
 ├── requirements.txt
 ├── scripts/
 │   ├── __init__.py
+│   ├── session_inputs.py
 │   ├── upmavt.py
 │   └── weight_space_definition.py
 └── data/
 	├── input.csv
+	├── settings.json
 	└── <session_name>/
 		├── value_functions.csv
 		├── bwt_comparisons.csv
-		└── qualitative_indicators.csv
+		├── qualitative_indicators.csv
+		└── practitioner_settings.json
 ```
+
+- `input.csv`: the decision matrix. The `is_qi` row marks qualitative criteria; their
+  cells are empty because each session's `qualitative_indicators.csv` fills them in.
+- `settings.json`: the weight-space settings the study used in the web app (model,
+  phase 3 tolerance, advanced parameters). Step 1 uses them, so local weights match
+  the web app's. Only present once weights were computed in the web app; otherwise
+  the web app's defaults are used.
+- `practitioner_settings.json`: the practitioner's confidence adjustments and opinion
+  weight for that decision-maker.
+- The per-session CSV files are semicolon-separated.
 
 ## Optional Arguments
 
@@ -72,3 +86,6 @@ python main.py --data-dir /path/to/data --output-dir /path/to/results
 
 - Session folders in `data/` can have arbitrary names.
 - The script auto-detects session folders that contain expected CSV files.
+- Each decision-maker's own qualitative indicator values are used in their runs, and
+  the practitioner's opinion weights set how often each decision-maker is sampled in
+  the non-strict steps (3, 4 and 6), as in the web app.

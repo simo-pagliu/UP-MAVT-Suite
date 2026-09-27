@@ -5,16 +5,61 @@ Load data from local CSV files for UPMAVT analysis.
 This module provides functions to extract data from CSV files and format it
 for use by the core analysis modules (upmavt.py, weight_space_definition.py).
 
-The key principle: these functions normalize CSV structures into the same
-standardized Python dictionaries/lists that load_DB.py produces, ensuring
-seamless drop-in replacement.
+The key principle: these functions read the files of a Suite export into the
+same session-shaped dictionaries the web worker loads from MongoDB, then build
+the engine inputs with the worker's own code (scripts/session_inputs.py), so an
+offline run uses exactly the same data preparation as the web app.
 """
 
 import os
 import csv
 import json
-from bisect import bisect_right
-from pathlib import Path
+
+from scripts.session_inputs import (
+    build_alternatives_with_qualitative,
+    build_comparisons_from_session,
+    build_value_functions_from_session,
+    compute_opinion_weights,
+)
+
+
+# Label-column values of input.csv rows that describe criteria instead of an
+# alternative (the same rows the web app's input CSV uses).
+_INPUT_METADATA_LABELS = {'group', 'unit', 'description', 'is_qi', 'vf_method', 'min', 'max'}
+_TRUE_VALUES = {'true', '1', 'yes', 'y'}
+
+# Weight-space settings used when the export has no settings file (web app defaults).
+DEFAULT_ANALYSIS_SETTINGS = {
+    'use_non_linear_model': True,
+    'phase3_tolerance_pct': 1.0,
+    'weight_space_parameters': {},
+}
+
+
+def _read_csv_rows(filepath):
+    """Read a CSV file into (fieldnames, list of dict rows).
+
+    Suite exports are semicolon-separated while hand-made files are often
+    comma-separated, so the delimiter is taken from the header line.
+    """
+    with open(filepath, 'r', encoding='utf-8-sig', newline='') as f:
+        header = f.readline()
+        f.seek(0)
+        delimiter = ';' if header.count(';') > header.count(',') else ','
+        reader = csv.DictReader(f, delimiter=delimiter)
+        rows = list(reader)
+        return reader.fieldnames or [], rows
+
+
+def _load_json(filepath):
+    """Load a JSON file, or return None when it is missing or unreadable."""
+    if not os.path.exists(filepath):
+        return None
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
 
 
 def _get_row_value(row, *keys, default=''):
@@ -79,57 +124,20 @@ def _parse_points_string(points_raw):
     return points
 
 
-def _build_piecewise_linear_function(points):
-    """Build a piecewise-linear function with endpoint clamping.
-
-    Interpolates only between the two neighboring points that bracket x.
-    """
-    parsed_points = []
-    for point in points:
-        if not isinstance(point, dict) or 'x' not in point or 'y' not in point:
-            continue
-        parsed_points.append((float(point['x']), float(point['y'])))
-
-    if len(parsed_points) < 2:
-        return None
-
-    sorted_points = sorted(parsed_points, key=lambda pair: pair[0])
-    x_values = [pair[0] for pair in sorted_points]
-    y_values = [pair[1] for pair in sorted_points]
-
-    def piecewise_function(raw_x):
-        x_value = float(raw_x)
-
-        if x_value <= x_values[0]:
-            return y_values[0]
-        if x_value >= x_values[-1]:
-            return y_values[-1]
-
-        left_index = bisect_right(x_values, x_value) - 1
-        right_index = left_index + 1
-
-        x_left = x_values[left_index]
-        y_left = y_values[left_index]
-        x_right = x_values[right_index]
-        y_right = y_values[right_index]
-
-        if x_right == x_left:
-            return y_right
-
-        interpolation_ratio = (x_value - x_left) / (x_right - x_left)
-        return y_left + interpolation_ratio * (y_right - y_left)
-
-    return piecewise_function
-
-
 def load_input_data(data_dir):
     """Load criteria and alternatives from input.csv.
-    
+
+    The first column holds alternative names. Rows labelled Group, Unit,
+    Description, is_qi, vf_method, Min or Max describe the criteria; the
+    ``is_qi`` row (TRUE/FALSE) marks qualitative criteria. Exports without an
+    ``is_qi`` row treat a criterion as qualitative when the sessions ranked it
+    in qualitative_indicators.csv.
+
     Parameters
     ----------
     data_dir : str
         Path to data directory containing input.csv.
-    
+
     Returns
     -------
     dict
@@ -138,64 +146,70 @@ def load_input_data(data_dir):
             'alternatives': {alt_name: {crit_name: value_str, ...}, ...},
             'criteria_names': [list of criterion names]
         }
-    
+
     Raises
     ------
     FileNotFoundError
         If input.csv not found.
     """
     input_csv = os.path.join(data_dir, 'input.csv')
-    
+
     if not os.path.exists(input_csv):
         raise FileNotFoundError(f"input.csv not found in {data_dir}")
-    
-    criteria = []
-    alternatives = {}
-    criteria_names = []
-    
-    with open(input_csv, 'r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-    
+
+    fieldnames, rows = _read_csv_rows(input_csv)
+
     if not rows:
         raise ValueError("input.csv is empty")
-    
-    # First row has the structure: Alternative, Criterion1, Criterion2, ...
-    # and metadata rows follow
-    # Assuming first column is criterion data, rest are alternatives
-    # This is a simplified parser - adjust based on actual input.csv structure
-    
-    # For now, parse the header row to identify criteria
-    headers = rows[0].keys()
-    
-    # Skip 'Alternative' and metadata columns, extract criteria names
-    for header in headers:
-        if header.lower() not in ['alternative', 'group', 'unit', 'description']:
-            if header:  # Non-empty header
-                criteria_names.append(header)
-    
-    # Parse alternatives from rows (Alternative column contains alt names)
+
+    label_key = next(
+        (name for name in fieldnames if str(name).strip().lower() == 'alternative'),
+        fieldnames[0],
+    )
+    criteria_names = [
+        name for name in fieldnames
+        if name and name != label_key and str(name).strip().lower() not in _INPUT_METADATA_LABELS
+    ]
+
+    alternatives = {}
+    metadata_rows = {}
     for row in rows:
-        alt_name = row.get('Alternative', '')
-        if alt_name and alt_name.lower() not in ['group', 'unit', 'description']:
-            if alt_name not in alternatives:
-                alternatives[alt_name] = {}
-            
-            for crit_name in criteria_names:
-                value = row.get(crit_name, '')
-                alternatives[alt_name][crit_name] = str(value) if value else ''
-    
-    # Build criteria dicts from the data
-    # This is a simplified version - you may need to enhance this
+        label = str(row.get(label_key) or '').strip()
+        if not label:
+            continue
+        if label.lower() in _INPUT_METADATA_LABELS:
+            metadata_rows[label.lower()] = row
+            continue
+        if label not in alternatives:
+            alternatives[label] = {}
+        for crit_name in criteria_names:
+            value = row.get(crit_name, '')
+            alternatives[label][crit_name] = str(value) if value else ''
+
+    is_qi_row = metadata_rows.get('is_qi')
+    if is_qi_row is not None:
+        qualitative_names = {
+            name for name in criteria_names
+            if str(is_qi_row.get(name) or '').strip().lower() in _TRUE_VALUES
+        }
+    else:
+        qualitative_names = _infer_qualitative_criteria(data_dir)
+
+    criteria = []
     for crit_name in criteria_names:
-        criteria.append({
+        criterion = {
             'criterion_name': crit_name,
+            'is_qualitative': crit_name in qualitative_names,
             'alternatives': [
                 {'name': alt_name, 'value': alternatives[alt_name].get(crit_name, '')}
                 for alt_name in alternatives.keys()
-            ]
-        })
-    
+            ],
+        }
+        for label in ('group', 'unit', 'description'):
+            if label in metadata_rows:
+                criterion[label] = str(metadata_rows[label].get(crit_name) or '')
+        criteria.append(criterion)
+
     return {
         'criteria': criteria,
         'alternatives': alternatives,
@@ -203,16 +217,29 @@ def load_input_data(data_dir):
     }
 
 
+def _infer_qualitative_criteria(data_dir):
+    """Names of criteria that any session ranked in qualitative_indicators.csv."""
+    names = set()
+    for session_name in list_sessions(data_dir):
+        qi_path = os.path.join(data_dir, session_name, 'qualitative_indicators.csv')
+        if not os.path.exists(qi_path):
+            continue
+        for crit_name, qi_data in _load_qualitative_indicators_csv(qi_path).items():
+            if qi_data.get('ranking'):
+                names.add(crit_name)
+    return names
+
+
 def load_session_data(data_dir, session_name):
     """Load elicitation session data from CSV files.
-    
+
     Parameters
     ----------
     data_dir : str
         Path to data directory containing elicitation subdirectories.
     session_name : str
         Name of the session/elicitation (e.g., 'elicitation_1').
-    
+
     Returns
     -------
     dict
@@ -222,50 +249,100 @@ def load_session_data(data_dir, session_name):
             'name': session_name,
             'value_functions': {...},
             'qualitative_indicators': {...},
-            'bwt': {...}
+            'bwt': {...},
+            'practitioner_settings': {...}
         }
-    
+
     Raises
     ------
     FileNotFoundError
         If session directory or required files not found.
     """
     session_dir = os.path.join(data_dir, session_name)
-    
+
     if not os.path.isdir(session_dir):
         raise FileNotFoundError(f"Session directory {session_name} not found in {data_dir}")
-    
+
     session_doc = {
         '_id': session_name,
         'name': session_name,
         'value_functions': None,
         'qualitative_indicators': None,
         'bwt': None,
+        'practitioner_settings': None,
     }
-    
+
     # Load value functions
     vf_file = os.path.join(session_dir, 'value_functions.csv')
     if os.path.exists(vf_file):
         session_doc['value_functions'] = _load_value_functions_csv(vf_file)
-    
+
     # Load qualitative indicators
     qi_file = os.path.join(session_dir, 'qualitative_indicators.csv')
     if os.path.exists(qi_file):
         session_doc['qualitative_indicators'] = _load_qualitative_indicators_csv(qi_file)
-    
+
     # Load BWT comparisons
     bwt_file = os.path.join(session_dir, 'bwt_comparisons.csv')
     if os.path.exists(bwt_file):
         session_doc['bwt'] = _load_bwt_csv(bwt_file)
-    
+
+    # Load the practitioner's confidence adjustments and opinion weight
+    session_doc['practitioner_settings'] = load_practitioner_settings(data_dir, session_name)
+
     return session_doc
+
+
+def load_practitioner_settings(data_dir, session_name):
+    """Load practitioner_settings.json of a session (None when absent)."""
+    settings = _load_json(os.path.join(data_dir, session_name, 'practitioner_settings.json'))
+    return settings if isinstance(settings, dict) else None
+
+
+def load_analysis_settings(data_dir):
+    """Load the weight-space settings the study used in the web app.
+
+    Reads data/settings.json (written by the export); if it is missing, falls
+    back to weights/computed_weights.json next to the data directory. Missing
+    values use the web app's defaults.
+
+    Returns
+    -------
+    dict
+        {'use_non_linear_model': bool, 'phase3_tolerance_pct': float,
+         'weight_space_parameters': dict}
+    """
+    settings = dict(DEFAULT_ANALYSIS_SETTINGS)
+    loaded = _load_json(os.path.join(data_dir, 'settings.json'))
+    if not isinstance(loaded, dict):
+        loaded = _load_json(os.path.join(os.path.dirname(os.path.abspath(data_dir)), 'weights', 'computed_weights.json'))
+    if not isinstance(loaded, dict):
+        return settings
+
+    if 'use_non_linear_model' in loaded:
+        settings['use_non_linear_model'] = bool(loaded['use_non_linear_model'])
+    try:
+        settings['phase3_tolerance_pct'] = max(0.0, float(loaded.get('phase3_tolerance_pct', 1.0)))
+    except (TypeError, ValueError):
+        pass
+    parameters = loaded.get('weight_space_parameters')
+    if isinstance(parameters, dict):
+        settings['weight_space_parameters'] = parameters
+    return settings
+
+
+def compute_opinion_weights_from_csv(data_dir, session_names):
+    """NSMC opinion weights for the sessions, in the given order (None = equal)."""
+    return compute_opinion_weights(
+        [load_practitioner_settings(data_dir, session_name) for session_name in session_names]
+    )
 
 
 def _load_value_functions_csv(filepath):
     """Parse value_functions.csv into the expected structure.
-    
+
     Expected CSV columns: criterion_name, x, y, confidence
-    
+
     Returns structure:
     {
         'criteria': {
@@ -278,61 +355,59 @@ def _load_value_functions_csv(filepath):
     }
     """
     criteria = {}
-    
-    with open(filepath, 'r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        fieldnames = reader.fieldnames or []
-        fieldnames_lower = {str(name).strip().lower() for name in fieldnames if name}
 
-        has_compact_points = 'list of points' in fieldnames_lower or 'list_of_points' in fieldnames_lower
+    fieldnames, rows = _read_csv_rows(filepath)
+    fieldnames_lower = {str(name).strip().lower() for name in fieldnames if name}
 
-        for row in reader:
-            crit_name = _get_row_value(row, 'criterion_name', 'CRITERION_NAME').strip()
-            if not crit_name:
+    has_compact_points = 'list of points' in fieldnames_lower or 'list_of_points' in fieldnames_lower
+
+    for row in rows:
+        crit_name = _get_row_value(row, 'criterion_name', 'CRITERION_NAME').strip()
+        if not crit_name:
+            continue
+
+        if crit_name not in criteria:
+            criteria[crit_name] = {
+                'points': [],
+                'confidence': _parse_confidence_value(
+                    _get_row_value(row, 'confidence', 'CONFIDENCE', default=4),
+                    default=4,
+                ),
+            }
+        else:
+            confidence_raw = _get_row_value(row, 'confidence', 'CONFIDENCE', default='')
+            if str(confidence_raw).strip():
+                criteria[crit_name]['confidence'] = _parse_confidence_value(confidence_raw, default=4)
+
+        if has_compact_points:
+            points_raw = _get_row_value(
+                row,
+                'LIST OF POINTS',
+                'list of points',
+                'list_of_points',
+                'points',
+                'POINTS',
+            )
+            criteria[crit_name]['points'].extend(_parse_points_string(points_raw))
+        else:
+            x_raw = _get_row_value(row, 'x', 'X')
+            y_raw = _get_row_value(row, 'y', 'Y')
+            try:
+                criteria[crit_name]['points'].append({'x': float(x_raw), 'y': float(y_raw)})
+            except (TypeError, ValueError):
                 continue
-
-            if crit_name not in criteria:
-                criteria[crit_name] = {
-                    'points': [],
-                    'confidence': _parse_confidence_value(
-                        _get_row_value(row, 'confidence', 'CONFIDENCE', default=4),
-                        default=4,
-                    ),
-                }
-            else:
-                confidence_raw = _get_row_value(row, 'confidence', 'CONFIDENCE', default='')
-                if str(confidence_raw).strip():
-                    criteria[crit_name]['confidence'] = _parse_confidence_value(confidence_raw, default=4)
-
-            if has_compact_points:
-                points_raw = _get_row_value(
-                    row,
-                    'LIST OF POINTS',
-                    'list of points',
-                    'list_of_points',
-                    'points',
-                    'POINTS',
-                )
-                criteria[crit_name]['points'].extend(_parse_points_string(points_raw))
-            else:
-                x_raw = _get_row_value(row, 'x', 'X')
-                y_raw = _get_row_value(row, 'y', 'Y')
-                try:
-                    criteria[crit_name]['points'].append({'x': float(x_raw), 'y': float(y_raw)})
-                except (TypeError, ValueError):
-                    continue
 
     for cfg in criteria.values():
         cfg['points'] = sorted(cfg.get('points', []), key=lambda p: p.get('x', 0))
-    
+
     return {'criteria': criteria}
 
 
 def _load_qualitative_indicators_csv(filepath):
     """Parse qualitative_indicators.csv into the expected structure.
-    
-    Expected CSV columns: criterion_name, rank, value, confidence
-    
+
+    Expected CSV columns: criterion_name, alternative, rank, value, confidence
+
     Returns structure:
     {
         'criterion_name': {
@@ -344,52 +419,51 @@ def _load_qualitative_indicators_csv(filepath):
     }
     """
     qi = {}
-    
-    with open(filepath, 'r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            crit_name = _get_row_value(row, 'criterion_name', 'CRITERION_NAME').strip()
-            if not crit_name:
-                continue
 
-            if crit_name not in qi:
-                qi[crit_name] = {
-                    'ranking': {},
-                    'values': {},
-                    'confidences': {}
-                }
+    _, rows = _read_csv_rows(filepath)
+    for row in rows:
+        crit_name = _get_row_value(row, 'criterion_name', 'CRITERION_NAME').strip()
+        if not crit_name:
+            continue
 
-            alt_name = _get_row_value(row, 'alternative', 'ALTERNATIVE').strip()
-            rank_raw = _get_row_value(row, 'rank', 'RANK')
-            value_raw = _get_row_value(row, 'value', 'VALUE')
-            conf_raw = _get_row_value(row, 'confidence', 'CONFIDENCE', default=4)
+        if crit_name not in qi:
+            qi[crit_name] = {
+                'ranking': {},
+                'values': {},
+                'confidences': {}
+            }
 
-            if not alt_name or str(rank_raw).strip() == '':
-                continue
+        alt_name = _get_row_value(row, 'alternative', 'ALTERNATIVE').strip()
+        rank_raw = _get_row_value(row, 'rank', 'RANK')
+        value_raw = _get_row_value(row, 'value', 'VALUE')
+        conf_raw = _get_row_value(row, 'confidence', 'CONFIDENCE', default=4)
 
-            try:
-                rank = int(float(rank_raw))
-            except (TypeError, ValueError):
-                continue
+        if not alt_name or str(rank_raw).strip() == '':
+            continue
 
-            try:
-                value = float(value_raw) if str(value_raw).strip() else 0.0
-            except (TypeError, ValueError):
-                value = 0.0
+        try:
+            rank = int(float(rank_raw))
+        except (TypeError, ValueError):
+            continue
 
-            qi[crit_name]['ranking'][alt_name] = rank
-            qi[crit_name]['values'][str(rank)] = value
-            qi[crit_name]['confidences'][str(rank)] = _parse_confidence_value(conf_raw, default=4)
-    
+        try:
+            value = float(value_raw) if str(value_raw).strip() else 0.0
+        except (TypeError, ValueError):
+            value = 0.0
+
+        qi[crit_name]['ranking'][alt_name] = rank
+        qi[crit_name]['values'][str(rank)] = value
+        qi[crit_name]['confidences'][str(rank)] = _parse_confidence_value(conf_raw, default=4)
+
     return qi
 
 
 def _load_bwt_csv(filepath):
     """Parse bwt_comparisons.csv into the expected structure.
-    
-    Expected CSV columns: type, reference_criterion, adjusted_criterion, 
+
+    Expected CSV columns: type, reference_criterion, adjusted_criterion,
                           data_value, group, confidence, a
-    
+
     Returns structure:
     {
         'comparisons': [
@@ -407,53 +481,52 @@ def _load_bwt_csv(filepath):
     }
     """
     comparisons = []
-    
-    with open(filepath, 'r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            data_value_raw = _get_row_value(row, 'data_value', 'DATA_VALUE', default=0)
-            confidence_raw = _get_row_value(row, 'confidence', 'CONFIDENCE', default=3)
-            a_raw = _get_row_value(row, 'a', 'A', default=1.0)
 
-            try:
-                data_value = float(data_value_raw) if str(data_value_raw).strip() else 0.0
-            except (TypeError, ValueError):
-                data_value = 0.0
+    _, rows = _read_csv_rows(filepath)
+    for row in rows:
+        data_value_raw = _get_row_value(row, 'data_value', 'DATA_VALUE', default=0)
+        confidence_raw = _get_row_value(row, 'confidence', 'CONFIDENCE', default=3)
+        a_raw = _get_row_value(row, 'a', 'A', default=1.0)
 
-            try:
-                a_value = float(a_raw) if str(a_raw).strip() else 1.0
-            except (TypeError, ValueError):
-                a_value = 1.0
+        try:
+            data_value = float(data_value_raw) if str(data_value_raw).strip() else 0.0
+        except (TypeError, ValueError):
+            data_value = 0.0
 
-            comparison = {
-                'type': _get_row_value(row, 'type', 'TYPE').strip(),
-                'reference_criterion': _get_row_value(row, 'reference_criterion', 'REFERENCE_CRITERION').strip(),
-                'adjusted_criterion': _get_row_value(row, 'adjusted_criterion', 'ADJUSTED_CRITERION').strip(),
-                'data_value': data_value,
-                'group': _get_row_value(row, 'group', 'GROUP').strip(),
-                'confidence': _parse_confidence_value(confidence_raw, default=3),
-                'a': a_value,
-            }
-            comparisons.append(comparison)
-    
+        try:
+            a_value = float(a_raw) if str(a_raw).strip() else 1.0
+        except (TypeError, ValueError):
+            a_value = 1.0
+
+        comparison = {
+            'type': _get_row_value(row, 'type', 'TYPE').strip(),
+            'reference_criterion': _get_row_value(row, 'reference_criterion', 'REFERENCE_CRITERION').strip(),
+            'adjusted_criterion': _get_row_value(row, 'adjusted_criterion', 'ADJUSTED_CRITERION').strip(),
+            'data_value': data_value,
+            'group': _get_row_value(row, 'group', 'GROUP').strip(),
+            'confidence': _parse_confidence_value(confidence_raw, default=3),
+            'a': a_value,
+        }
+        comparisons.append(comparison)
+
     return {'comparisons': comparisons}
 
 
 def load_computed_weights(weights_csv_path):
     """Load pre-computed weight solutions from CSV file.
-    
+
     Parameters
     ----------
     weights_csv_path : str
         Path to weight_solutions.csv.
-    
+
     Returns
     -------
     dict
         {
             'weight_solutions': {session_id: [list of weight dicts], ...},
         }
-    
+
     Raises
     ------
     FileNotFoundError
@@ -461,46 +534,44 @@ def load_computed_weights(weights_csv_path):
     """
     if not os.path.exists(weights_csv_path):
         raise FileNotFoundError(f"Weight solutions file not found: {weights_csv_path}")
-    
-    weight_solutions = {}
-    
-    with open(weights_csv_path, 'r', encoding='utf-8') as f:
-        reader = csv.DictReader(f)
-        fieldnames = reader.fieldnames or []
-        has_session_id = any(str(name).strip().lower() == 'session_id' for name in fieldnames if name)
 
-        for row in reader:
-            session_id = _get_row_value(row, 'session_id', 'SESSION_ID', default='').strip()
-            if not session_id and not has_session_id:
-                session_id = 'elicitation_1'
-            if not session_id:
+    weight_solutions = {}
+
+    fieldnames, rows = _read_csv_rows(weights_csv_path)
+    has_session_id = any(str(name).strip().lower() == 'session_id' for name in fieldnames if name)
+
+    for row in rows:
+        session_id = _get_row_value(row, 'session_id', 'SESSION_ID', default='').strip()
+        if not session_id and not has_session_id:
+            session_id = 'elicitation_1'
+        if not session_id:
+            continue
+
+        if session_id not in weight_solutions:
+            weight_solutions[session_id] = []
+
+        # Build weight dict from remaining columns (criterion names)
+        weight_dict = {}
+        for key, value in row.items():
+            key_lower = str(key).strip().lower()
+            if key_lower in {'session_id', 'solution_index'}:
+                continue
+            if not value:
+                continue
+            try:
+                weight_dict[key] = float(value)
+            except ValueError:
                 continue
 
-            if session_id not in weight_solutions:
-                weight_solutions[session_id] = []
+        if weight_dict:
+            weight_solutions[session_id].append(weight_dict)
 
-            # Build weight dict from remaining columns (criterion names)
-            weight_dict = {}
-            for key, value in row.items():
-                key_lower = str(key).strip().lower()
-                if key_lower in {'session_id', 'solution_index'}:
-                    continue
-                if not value:
-                    continue
-                try:
-                    weight_dict[key] = float(value)
-                except ValueError:
-                    continue
-
-            if weight_dict:
-                weight_solutions[session_id].append(weight_dict)
-    
     return {'weight_solutions': weight_solutions}
 
 
 def save_weight_solutions_csv(output_path, weight_solutions_dict, session_ids=None):
     """Save weight solutions to CSV file.
-    
+
     Parameters
     ----------
     output_path : str
@@ -509,7 +580,7 @@ def save_weight_solutions_csv(output_path, weight_solutions_dict, session_ids=No
         {session_id: [list of weight dicts], ...}
     session_ids : list or None
         If provided, only save these sessions. Otherwise save all.
-    
+
     Returns
     -------
     None
@@ -519,24 +590,24 @@ def save_weight_solutions_csv(output_path, weight_solutions_dict, session_ids=No
     for session_id, solutions in weight_solutions_dict.items():
         for solution in solutions:
             all_criteria.update(solution.keys())
-    
+
     criteria_list = sorted(list(all_criteria))
-    
+
     # Build rows
     rows = []
     for session_id, solutions in weight_solutions_dict.items():
         if session_ids and session_id not in session_ids:
             continue
-        
+
         for solution in solutions:
             row = {'session_id': session_id}
             for crit in criteria_list:
                 row[crit] = solution.get(crit, 0)
             rows.append(row)
-    
+
     # Write CSV
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    
+
     with open(output_path, 'w', newline='', encoding='utf-8') as f:
         fieldnames = ['session_id'] + criteria_list
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -546,12 +617,12 @@ def save_weight_solutions_csv(output_path, weight_solutions_dict, session_ids=No
 
 def list_sessions(data_dir):
     """List all available elicitation sessions in data directory.
-    
+
     Parameters
     ----------
     data_dir : str
         Path to data directory.
-    
+
     Returns
     -------
     list[str]
@@ -559,7 +630,7 @@ def list_sessions(data_dir):
     """
     if not os.path.isdir(data_dir):
         return []
-    
+
     sessions = []
     for item in os.listdir(data_dir):
         item_path = os.path.join(data_dir, item)
@@ -575,16 +646,17 @@ def list_sessions(data_dir):
         present = set(os.listdir(item_path)) if os.path.isdir(item_path) else set()
         if expected_files.intersection(present):
             sessions.append(item)
-    
+
     return sorted(sessions)
 
 # ============================================================================
 # HELPER FUNCTIONS FOR DATA EXTRACTION & PROCESSING
+# (thin wrappers: load the session files, then use the worker's builders)
 # ============================================================================
 
 def build_value_functions_from_csv(data_dir, session_name, criteria, return_confidence=False):
     """Build value function dicts from CSV files.
-    
+
     Parameters
     ----------
     data_dir : str
@@ -594,8 +666,9 @@ def build_value_functions_from_csv(data_dir, session_name, criteria, return_conf
     criteria : list[dict]
         Criteria list from input document.
     return_confidence : bool
-        If True, also return confidence dict.
-    
+        If True, also return confidence dict (with the practitioner's
+        confidence adjustments applied).
+
     Returns
     -------
     dict or tuple
@@ -604,167 +677,56 @@ def build_value_functions_from_csv(data_dir, session_name, criteria, return_conf
         If return_confidence=True:
             (vf_dict, confidence_dict)
     """
-    vf_dict = {}
-    confidence_dict = {}
-
-    session_dir = os.path.join(data_dir, session_name)
-    vf_path = os.path.join(session_dir, 'value_functions.csv')
-    qi_path = os.path.join(session_dir, 'qualitative_indicators.csv')
-
-    value_functions_data = _load_value_functions_csv(vf_path) if os.path.exists(vf_path) else {'criteria': {}}
-    criteria_map = value_functions_data.get('criteria', {}) if isinstance(value_functions_data, dict) else {}
-    qualitative_indicators = _load_qualitative_indicators_csv(qi_path) if os.path.exists(qi_path) else {}
-    
-    # Build interpolation functions
-    for criterion in criteria:
-        if not isinstance(criterion, dict):
-            continue
-        name = criterion.get('criterion_name')
-        if not name:
-            continue
-        
-        points = []
-        
-        if criterion.get('is_qualitative'):
-            # For weight computation and UP-MAVT, qualitative criteria use identity function: vf(x) = x
-            # The uncertainty is encoded in the alternative values themselves (x ± error%)
-            # So the VF has no error: confidence = 4
-            points = [{'x': 0, 'y': 0}, {'x': 1, 'y': 1}]
-            if return_confidence:
-                confidence_dict[name] = 4  # No error in VF, uncertainty is in alternative values
-        else:
-            # Quantitative criterion
-            cfg = criteria_map.get(name, {}) if isinstance(criteria_map, dict) else {}
-            if isinstance(cfg, dict):
-                points = cfg.get('points', [])
-                if return_confidence:
-                    confidence_dict[name] = _parse_confidence_value(cfg.get('confidence', 4), default=4)
-
-        if not points or len(points) < 2:
-            continue
-        
-        piecewise_function = _build_piecewise_linear_function(points)
-        if piecewise_function is None:
-            continue
-        vf_dict[name] = piecewise_function
-    
-    if return_confidence:
-        return vf_dict, confidence_dict
-    return vf_dict
+    session_doc = load_session_data(data_dir, session_name)
+    return build_value_functions_from_session(session_doc, criteria, return_confidence=return_confidence)
 
 
 def build_comparisons_from_csv(data_dir, session_name):
     """Extract and format comparisons from CSV BWT file.
-    
+
     Parameters
     ----------
     data_dir : str
         Path to data directory.
     session_name : str
         Elicitation session name (e.g., 'elicitation_1').
-    
+
     Returns
     -------
     list[dict]
         List of comparison records with standard format.
     """
-    session_dir = os.path.join(data_dir, session_name)
-    bwt_path = os.path.join(session_dir, 'bwt_comparisons.csv')
-    
-    comparisons = []
-    
-    if not os.path.exists(bwt_path):
-        return comparisons
-
-    bwt_data = _load_bwt_csv(bwt_path)
-    for comp in bwt_data.get('comparisons', []):
-        comparisons.append({
-            'REFERENCE_CRITERION': comp.get('reference_criterion', ''),
-            'ADJUSTED_CRITERION': comp.get('adjusted_criterion', ''),
-            'DATA_VALUE': float(comp.get('data_value', 0) or 0),
-            'TYPE': comp.get('type', ''),
-            'GROUP': comp.get('group', ''),
-        })
-    
-    return comparisons
+    session_doc = load_session_data(data_dir, session_name)
+    return build_comparisons_from_session(session_doc)
 
 
 def build_alternatives_from_csv(data_dir, session_name=None):
-    """Build alternatives dict from input CSV.
-    
+    """Build the decision matrix (alternatives dict) from the CSV files.
+
     Parameters
     ----------
     data_dir : str
         Path to data directory.
     session_name : str or None
-        Optional session name for qualitative substitution.
-    
+        Session whose qualitative indicators (and practitioner confidence
+        adjustments) fill the qualitative columns. Each decision-maker ranked
+        the qualitative criteria separately, so build one matrix per session.
+        Without a session the qualitative entries stay empty.
+
     Returns
     -------
     tuple
         (alternatives_dict, criteria_names_list)
     """
     input_data = load_input_data(data_dir)
-    alternatives = input_data.get('alternatives', {})
-    criteria_names = input_data.get('criteria_names', [])
-    criteria = input_data.get('criteria', [])
-    
-    # Add qualitative substitution if session_name is provided
-    if session_name:
-        session_dir = os.path.join(data_dir, session_name)
-        qi_path = os.path.join(session_dir, 'qualitative_indicators.csv')
-        if os.path.exists(qi_path):
-            qualitative_indicators = _load_qualitative_indicators_csv(qi_path)
-            
-            if qualitative_indicators:
-                # Confidence to error percentage mapping
-                confidence_errors = {
-                    0: 10.0,
-                    1: 7.5,
-                    2: 5.0,
-                    3: 2.5,
-                    4: 0.0,
-                }
-                
-                for criterion in criteria:
-                    if not criterion.get('is_qualitative'):
-                        continue
-                    
-                    crit_name = criterion.get('criterion_name')
-                    if not crit_name or crit_name not in qualitative_indicators:
-                        continue
-                    
-                    qi_data = qualitative_indicators[crit_name]
-                    ranking = qi_data.get('ranking', {})
-                    values = qi_data.get('values', {})
-                    confidences = qi_data.get('confidences', {})
-                    
-                    if not ranking or not values:
-                        continue
-                    
-                    for alt_name in alternatives.keys():
-                        if alt_name in ranking:
-                            rank = ranking[alt_name]
-                            
-                            # Use the actual value from the QI data, not recalculated from rank
-                            rank_key = str(rank) if not isinstance(rank, str) else rank
-                            x_pos = values.get(rank_key, values.get(int(rank_key) if rank_key.isdigit() else rank))
-                            
-                            if x_pos is None:
-                                continue
-                            
-                            x_pos = float(x_pos)
-                            
-                            # Get confidence for this rank and encode uncertainty
-                            conf_key = str(rank) if not isinstance(rank, str) else rank
-                            confidence = confidences.get(conf_key, confidences.get(int(conf_key) if conf_key.isdigit() else conf_key, 4))
-                            error_pct = confidence_errors.get(int(confidence), 0.0)
-                            
-                            if error_pct > 0:
-                                # Format as "x_pos ± error_pct%"
-                                alternatives[alt_name][crit_name] = f"{x_pos} ± {error_pct}%"
-                            else:
-                                # No uncertainty, just store the x_pos
-                                alternatives[alt_name][crit_name] = x_pos
-    
-    return alternatives, criteria_names
+    input_doc = {'criteria': input_data.get('criteria', [])}
+
+    if not session_name:
+        return build_alternatives_with_qualitative(input_doc)
+
+    session_doc = load_session_data(data_dir, session_name)
+    return build_alternatives_with_qualitative(
+        input_doc,
+        session_doc.get('qualitative_indicators'),
+        session_doc.get('practitioner_settings'),
+    )

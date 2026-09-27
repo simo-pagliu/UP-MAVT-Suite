@@ -306,7 +306,7 @@ class ExportService:
         return output.getvalue()
 
     @classmethod
-    def build_value_functions_csv(cls, criteria, criteria_map, qualitative_indicators=None):
+    def build_value_functions_csv(cls, criteria, criteria_map, qualitative_indicators=None, precision=3):
         """Build a value functions CSV with serialised point lists.
 
         For qualitative criteria the value function is generated automatically
@@ -315,7 +315,8 @@ class ExportService:
         iterating directly over *criteria_map*.
 
         Columns: ``CRITERION_NAME``, ``CONFIDENCE``, ``LIST OF POINTS`` (a
-        semicolon-separated list of ``x:y`` pairs rounded to 3 decimal places).
+        semicolon-separated list of ``x:y`` pairs rounded to *precision*
+        decimal places).
 
         Args:
             criteria (list[dict]): The session's criteria list.
@@ -323,6 +324,9 @@ class ExportService:
                 'confidence': ...}`` from the session's ``value_functions``.
             qualitative_indicators (dict | None): The session's qualitative
                 indicators (required to generate qualitative value functions).
+            precision (int | None): Decimal places for the point coordinates;
+                ``None`` keeps full precision (used by the offline bundle so
+                local runs see the same numbers as the web app).
 
         Returns:
             str: The CSV text (UTF-8).
@@ -370,24 +374,32 @@ class ExportService:
                     cfg = criteria_map.get(name) if isinstance(criteria_map, dict) else None
                     points = cfg.get('points') if isinstance(cfg, dict) else []
                     confidence = cfg.get('confidence', 4) if isinstance(cfg, dict) else 4
-                serialized = cls._serialize_points(points)
+                serialized = cls._serialize_points(points, precision)
                 writer.writerow([name, confidence, serialized])
         else:
             for name, cfg in criteria_map.items():
                 points = cfg.get('points') if isinstance(cfg, dict) else []
                 confidence = cfg.get('confidence', 4) if isinstance(cfg, dict) else 4
-                writer.writerow([name, confidence, cls._serialize_points(points)])
+                writer.writerow([name, confidence, cls._serialize_points(points, precision)])
         return output.getvalue()
 
     @staticmethod
-    def _serialize_points(points):
+    def _round_number(value, precision):
+        """Round *value* to *precision* decimals; ``None`` keeps full precision."""
+        number = float(value)
+        return number if precision is None else round(number, precision)
+
+    @classmethod
+    def _serialize_points(cls, points, precision=3):
         """Serialise a list of ``{'x', 'y'}`` dicts to a ``x:y;x:y`` string.
 
-        Each coordinate is rounded to 3 decimal places.  Points with missing
-        or non-numeric coordinates are skipped.
+        Each coordinate is rounded to *precision* decimal places (``None``
+        keeps full precision).  Points with missing or non-numeric
+        coordinates are skipped.
 
         Args:
             points (list[dict] | None): The list of point dicts.
+            precision (int | None): Decimal places for each coordinate.
 
         Returns:
             str: Semicolon-separated ``x:y`` pairs, or ``''`` when *points*
@@ -403,13 +415,13 @@ class ExportService:
             if x is None or y is None:
                 continue
             try:
-                parts.append(f"{round(float(x), 3)}:{round(float(y), 3)}")
+                parts.append(f"{cls._round_number(x, precision)}:{cls._round_number(y, precision)}")
             except (TypeError, ValueError):
                 continue
         return ';'.join(parts)
 
     @classmethod
-    def build_pile_bwt_csv(cls, bwt_data):
+    def build_pile_bwt_csv(cls, bwt_data, precision=3):
         """Build a PILE-BWT comparison CSV.
 
         When *bwt_data* contains a ``comparisons`` list the output includes
@@ -420,6 +432,8 @@ class ExportService:
 
         Args:
             bwt_data: The session's BWT data object.
+            precision (int | None): Decimal places for ``DATA_VALUE``;
+                ``None`` keeps full precision.
 
         Returns:
             str: The CSV text (UTF-8).
@@ -434,7 +448,7 @@ class ExportService:
                 data_value = comp.get('data_value', '')
                 if data_value != '' and data_value is not None:
                     try:
-                        data_value = round(float(data_value), 3)
+                        data_value = cls._round_number(data_value, precision)
                     except (TypeError, ValueError):
                         pass
                 writer.writerow([

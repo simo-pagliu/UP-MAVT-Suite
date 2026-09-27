@@ -28,9 +28,11 @@ from load_LOCAL import (
     build_value_functions_from_csv,
     build_comparisons_from_csv,
     build_alternatives_from_csv,
+    load_analysis_settings,
+    compute_opinion_weights_from_csv,
 )
-from weight_space_definition import compute_weights
-from upmavt import run_upmavt
+from scripts.weight_space_definition import compute_weights
+from scripts.upmavt import run_upmavt
 
 logging.basicConfig(
     level=logging.INFO,
@@ -294,28 +296,43 @@ def save_step_results_csv(results, output_path):
 def prepare_upmavt_data(data_dir, session_names, criteria, weight_solutions):
     """Prepare data structures for run_upmavt.
     
+    Like the web app, each session gets its own decision matrix: its
+    qualitative indicator values (and the practitioner's confidence
+    adjustments) fill the qualitative columns.
+
     Returns
     -------
     tuple
-        (vf_lists, confidence_lists, weight_solutions_list, alternatives, criteria_names)
+        (vf_lists, confidence_lists, weight_solutions_list, alternatives_list,
+         criteria_names, opinion_weights)
     """
     vf_lists = []
     confidence_lists = []
     weight_solutions_list = []
-    
+    alternatives_list = []
+    criteria_names = []
+
     for session_name in session_names:
         vf_dict, conf_dict = build_value_functions_from_csv(
             data_dir, session_name, criteria, return_confidence=True
         )
         vf_lists.append(vf_dict)
         confidence_lists.append(conf_dict)
-        
+
         ws = weight_solutions.get(session_name, [])
         weight_solutions_list.append(ws)
-    
-    alternatives, criteria_names = build_alternatives_from_csv(data_dir)
-    
-    return vf_lists, confidence_lists, weight_solutions_list, alternatives, criteria_names
+
+        alternatives, criteria_names = build_alternatives_from_csv(data_dir, session_name)
+        alternatives_list.append(alternatives)
+
+    # Practitioner opinion weights (NSMC sampling); None means equal weights.
+    opinion_weights = compute_opinion_weights_from_csv(data_dir, session_names)
+    if opinion_weights:
+        logger.info("  Opinion weights: %s", ', '.join(
+            f"{name}={weight:.3f}" for name, weight in zip(session_names, opinion_weights)
+        ))
+
+    return vf_lists, confidence_lists, weight_solutions_list, alternatives_list, criteria_names, opinion_weights
 
 
 def step_1_compute_weights(data_dir, output_dir, session_names):
@@ -333,25 +350,42 @@ def step_1_compute_weights(data_dir, output_dir, session_names):
             logger.info("Recomputing weights...")
         else:
             logger.info("Using existing weight solutions.")
-            return
-    
+            return load_computed_weights(weights_file)['weight_solutions']
+
     logger.info("\nComputing weights for %d elicitation(s)...", len(session_names))
-    
+
     try:
         input_data = load_input_data(data_dir)
         criteria = input_data['criteria']
         criteria_names = [c['criterion_name'] for c in criteria if 'criterion_name' in c]
-        
+
+        # Same weight-space settings the study used in the web app (data/settings.json).
+        settings = load_analysis_settings(data_dir)
+        logger.info(
+            "  Model: %s, phase 3 tolerance: %s%%, parameters: %s",
+            'non-linear' if settings['use_non_linear_model'] else 'linear',
+            settings['phase3_tolerance_pct'],
+            settings['weight_space_parameters'] or 'defaults',
+        )
+
         all_weight_solutions = {}
-        
+
         for session_name in session_names:
             logger.info("\n  Processing %s...", session_name)
-            
+
             # Build value functions and comparisons from session data
             value_functions = build_value_functions_from_csv(data_dir, session_name, criteria)
             comparisons = build_comparisons_from_csv(data_dir, session_name)
-            
-            ws = compute_weights(value_functions, comparisons, criteria_names=criteria_names, print_fn=lambda msg: None)
+
+            ws = compute_weights(
+                value_functions,
+                comparisons,
+                criteria_names=criteria_names,
+                print_fn=lambda msg: None,
+                use_non_linear_model=settings['use_non_linear_model'],
+                step_c_lim_percent=settings['phase3_tolerance_pct'],
+                parameter_overrides=settings['weight_space_parameters'],
+            )
             all_weight_solutions[session_name] = ws
             
             logger.info("    ✓ %d feasible weight solutions found", len(ws))
@@ -400,7 +434,7 @@ def step_2_consensus_analysis(data_dir, output_dir, session_names, weight_soluti
         input_data = load_input_data(data_dir)
         criteria = input_data['criteria']
         
-        vf_lists, conf_lists, ws_list, alternatives, crit_names = prepare_upmavt_data(
+        vf_lists, conf_lists, ws_list, alternatives, crit_names, opinion_weights = prepare_upmavt_data(
             data_dir, session_names, criteria, weight_solutions
         )
         
@@ -409,7 +443,7 @@ def step_2_consensus_analysis(data_dir, output_dir, session_names, weight_soluti
             'aggregation_method': agg_method,
             'mc_mode': 'strict',
             'use_random_weights': False,
-            'opinion_weights': None,
+            'opinion_weights': opinion_weights,
         }
         
         results = run_upmavt(vf_lists, conf_lists, ws_list, alternatives, crit_names, params, print_fn=lambda msg: logger.info("%s", msg))
@@ -478,7 +512,7 @@ def step_3_dominance_analysis(data_dir, output_dir, session_names, weight_soluti
         input_data = load_input_data(data_dir)
         criteria = input_data['criteria']
         
-        vf_lists, conf_lists, ws_list, alternatives, crit_names = prepare_upmavt_data(
+        vf_lists, conf_lists, ws_list, alternatives, crit_names, opinion_weights = prepare_upmavt_data(
             data_dir, session_names, criteria, weight_solutions
         )
         
@@ -487,7 +521,7 @@ def step_3_dominance_analysis(data_dir, output_dir, session_names, weight_soluti
             'aggregation_method': agg_method,
             'mc_mode': 'non_strict',
             'use_random_weights': True,
-            'opinion_weights': None,
+            'opinion_weights': opinion_weights,
         }
         
         results = run_upmavt(vf_lists, conf_lists, ws_list, alternatives, crit_names, params, print_fn=lambda m: None)
@@ -524,7 +558,7 @@ def step_4_compensation_analysis(data_dir, output_dir, session_names, weight_sol
         input_data = load_input_data(data_dir)
         criteria = input_data['criteria']
         
-        vf_lists, conf_lists, ws_list, alternatives, crit_names = prepare_upmavt_data(
+        vf_lists, conf_lists, ws_list, alternatives, crit_names, opinion_weights = prepare_upmavt_data(
             data_dir, session_names, criteria, weight_solutions
         )
         
@@ -536,7 +570,7 @@ def step_4_compensation_analysis(data_dir, output_dir, session_names, weight_sol
                 'aggregation_method': agg_method,
                 'mc_mode': 'non_strict',
                 'use_random_weights': False,
-                'opinion_weights': None,
+                'opinion_weights': opinion_weights,
             }
             
             results = run_upmavt(vf_lists, conf_lists, ws_list, alternatives, crit_names, params, print_fn=lambda m: None)
@@ -583,7 +617,7 @@ def step_5_uncertainty_analysis(data_dir, output_dir, session_names, weight_solu
         input_data = load_input_data(data_dir)
         criteria = input_data['criteria']
         
-        vf_lists, conf_lists, ws_list, alternatives, crit_names = prepare_upmavt_data(
+        vf_lists, conf_lists, ws_list, alternatives, crit_names, opinion_weights = prepare_upmavt_data(
             data_dir, session_names, criteria, weight_solutions
         )
         
@@ -592,7 +626,7 @@ def step_5_uncertainty_analysis(data_dir, output_dir, session_names, weight_solu
             'aggregation_method': agg_method,
             'mc_mode': 'strict',
             'use_random_weights': False,
-            'opinion_weights': None,
+            'opinion_weights': opinion_weights,
         }
         
         results = run_upmavt(vf_lists, conf_lists, ws_list, alternatives, crit_names, params, print_fn=lambda m: None)
@@ -654,7 +688,7 @@ def step_6_final_results(data_dir, output_dir, session_names, weight_solutions):
         input_data = load_input_data(data_dir)
         criteria = input_data['criteria']
         
-        vf_lists, conf_lists, ws_list, alternatives, crit_names = prepare_upmavt_data(
+        vf_lists, conf_lists, ws_list, alternatives, crit_names, opinion_weights = prepare_upmavt_data(
             data_dir, session_names, criteria, weight_solutions
         )
         
@@ -663,7 +697,7 @@ def step_6_final_results(data_dir, output_dir, session_names, weight_solutions):
             'aggregation_method': agg_method,
             'mc_mode': 'non_strict',
             'use_random_weights': False,
-            'opinion_weights': None,
+            'opinion_weights': opinion_weights,
         }
         
         results = run_upmavt(vf_lists, conf_lists, ws_list, alternatives, crit_names, params, print_fn=lambda m: None)

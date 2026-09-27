@@ -1,6 +1,7 @@
 """Unit tests for WorkflowService."""
 import csv
 import io
+import json
 import zipfile
 
 import pytest
@@ -500,3 +501,95 @@ class TestDistributionStatsExports:
         assert 'title;Step 5 distribution stats' in payload
         assert 'expert;n;mean;median;stdDev;iqr;skewness;kurtosis;min;p5;p25;p75;p95;max' in payload
         assert 'Alt A - E1 (0);3;0.4;0.2;' in payload
+
+
+# ---------------------------------------------------------------------------
+# Offline bundle (upmavt_data_*.zip) consumed by frontend/public/main.py
+# ---------------------------------------------------------------------------
+
+class TestOfflineBundleExport:
+    CRITERIA = [
+        {'criterion_name': 'Cost', 'unit': 'EUR',
+         'alternatives': [{'name': 'A', 'value': '100'}, {'name': 'B', 'value': '200'}]},
+        {'criterion_name': 'Quality', 'unit': '', 'is_qualitative': True,
+         'alternatives': [{'name': 'A', 'value': ''}, {'name': 'B', 'value': ''}]},
+    ]
+
+    @pytest.fixture()
+    def bundle(self, mock_db, wf_svc):
+        svc = StudySessionService(mock_db)
+        sid = svc.create('OFFLINE-STUDY')
+        svc.update_input(sid, self.CRITERIA)
+        session_id = svc.create_elicitation_session(sid, 'EXP-01')
+        mock_db.sessions.update_one({'_id': ObjectId(session_id)}, {'$set': {
+            'qualitative_indicators': {'Quality': {
+                'ranking': {'A': 0, 'B': 1}, 'values': {'0': 0.8, '1': 0.3}, 'confidences': {'0': 3, '1': 4},
+            }},
+            'value_functions': {'criteria': {'Cost': {
+                'points': [{'x': 100, 'y': 1}, {'x': 133.33337, 'y': 0.66666667}, {'x': 200, 'y': 0}],
+                'confidence': 3,
+            }}},
+            'bwt': {'comparisons': [{
+                'reference_criterion': 'Quality', 'adjusted_criterion': 'Cost',
+                'data_value': 191.98765, 'type': 'best', 'group': 'G1',
+            }]},
+            'practitioner_settings': {
+                'overall_weight': 2.0,
+                'confidence_adjustments': {'overall': -1, 'qi_criteria': {'Quality': -0.5}},
+            },
+        }})
+        mock_db.study_sessions.update_one({'_id': ObjectId(sid)}, {'$set': {'computed_weights': {
+            'use_non_linear_model': False,
+            'phase3_tolerance_pct': 2.5,
+            'weight_space_parameters': {'max_results': 12},
+            'weight_solutions': {session_id: [{'Cost': 0.4, 'Quality': 0.6}]},
+            'timestamp': datetime.now(timezone.utc),
+        }}})
+
+        buf, _, _ = wf_svc.export_workflow_data_zip(sid)
+        zf = zipfile.ZipFile(buf)
+        folder = next(n.split('/')[1] for n in zf.namelist() if n.endswith('/value_functions.csv'))
+        return zf, f'data/{folder}'
+
+    @staticmethod
+    def _read(zf, name):
+        return zf.read(name).decode('utf-8')
+
+    def test_bundles_the_shared_session_inputs_module(self, bundle):
+        zf, _ = bundle
+        assert 'scripts/session_inputs.py' in zf.namelist()
+        assert 'def build_alternatives_with_qualitative' in self._read(zf, 'scripts/session_inputs.py')
+
+    def test_input_csv_marks_qualitative_criteria(self, bundle):
+        zf, _ = bundle
+        rows = list(csv.reader(io.StringIO(self._read(zf, 'data/input.csv'))))
+        assert rows[0] == ['Alternative', 'Cost', 'Quality']
+        assert rows[1] == ['is_qi', 'FALSE', 'TRUE']
+        assert rows[2] == ['A', '100', '']
+
+    def test_writes_weight_settings_the_study_used(self, bundle):
+        zf, _ = bundle
+        settings = json.loads(self._read(zf, 'data/settings.json'))
+        assert settings == {
+            'use_non_linear_model': False,
+            'phase3_tolerance_pct': 2.5,
+            'weight_space_parameters': {'max_results': 12},
+        }
+
+    def test_writes_practitioner_settings_per_session(self, bundle):
+        zf, folder = bundle
+        settings = json.loads(self._read(zf, f'{folder}/practitioner_settings.json'))
+        assert settings['overall_weight'] == 2.0
+        assert settings['confidence_adjustments']['overall'] == -1.0
+        assert settings['confidence_adjustments']['qi_criteria'] == {'Quality': -0.5}
+
+    def test_session_csvs_keep_full_precision(self, bundle):
+        zf, folder = bundle
+        assert '133.33337:0.66666667' in self._read(zf, f'{folder}/value_functions.csv')
+        assert 'Quality;Cost;191.98765;best;G1' in self._read(zf, f'{folder}/bwt_comparisons.csv')
+
+    def test_regular_csv_downloads_still_round_to_three_decimals(self):
+        from app.services.export_service import ExportService
+        bwt_csv = ExportService.build_pile_bwt_csv({'comparisons': [{'data_value': 191.98765}]})
+        assert ';191.988;' in bwt_csv
+        assert ExportService._serialize_points([{'x': 133.33337, 'y': 0.66666667}]) == '133.333:0.667'

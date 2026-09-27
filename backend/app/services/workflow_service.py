@@ -1036,7 +1036,12 @@ class WorkflowService:
 
     @staticmethod
     def _build_local_input_csv(criteria):
-        """Build data/input.csv expected by frontend/public/load_LOCAL.py."""
+        """Build data/input.csv expected by frontend/public/load_LOCAL.py.
+
+        A header row of criterion names, an ``is_qi`` row (TRUE/FALSE) marking
+        the qualitative criteria, then one row per alternative. Qualitative
+        cells are empty: each session's qualitative_indicators.csv fills them.
+        """
         criterion_names = [
             c.get('criterion_name')
             for c in criteria
@@ -1063,9 +1068,16 @@ class WorkflowService:
                     alternatives_order.append(alt_name)
                 values_by_alt[alt_name][crit_name] = alt.get('value', '')
 
+        qualitative_names = {
+            c.get('criterion_name')
+            for c in criteria
+            if isinstance(c, dict) and c.get('is_qualitative')
+        }
+
         output = io.StringIO()
         writer = csv.writer(output)
         writer.writerow(['Alternative', *criterion_names])
+        writer.writerow(['is_qi', *['TRUE' if name in qualitative_names else 'FALSE' for name in criterion_names]])
         for alt_name in alternatives_order:
             row = [alt_name]
             for crit_name in criterion_names:
@@ -1136,18 +1148,13 @@ class WorkflowService:
                 Path('worker/scripts/upmavt.py'),
                 Path('scripts/upmavt.py'),
             ])
+            session_inputs_path = self._find_existing_path([
+                Path('worker/scripts/session_inputs.py'),
+                Path('scripts/session_inputs.py'),
+            ])
 
-            main_template = self._read_text(main_path)
-            # Run main from project root, import exact worker scripts as package modules.
-            main_content = main_template.replace(
-                'from weight_space_definition import compute_weights',
-                'from scripts.weight_space_definition import compute_weights',
-            ).replace(
-                'from upmavt import run_upmavt',
-                'from scripts.upmavt import run_upmavt',
-            )
-
-            zf.writestr('main.py', main_content)
+            # main.py and load_LOCAL.py import the exact worker scripts from scripts/.
+            zf.writestr('main.py', self._read_text(main_path))
             zf.writestr('load_LOCAL.py', self._read_text(load_local_path))
             zf.writestr('README.md', self._read_text(readme_path).replace('python scripts/main.py', 'python main.py'))
             zf.writestr('requirements.txt', 'numpy\nscipy\nmatplotlib\n')
@@ -1156,8 +1163,10 @@ class WorkflowService:
             zf.writestr('scripts/__init__.py', '')
             zf.writestr('scripts/weight_space_definition.py', self._read_text(weight_space_path))
             zf.writestr('scripts/upmavt.py', self._read_text(upmavt_path))
+            zf.writestr('scripts/session_inputs.py', self._read_text(session_inputs_path))
 
-            # Local CSV data layout expected by load_LOCAL.py
+            # Local data layout expected by load_LOCAL.py. Numbers are written at
+            # full precision so a local run sees exactly what the web app uses.
             zf.writestr('data/input.csv', self._build_local_input_csv(criteria))
             for session_doc in session_docs:
                 if not isinstance(session_doc, dict):
@@ -1165,14 +1174,20 @@ class WorkflowService:
                 session_name = session_doc.get('name') or str(session_doc.get('_id'))
                 safe_session_name = self._safe_filename(session_name)
                 session_criteria = self._session_svc.resolve_session_criteria(session_doc)
-                qualitative = session_doc.get('qualitative_indicators') or {}
+                # Same normalization the web app applies before each run.
+                qualitative = self._session_svc.normalize_qualitative_indicators(
+                    session_criteria, session_doc.get('qualitative_indicators') or {}
+                )
                 value_functions = session_doc.get('value_functions') or {}
                 vf_criteria = value_functions.get('criteria', {}) if isinstance(value_functions, dict) else {}
                 bwt = session_doc.get('bwt') or {}
+                practitioner_settings = self._session_svc.normalize_practitioner_settings(
+                    session_criteria, session_doc.get('practitioner_settings')
+                )
 
                 zf.writestr(
                     f'data/{safe_session_name}/value_functions.csv',
-                    ExportService.build_value_functions_csv(session_criteria, vf_criteria, qualitative),
+                    ExportService.build_value_functions_csv(session_criteria, vf_criteria, qualitative, precision=None),
                 )
                 zf.writestr(
                     f'data/{safe_session_name}/qualitative_indicators.csv',
@@ -1180,12 +1195,23 @@ class WorkflowService:
                 )
                 zf.writestr(
                     f'data/{safe_session_name}/bwt_comparisons.csv',
-                    ExportService.build_pile_bwt_csv(bwt),
+                    ExportService.build_pile_bwt_csv(bwt, precision=None),
+                )
+                # Confidence adjustments and opinion weight set by the practitioner.
+                zf.writestr(
+                    f'data/{safe_session_name}/practitioner_settings.json',
+                    self._json_bytes(practitioner_settings),
                 )
 
             computed_weights = study.get('computed_weights')
             if computed_weights:
                 zf.writestr('weights/computed_weights.json', self._json_bytes(computed_weights))
+                # Weight-space settings the study ran with, reused by main.py step 1.
+                zf.writestr('data/settings.json', self._json_bytes({
+                    'use_non_linear_model': computed_weights.get('use_non_linear_model', True),
+                    'phase3_tolerance_pct': computed_weights.get('phase3_tolerance_pct', 1.0),
+                    'weight_space_parameters': computed_weights.get('weight_space_parameters') or {},
+                }))
 
             for step_number in [2, 3, 4, 5, 6]:
                 step_results = study.get(f'step_{step_number}_results')
