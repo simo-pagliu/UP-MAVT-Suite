@@ -140,9 +140,6 @@ hand-checkable mathematics:
 
 ## Publication
 
-Two publications are in preparation:
-
-- **Software paper** (SoftwareX) — describes the UP-MAVT Suite software itself. Coming soon.
-- **Method paper** (European Journal of Operational Research) — details the UP-MAVT methodology and workflow. Coming soon.
+Two publications are in preparation.
 
 Links and DOIs will be added here once available.
