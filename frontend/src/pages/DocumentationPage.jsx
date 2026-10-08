@@ -187,9 +187,7 @@ function ArchitecturePanel() {
         items={[
           '.env / .env.example — ADMIN_PASSWORD and other secrets; never commit .env to version control.',
           'frontend/src/config.js — exports API_URL (read from VITE_API_URL env var).',
-          'docker-compose.yml — service definitions, port mappings, volume mounts, environment injection.',
-          'deployment_notes.md — step-by-step instructions for building, tagging, and pushing images to the PSI Gitea registry.',
-        ]}
+          'docker-compose.yml — service definitions, port mappings, volume mounts, environment injection.',        ]}
       />
     </VStack>
   )
@@ -470,7 +468,6 @@ function FileStructurePanel() {
 {`elicitation-tools/
 ├── docker-compose.yml          # Service orchestration
 ├── .env / .env.example         # Secrets (never commit .env)
-├── deployment_notes.md         # Image build & push instructions
 │
 ├── frontend/                   # React + Vite SPA
 │   ├── src/

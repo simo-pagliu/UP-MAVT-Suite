@@ -86,13 +86,13 @@ _BASE_HTML = """\
   <div class="container">
     <div class="header"><h1>{heading}</h1></div>
     <div class="body">{body}</div>
-    <div class="footer">This is an automated message from mcda-up.psi.ch. Please do not reply.</div>
+    <div class="footer">This is an automated message from UP-MAVT Suite. Please do not reply.</div>
   </div>
 </body>
 </html>
 """
 
-_PLAIN_FOOTER = "\n\n---\nThis is an automated message from mcda-up.psi.ch. Please do not reply."
+_PLAIN_FOOTER = "\n\n---\nThis is an automated message from UP-MAVT Suite. Please do not reply."
 
 
 def _html(subject, heading, body):
@@ -510,7 +510,7 @@ class EmailService:
         Returns:
             dict: Delivery status dict.
         """
-        subject = 'Your mcda-up.psi.ch verification code'
+        subject = 'Your UP-MAVT Suite verification code'
         html_body = _html(
             subject=subject,
             heading='Verify Your Email Address',
