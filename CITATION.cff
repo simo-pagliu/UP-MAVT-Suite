@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the software paper below."
+title: "UP-MAVT suite: A web application for multi-criteria group decision analysis under uncertainty"
+type: software
+authors:
+  - family-names: Pagliuca
+    given-names: Simone
+  - family-names: Huang
+    given-names: River
+  - family-names: Cadoni
+    given-names: Matteo
+  - family-names: Burgherr
+    given-names: Peter
+license: MIT
+repository-code: "https://github.com/simo-pagliu/UP-MAVT-Suite"
+preferred-citation:
+  type: article
+  title: "UP-MAVT suite: A web application for multi-criteria group decision analysis under uncertainty"
+  authors:
+    - family-names: Pagliuca
+      given-names: Simone
+    - family-names: Huang
+      given-names: River
+    - family-names: Cadoni
+      given-names: Matteo
+    - family-names: Burgherr
+      given-names: Peter
+  journal: "SoftwareX"
+  year: 2026
+  doi: "10.1016/j.softx.2026.103112"
