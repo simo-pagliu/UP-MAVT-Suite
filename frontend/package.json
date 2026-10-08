@@ -1,6 +1,7 @@
 {
-  "name": "elicitation-frontend",
-  "version": "0.1.0",
+  "name": "up-mavt-suite-frontend",
+  "version": "1.0.0",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",
