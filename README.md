@@ -1,5 +1,9 @@
 # UP-MAVT Suite
 
+[![Paper](https://img.shields.io/badge/SoftwareX-10.1016%2Fj.softx.2026.103112-blue)](https://doi.org/10.1016/j.softx.2026.103112)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Cite](https://img.shields.io/badge/Cite-this%20software-orange)](#publication)
+
 Open-source web application for Multi-Criteria Decision Analysis (MCDA) under uncertainty, based on the UP-MAVT methodology.
 
 UP-MAVT Suite guides a group of stakeholders through a structured elicitation process to assign weights and preferences to a set of criteria, then runs a Monte Carlo simulation to produce robust, uncertainty-aware rankings of alternatives. The software supports three user roles: **Stakeholder** (participates in the elicitation workflow: qualitative indicators, value functions, pairwise weight comparison), **Practitioner** (sets up the case study, manages stakeholder sessions, and launches the analysis), and **Admin** (manages all studies and sessions through an administration panel).
