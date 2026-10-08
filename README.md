@@ -119,6 +119,16 @@ hand-checkable mathematics:
 
 ---
 
+## License
+
+Released under the [MIT License](LICENSE).
+
+---
+
 ## Publication
 
-Add the final publication link and DOI here when available.
+If you use this software, please cite the software paper:
+
+> Pagliuca S, Huang R, Cadoni M, Burgherr P. UP-MAVT suite: A web application for multi-criteria group decision analysis under uncertainty. *SoftwareX*. https://doi.org/10.1016/j.softx.2026.103112
+
+The paper describing the UP-MAVT method itself is a work in progress; its reference will be added here once published.
