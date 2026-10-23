@@ -309,19 +309,25 @@ function getAggregationPlotLabel(backendMethod, alphaMap = null, fallbackAlpha =
   return `${label} (alpha = ${formattedAlpha})`
 }
 
-// Controlled NumberInput whose displayed text is a local edit buffer, not a
-// direct reflection of the (clamped, rounded) committed value. Chakra's
-// NumberInput reformats a numeric `value` prop on every render, which fights
-// the user mid-keystroke (e.g. typing "0." gets reverted to "0", so the next
-// keystroke "5" is read as "05" and clamped to the max). Clamping/formatting
-// here only happens on blur, once the user is done typing.
 function formatOpinionWeightValue(weightValue) {
   const numericValue = Number(weightValue)
   if (!Number.isFinite(numericValue)) return null
   return Number(Math.max(0, numericValue).toFixed(2)).toString()
 }
 
-function AlphaNumberInput({
+function formatConfidenceAdjustmentValue(adjustment) {
+  const numericValue = Number(adjustment)
+  return Number.isFinite(numericValue) ? numericValue.toFixed(1) : null
+}
+
+// Controlled NumberInput whose displayed text is a local edit buffer, not a
+// direct reflection of the (clamped, rounded) committed value. Chakra's
+// NumberInput reformats a numeric `value` prop on every render, which fights
+// the user mid-keystroke (e.g. typing "0." gets reverted to "0", so the next
+// keystroke "5" is read as "05" and clamped to the max, and a leading "-" is
+// dropped). Clamping/formatting here only happens on blur, once the user is
+// done typing. Other props go to the NumberInput, `fieldProps` to its field.
+function BufferedNumberInput({
   value,
   onChange,
   min = -1,
@@ -331,6 +337,8 @@ function AlphaNumberInput({
   format = formatAlphaValue,
   isDisabled,
   width = '100px',
+  fieldProps,
+  ...inputProps
 }) {
   const [text, setText] = useState(() => format(value) ?? '0')
   const isFocusedRef = useRef(false)
@@ -342,6 +350,7 @@ function AlphaNumberInput({
 
   return (
     <NumberInput
+      {...inputProps}
       value={text}
       min={min}
       max={max}
@@ -363,7 +372,7 @@ function AlphaNumberInput({
         }
       }}
     >
-      <NumberInputField />
+      <NumberInputField {...fieldProps} />
       <NumberInputStepper>
         <NumberIncrementStepper />
         <NumberDecrementStepper />
@@ -868,30 +877,25 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
   }
 
   const handlePractitionerSettingsChange = (sessionId, updater) => {
-    let nextSettings = null
-    setPractitionerSettingsById((prev) => {
-      const session = sessions.find((entry) => entry._id === sessionId)
-      const current = normalizePractitionerSettings(
-        criteria,
-        prev[sessionId] || session?.practitioner_settings
-      )
-      nextSettings = normalizePractitionerSettings(
-        criteria,
-        typeof updater === 'function' ? updater(current) : updater
-      )
-      return {
-        ...prev,
-        [sessionId]: nextSettings,
-      }
-    });
-    if (nextSettings) {
-      const existingTimeout = practitionerSettingsSaveTimersRef.current[sessionId]
-      if (existingTimeout) clearTimeout(existingTimeout)
-      setPractitionerSettingsSaveStateById((prev) => ({ ...prev, [sessionId]: 'pending' }))
-      practitionerSettingsSaveTimersRef.current[sessionId] = setTimeout(() => {
-        handleSavePractitionerSettings(sessionId, nextSettings)
-      }, 500)
-    }
+    // Computed here rather than inside the state updater: React may run the updater
+    // later, and the save below needs the new settings now.
+    const session = sessions.find((entry) => entry._id === sessionId)
+    const current = normalizePractitionerSettings(
+      criteria,
+      practitionerSettingsById[sessionId] || session?.practitioner_settings
+    )
+    const nextSettings = normalizePractitionerSettings(
+      criteria,
+      typeof updater === 'function' ? updater(current) : updater
+    )
+    setPractitionerSettingsById((prev) => ({ ...prev, [sessionId]: nextSettings }))
+
+    const existingTimeout = practitionerSettingsSaveTimersRef.current[sessionId]
+    if (existingTimeout) clearTimeout(existingTimeout)
+    setPractitionerSettingsSaveStateById((prev) => ({ ...prev, [sessionId]: 'pending' }))
+    practitionerSettingsSaveTimersRef.current[sessionId] = setTimeout(() => {
+      handleSavePractitionerSettings(sessionId, nextSettings)
+    }, 500)
   }
 
   const handleSavePractitionerSettings = async (sessionId, settingsOverride = null) => {
@@ -915,8 +919,9 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       const response = await axios.put(`${API_URL}/session/${sessionId}/practitioner-settings`, {
         practitioner_settings: settings,
       })
+      // The on-screen values stay as they are: the user may have kept editing while
+      // this request was in flight, and its reply would overwrite those newer edits.
       const updatedSettings = normalizePractitionerSettings(criteria, response.data?.practitioner_settings)
-      setPractitionerSettingsById((prev) => ({ ...prev, [sessionId]: updatedSettings }))
       setSessions((prev) => prev.map((entry) => (
         entry._id === sessionId
           ? { ...entry, practitioner_settings: updatedSettings }
@@ -1326,7 +1331,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                       </SliderTrack>
                       <SliderThumb />
                     </Slider>
-                    <AlphaNumberInput
+                    <BufferedNumberInput
                       value={alphaValue}
                       onChange={(clamped) => setAggregationStepAlphas((prev) => ({ ...prev, [method.id]: clamped }))}
                       isDisabled={runningStep !== null}
@@ -1359,8 +1364,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     const totalWeight = rows.reduce((sum, row) => sum + row.weight, 0)
     const allDefault = rows.every((row) => row.weight === 1)
 
-    // Update all sessions in one state change and save each directly: several
-    // handlePractitionerSettingsChange calls in one tick would only schedule the first save.
+    // Update all sessions in one state change and save each right away (no debounce).
     const handleResetOpinionWeights = () => {
       const updates = {}
       rows.forEach((row) => {
@@ -1423,7 +1427,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                         </Td>
                         <Td isNumeric>
                           <Box display="inline-block">
-                            <AlphaNumberInput
+                            <BufferedNumberInput
                               value={weight}
                               min={0}
                               max={100}
@@ -3664,26 +3668,19 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                                   </Td>
                                   <Td isNumeric fontSize="sm" color="gray.600">{formatConfidenceValue(row.declared)}</Td>
                                   <Td isNumeric>
-                                    <NumberInput
+                                    <BufferedNumberInput
                                       size="sm"
-                                      step={0.1}
+                                      value={row.value}
+                                      onChange={row.onChange}
                                       min={-4}
                                       max={4}
+                                      step={0.1}
                                       precision={1}
-                                      value={Number(row.value).toFixed(1)}
-                                      onChange={(_, valueAsNumber) => {
-                                        if (!Number.isFinite(valueAsNumber)) return
-                                        row.onChange(valueAsNumber)
-                                      }}
-                                      maxW="90px"
+                                      format={formatConfidenceAdjustmentValue}
+                                      width="90px"
                                       ml="auto"
-                                    >
-                                      <NumberInputField textAlign="right" />
-                                      <NumberInputStepper>
-                                        <NumberIncrementStepper />
-                                        <NumberDecrementStepper />
-                                      </NumberInputStepper>
-                                    </NumberInput>
+                                      fieldProps={{ textAlign: 'right' }}
+                                    />
                                   </Td>
                                   <Td
                                     isNumeric
@@ -5460,6 +5457,7 @@ export {
   buildWeightSpacePlotSvg,
   inlineSvgComputedStyles,
   toWorkflowStepFilenameBase,
+  BufferedNumberInput,
 }
 
 export default RunUpMavtPage

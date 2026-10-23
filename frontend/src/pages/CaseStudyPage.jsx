@@ -656,8 +656,9 @@ function CaseStudyPage({ studySessionId, onStudyAccessed, onClearStudy }) {
       const response = await axios.put(`${API_URL}/session/${sessionId}/practitioner-settings`, {
         practitioner_settings: settings,
       })
+      // The notes box keeps what is typed: the server trims the stored text, and
+      // this reply may also be older than what the user has typed since.
       const updatedSettings = normalizePractitionerSettings(criteria, response.data?.practitioner_settings)
-      setPractitionerSettingsById((prev) => ({ ...prev, [sessionId]: updatedSettings }))
       setSessions((prev) => prev.map((session) => (
         session._id === sessionId
           ? { ...session, practitioner_settings: updatedSettings }
