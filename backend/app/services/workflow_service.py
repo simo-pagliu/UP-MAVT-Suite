@@ -565,11 +565,32 @@ class WorkflowService:
             raise NotFoundError(f'Step {step_number} results not found')
         if 'timestamp' in step_data and step_data['timestamp']:
             step_data['timestamp'] = step_data['timestamp'].isoformat()
+        if not isinstance(step_data.get('session_ids'), list):
+            legacy_session_ids = self._legacy_step_session_ids(study_session_id, step_number, step_data)
+            if legacy_session_ids is not None:
+                step_data['session_ids'] = legacy_session_ids
         if step_number == 4 and 'results_by_aggregation' in step_data:
             for agg_data in step_data['results_by_aggregation'].values():
                 if isinstance(agg_data, dict) and agg_data.get('timestamp'):
                     agg_data['timestamp'] = agg_data['timestamp'].isoformat()
         return step_data
+
+    def _legacy_step_session_ids(self, study_session_id, step_number, step_data):
+        """Session IDs for step results saved before the worker recorded them.
+
+        The task that produced the results holds the sessions it ran, in run
+        order. Returns ``None`` when that task is gone or its session count does
+        not match the per-elicitation results.
+        """
+        task = self._tasks.find_latest_completed_step(study_session_id, step_number)
+        params = task.get('params') if isinstance(task, dict) else None
+        session_ids = params.get('selected_session_ids') if isinstance(params, dict) else None
+        if not isinstance(session_ids, list):
+            return None
+        by_elicitation = step_data.get('results_by_elicitation')
+        if isinstance(by_elicitation, dict) and len(by_elicitation) != len(session_ids):
+            return None
+        return [str(session_id) for session_id in session_ids]
 
     @staticmethod
     def _normalize_weight_export_rows(raw_rows):

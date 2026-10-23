@@ -876,6 +876,15 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
     return session._id || fallbackLabel || 'Unknown session'
   }
 
+  // Per-elicitation results are keyed by run position; `session_ids` records which
+  // session ran at each position, since the selection may have changed since the run.
+  const getElicitationLabel = (stepResults, expertIdx) => {
+    const position = parseInt(expertIdx)
+    const sessionId = stepResults?.session_ids?.[position]
+    const session = sessionId ? sessions.find((entry) => entry._id === sessionId) : null
+    return getSessionLabel(session, `Expert ${position + 1}`)
+  }
+
   const handlePractitionerSettingsChange = (sessionId, updater) => {
     // Computed here rather than inside the state updater: React may run the updater
     // later, and the save below needs the new settings now.
@@ -1569,7 +1578,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       .sort((a, b) => Number(a[0]) - Number(b[0]))
 
     sortedElicitations.forEach(([expertIdx, iterations], idx) => {
-      const expertName = getSessionLabel(sessions[parseInt(expertIdx)], `Expert ${parseInt(expertIdx) + 1}`)
+      const expertName = getElicitationLabel(stepResults, expertIdx)
       const values = iterations.map((row) => Number(row[altIndex])).filter((v) => Number.isFinite(v))
       expertSeries.push({
         label: `E${idx + 1}`,
@@ -1652,7 +1661,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
       .sort((a, b) => Number(a[0]) - Number(b[0]))
       .map(([expertIdx], idx) => ({
         label: `E${idx + 1}`,
-        expertName: getSessionLabel(sessions[parseInt(expertIdx)], `Expert ${parseInt(expertIdx) + 1}`),
+        expertName: getElicitationLabel(stepResults, expertIdx),
       }))
   }
 

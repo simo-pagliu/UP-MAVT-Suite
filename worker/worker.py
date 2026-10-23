@@ -235,6 +235,9 @@ def handle_run_step(task):
             step_number, session_docs, criteria, weight_solutions_list, params,
             print_fn=logger.log, input_doc=input_doc,
         )
+        # Elicitation i of the results is session_ids[i]; saved so the results can
+        # be labelled by session even after the selection changes.
+        result_doc['session_ids'] = [str(doc.get('_id')) for doc in session_docs]
         save_step_results(db, study_session_id, step_number, result_doc)
 
         logger.log(f"\n✓ Step {step_number} completed and results saved to database.")

@@ -45,6 +45,26 @@ class TaskRepository(BaseRepository):
             sort=[('created_at', -1)]
         )
 
+    def find_latest_completed_step(self, study_session_id, step_number):
+        """Find the most recent completed ``run_step`` task for one step of a study.
+
+        Args:
+            study_session_id: The study session's identifier.
+            step_number (int): The UP-MAVT step number (2–6).
+
+        Returns:
+            dict | None: The most recent completed task document, or ``None``.
+        """
+        return self._col.find_one(
+            {
+                'params.study_session_id': str(study_session_id),
+                'type': 'run_step',
+                'params.step_number': step_number,
+                'status': 'completed',
+            },
+            sort=[('created_at', -1)]
+        )
+
     def insert(self, doc):
         """Insert a new task document.
 

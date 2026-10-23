@@ -404,6 +404,44 @@ class TestGetStepResults:
         result = wf_svc.get_step_results(study_id, 2)
         assert result['data'] == [1, 2, 3]
 
+    def _insert_completed_step_task(self, mock_db, study_id, step_number, session_ids, created_at):
+        mock_db.tasks.insert_one({
+            'type': 'run_step',
+            'status': 'completed',
+            'params': {
+                'study_session_id': study_id,
+                'step_number': step_number,
+                'selected_session_ids': session_ids,
+            },
+            'created_at': created_at,
+        })
+
+    def test_keeps_session_ids_saved_by_the_worker(self, mock_db, wf_svc, study_id):
+        mock_db.study_sessions.update_one(
+            {'_id': ObjectId(study_id)},
+            {'$set': {'step_2_results': {'session_ids': ['s2', 's1'], 'results_by_elicitation': {'0': [], '1': []}}}}
+        )
+        self._insert_completed_step_task(mock_db, study_id, 2, ['other'], datetime.now(timezone.utc))
+        assert wf_svc.get_step_results(study_id, 2)['session_ids'] == ['s2', 's1']
+
+    def test_legacy_results_take_session_ids_from_the_latest_task(self, mock_db, wf_svc, study_id):
+        mock_db.study_sessions.update_one(
+            {'_id': ObjectId(study_id)},
+            {'$set': {'step_2_results': {'results_by_elicitation': {'0': [], '1': []}}}}
+        )
+        self._insert_completed_step_task(mock_db, study_id, 2, ['old-a', 'old-b'], datetime(2026, 1, 1, tzinfo=timezone.utc))
+        self._insert_completed_step_task(mock_db, study_id, 2, ['s3', 's1'], datetime(2026, 2, 1, tzinfo=timezone.utc))
+        self._insert_completed_step_task(mock_db, study_id, 5, ['x', 'y'], datetime(2026, 3, 1, tzinfo=timezone.utc))
+        assert wf_svc.get_step_results(study_id, 2)['session_ids'] == ['s3', 's1']
+
+    def test_legacy_results_skip_task_with_mismatched_session_count(self, mock_db, wf_svc, study_id):
+        mock_db.study_sessions.update_one(
+            {'_id': ObjectId(study_id)},
+            {'$set': {'step_2_results': {'results_by_elicitation': {'0': [], '1': []}}}}
+        )
+        self._insert_completed_step_task(mock_db, study_id, 2, ['only-one'], datetime.now(timezone.utc))
+        assert 'session_ids' not in wf_svc.get_step_results(study_id, 2)
+
 
 # ---------------------------------------------------------------------------
 # export_weight_solutions_csv / export_weight_solutions_single_csv
