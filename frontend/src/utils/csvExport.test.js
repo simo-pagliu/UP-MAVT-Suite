@@ -46,7 +46,7 @@ const parseCSV = (csv) =>
     for (const char of line) {
       if (char === '"') {
         inQuotes = !inQuotes
-      } else if (char === ',' && !inQuotes) {
+      } else if (char === ';' && !inQuotes) {
         values.push(current)
         current = ''
       } else {
@@ -69,8 +69,12 @@ describe('generateInputCSV', () => {
   it('produces the correct number of rows', () => {
     const csv = generateInputCSV(makeCriteria())
     const rows = csv.split('\n')
-    // header + group + description + 2 alternatives + unit = 6 rows
-    expect(rows).toHaveLength(6)
+    // header + group + description + is_qi + vf_method + min + max + 2 alternatives + unit = 10 rows
+    expect(rows).toHaveLength(10)
+  })
+
+  it('uses semicolons as the delimiter', () => {
+    expect(generateInputCSV(makeCriteria()).split('\n')[0]).toBe('Alternative;C1;C2')
   })
 
   it('first row is the header (Alternative, criterion names)', () => {
@@ -106,19 +110,27 @@ describe('generateInputCSV', () => {
     expect(lastRow[2]).toBe('EUR')
   })
 
+  it('marks qualitative criteria and the value-function method', () => {
+    const criteria = makeCriteria()
+    criteria[1] = { ...criteria[1], is_qualitative: true, use_mid_splitting: true }
+    const rows = parseCSV(generateInputCSV(criteria))
+    expect(rows[3]).toEqual(['is_qi', 'FALSE', 'TRUE'])
+    expect(rows[4]).toEqual(['vf_method', 'FALSE', 'TRUE'])
+  })
+
   it('alternative rows contain names and values', () => {
     const criteria = makeCriteria()
     const rows = parseCSV(generateInputCSV(criteria))
-    // rows[3] = Alt A, rows[4] = Alt B
-    expect(rows[3][0]).toBe('Alt A')
-    expect(rows[3][1]).toBe('10')
-    expect(rows[3][2]).toBe('5')
-    expect(rows[4][0]).toBe('Alt B')
-    expect(rows[4][1]).toBe('20')
-    expect(rows[4][2]).toBe('15')
+    // rows[7] = Alt A, rows[8] = Alt B (after the 7 header and metadata rows)
+    expect(rows[7][0]).toBe('Alt A')
+    expect(rows[7][1]).toBe('10')
+    expect(rows[7][2]).toBe('5')
+    expect(rows[8][0]).toBe('Alt B')
+    expect(rows[8][1]).toBe('20')
+    expect(rows[8][2]).toBe('15')
   })
 
-  it('includes Min/Max rows when use_custom_min_max is set', () => {
+  it('fills the Min/Max rows when use_custom_min_max is set', () => {
     const criteria = [
       {
         criterion_name: 'C1',
@@ -142,16 +154,16 @@ describe('generateInputCSV', () => {
     expect(maxRow[1]).toBe('100')
   })
 
-  it('does not include Min/Max rows when no criterion has custom min/max', () => {
-    const csv = generateInputCSV(makeCriteria())
-    expect(csv).not.toContain('Min')
-    expect(csv).not.toContain('Max')
+  it('leaves the Min/Max rows empty when no criterion has custom min/max', () => {
+    const rows = parseCSV(generateInputCSV(makeCriteria()))
+    expect(rows.find((r) => r[0] === 'Min')).toEqual(['Min', '', ''])
+    expect(rows.find((r) => r[0] === 'Max')).toEqual(['Max', '', ''])
   })
 
-  it('properly quotes cells that contain commas', () => {
+  it('properly quotes cells that contain semicolons', () => {
     const criteria = [
       {
-        criterion_name: 'C, one',
+        criterion_name: 'C; one',
         unit: 'km',
         group: '',
         description: '',
@@ -163,7 +175,7 @@ describe('generateInputCSV', () => {
       },
     ]
     const csv = generateInputCSV(criteria)
-    expect(csv).toContain('"C, one"')
+    expect(csv).toContain('"C; one"')
   })
 })
 

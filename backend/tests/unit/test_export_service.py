@@ -14,8 +14,8 @@ from app.services.export_service import ExportService
 # ---------------------------------------------------------------------------
 
 def read_csv(text):
-    """Parse CSV text into a list of dicts (first row = header)."""
-    reader = csv.DictReader(io.StringIO(text))
+    """Parse the exports' semicolon-separated CSV text into a list of dicts (first row = header)."""
+    reader = csv.DictReader(io.StringIO(text), delimiter=';')
     return list(reader)
 
 
@@ -314,7 +314,9 @@ class TestGenerateQualitativeValueFunction:
         points = ExportService.generate_qualitative_value_function(QUALITATIVE_INDICATORS, 'Quality')
         assert points[0]['y'] == 0  # increasing → y=0 at x=0
 
-    def test_decreasing_function_starts_at_1(self):
+    def test_decreasing_criterion_still_uses_the_identity_line(self):
+        # The direction is already in the alternatives' values, so the
+        # function itself stays y = x.
         qi_dec = {
             'Quality': {
                 'ranking': {'A': 1, 'B': 2},
@@ -323,7 +325,7 @@ class TestGenerateQualitativeValueFunction:
             }
         }
         points = ExportService.generate_qualitative_value_function(qi_dec, 'Quality')
-        assert points[0]['y'] == 1
+        assert points == [{'x': 0, 'y': 0}, {'x': 1, 'y': 1}]
 
     def test_returns_empty_for_missing_data(self):
         assert ExportService.generate_qualitative_value_function({}, 'Missing') == []

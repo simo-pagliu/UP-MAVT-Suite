@@ -193,20 +193,20 @@ describe('RunUpMavtPage export helpers', () => {
     expect(disjoint.consensusPercent).toBeCloseTo(0, 6)
   })
 
-  it('builds consensus quantification CSV for step 2 exports', () => {
+  it('builds the consensus quantification CSV exported for Step 4', () => {
     const csv = buildConsensusQuantificationCsv([
       {
         alternative: 'Alt A',
         elicitationCount: 3,
-        differenceArea: 1.234567,
-        consensusRatio: 0.6172835,
-        consensusPercent: 61.72835,
+        differenceArea: 1.234568,
+        consensusRatio: 0.617284,
+        consensusPercent: 61.7284,
       },
     ])
 
-    expect(csv).toContain('title;Step 2 consensus quantification')
+    expect(csv).toContain('title;Step 4 consensus analysis quantification')
     expect(csv).toContain('alternative;elicitation_count;difference_area;consensus_ratio;consensus_percent')
-    expect(csv).toContain('Alt A;3;1.234567;0.617284;61.73')
+    expect(csv).toContain('Alt A;3;1.234568;0.617284;61.73')
   })
 
   it('includes weight-space target when available', () => {

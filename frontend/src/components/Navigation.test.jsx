@@ -14,7 +14,6 @@ const renderNavigation = (props = {}) => {
     sessionId: null,
     studySessionId: null,
     features: { qi: false, vf: false, bwt: false },
-    onLogin: vi.fn(),
     onLogout: vi.fn(),
     onDocumentation: vi.fn(),
   }
@@ -39,23 +38,17 @@ describe('Navigation – branding', () => {
 // Login / Logout button
 // ---------------------------------------------------------------------------
 describe('Navigation – login / logout', () => {
-  it('shows a Login button when not logged in', () => {
+  // Logging in happens on the landing page, so the bar has no Login button.
+  it('shows no Logout or page buttons when not logged in', () => {
     renderNavigation({ isLoggedIn: false })
-    expect(screen.getByRole('button', { name: /login/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /logout/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /overview/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /documentation/i })).toBeInTheDocument()
   })
 
   it('shows a Logout button when logged in', () => {
     renderNavigation({ isLoggedIn: true, currentRole: 'stakeholder' })
     expect(screen.getByRole('button', { name: /logout/i })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /login/i })).not.toBeInTheDocument()
-  })
-
-  it('calls onLogin when the Login button is clicked', async () => {
-    const onLogin = vi.fn()
-    renderNavigation({ isLoggedIn: false, onLogin })
-    await userEvent.click(screen.getByRole('button', { name: /login/i }))
-    expect(onLogin).toHaveBeenCalledOnce()
   })
 
   it('calls onLogout when the Logout button is clicked', async () => {
@@ -81,7 +74,7 @@ describe('Navigation – admin role', () => {
 // Navigation items – stakeholder role
 // ---------------------------------------------------------------------------
 describe('Navigation – stakeholder role', () => {
-  it('shows all stakeholder pages regardless of feature flags', () => {
+  it('hides the pages of disabled features', () => {
     renderNavigation({
       isLoggedIn: true,
       currentRole: 'stakeholder',
@@ -89,21 +82,21 @@ describe('Navigation – stakeholder role', () => {
       features: { qi: true, vf: false, bwt: false },
     })
     expect(screen.getByRole('button', { name: /qualitative indicators/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /quantitative/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /weights/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /quantitative/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /weights/i })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /overview/i })).toBeInTheDocument()
   })
 
-  it('still shows all stakeholder pages when every feature flag is false', () => {
+  it('shows only the Overview when every feature flag is false', () => {
     renderNavigation({
       isLoggedIn: true,
       currentRole: 'stakeholder',
       sessionId: 'sess-1',
       features: { qi: false, vf: false, bwt: false },
     })
-    expect(screen.getByRole('button', { name: /qualitative indicators/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /quantitative/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /weights/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /qualitative indicators/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /quantitative/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /weights/i })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /overview/i })).toBeInTheDocument()
   })
 

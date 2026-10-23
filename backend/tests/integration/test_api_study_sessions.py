@@ -3,6 +3,8 @@ import io
 import pytest
 from bson.objectid import ObjectId
 
+from app.services.email_verification_service import EmailVerificationService
+
 
 VALID_CRITERIA = [
     {
@@ -24,6 +26,19 @@ def create_study(client, code='STUDY-001'):
     resp = client.post('/api/study-session', json={'code': code})
     assert resp.status_code == 201
     return resp.json['study_session_id']
+
+
+def create_study_with_email(client, db, code, email):
+    """Create a study with a verified creator email, as the login page does:
+    request a code, confirm it, then send the verification token along."""
+    verification = EmailVerificationService(db)
+    issued = verification.issue_code(email)
+    token = verification.confirm_code(email, issued['code'])['verification_token']
+    return client.post('/api/study-session', json={
+        'code': code,
+        'creator_email': email,
+        'email_verification_token': token,
+    })
 
 
 def set_input(client, study_id, criteria=None):
@@ -297,27 +312,29 @@ class TestWorkflowStatus:
 # ---------------------------------------------------------------------------
 
 class TestCreateStudySessionWithEmail:
-    def test_create_with_creator_email_returns_email_status(self, client, monkeypatch):
+    def test_create_with_creator_email_returns_email_status(self, client, mock_db, monkeypatch):
         monkeypatch.delenv('SMTP_HOST', raising=False)
-        resp = client.post('/api/study-session', json={
-            'code': 'EMAIL-STUDY',
-            'creator_email': 'owner@example.com',
-        })
+        resp = create_study_with_email(client, mock_db, 'EMAIL-STUDY', 'owner@example.com')
         assert resp.status_code == 201
         assert resp.json['study_session_id']
         assert resp.json['email_status'] == 'skipped'
+
+    def test_create_with_unverified_creator_email_is_rejected(self, client):
+        resp = client.post('/api/study-session', json={
+            'code': 'UNVERIFIED-EMAIL',
+            'creator_email': 'owner@example.com',
+        })
+        assert resp.status_code == 400
+        assert 'verification' in resp.json['error'].lower()
 
     def test_create_without_creator_email_no_email_status(self, client):
         resp = client.post('/api/study-session', json={'code': 'NO-EMAIL'})
         assert resp.status_code == 201
         assert 'email_status' not in resp.json
 
-    def test_create_stores_creator_email(self, client, monkeypatch):
+    def test_create_stores_creator_email(self, client, mock_db, monkeypatch):
         monkeypatch.delenv('SMTP_HOST', raising=False)
-        resp = client.post('/api/study-session', json={
-            'code': 'STORED-EMAIL',
-            'creator_email': 'owner@example.com',
-        })
+        resp = create_study_with_email(client, mock_db, 'STORED-EMAIL', 'owner@example.com')
         study_id = resp.json['study_session_id']
         study_resp = client.get(f'/api/study-session/{study_id}')
         assert study_resp.json.get('creator_email') == 'owner@example.com'
@@ -362,13 +379,10 @@ class TestCompleteElicitationSession:
         assert resp.json['status'] == 'completed'
         assert resp.json['session_locked'] is True
 
-    def test_complete_sends_email_when_creator_email_set(self, client, monkeypatch):
+    def test_complete_sends_email_when_creator_email_set(self, client, mock_db, monkeypatch):
         monkeypatch.delenv('SMTP_HOST', raising=False)
         # Create study with a creator email
-        resp = client.post('/api/study-session', json={
-            'code': 'EMAIL-NOTIFY-STUDY',
-            'creator_email': 'practitioner@example.com',
-        })
+        resp = create_study_with_email(client, mock_db, 'EMAIL-NOTIFY-STUDY', 'practitioner@example.com')
         sid = resp.json['study_session_id']
         set_input(client, sid)
         esid = create_elicitation_session(client, sid, 'EXPERT-B')
@@ -440,10 +454,7 @@ class TestNotifyInactiveStudySessions:
         from app.services import AuthenticationService
         import os
         os.environ.pop('SMTP_HOST', None)
-        create_resp = client.post('/api/study-session', json={
-            'code': 'OLD-STUDY-EMAIL',
-            'creator_email': 'owner@example.com',
-        })
+        create_resp = create_study_with_email(client, mock_db, 'OLD-STUDY-EMAIL', 'owner@example.com')
         sid = create_resp.json['study_session_id']
         old_date = datetime.now(timezone.utc) - timedelta(days=400)
         mock_db.study_sessions.update_one(
