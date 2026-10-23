@@ -142,6 +142,12 @@ hand-checkable mathematics:
 
 ---
 
+## Known issues
+
+- **GEO+offset aggregation:** only α in (0, 1] changes the result. Every α ≤ 0 gives the same result as a very small positive α, close to (but not exactly) WAM.
+
+---
+
 ## License
 
 Released under the [MIT License](LICENSE).

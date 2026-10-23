@@ -2796,10 +2796,9 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     Uncertainty Propagated - Multi-Attribute Value Theory (UP-MAVT) is an extension of traditional MAVT, developed by Pagliuca et al. (2026 - publication forthcoming) to systematically incorporate uncertainty into the decision analysis process.
                     {' '}
                     <Link color="blue.600" textDecoration="underline" cursor="pointer" onClick={onUncertaintiesOpen}>
-                      This diagram illustrates the sources of uncertainty considered in the framework.  
-                      The UP-MAVT workflow guides the practitioner through the analysis, in the five steps that are detailed below.
-                      
+                      This diagram illustrates the sources of uncertainty considered in the framework.
                     </Link>
+                    {' '}The UP-MAVT workflow guides the practitioner through the analysis in the five steps detailed below.
                   </Text>
 
                   <Box>
@@ -2815,7 +2814,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                       <ListItem>Click <b>Run Compute Weights</b>.</ListItem>
                       <ListItem>Review the <b>Weight Space Plot</b> for each session — it shows the region of feasible criteria weights implied by each expert's answers.</ListItem>
                       <ListItem>Open <b>Declared vs Computed Ratios</b> to sanity-check that the weight ratios the algorithm derived roughly match what the expert declared. A session with wildly diverging ratios may indicate confused or contradictory input.</ListItem>
-                      <ListItem>In <b>Confidence Review</b>, look at each expert's self-declared confidence and adjust it if you have reason to believe it's over- or under-stated (e.g., you observed hesitation during elicitation, or the consistency check in the previous point flags a problem). Adjustments can be applied overall, to all quantitative indicators, to all value functions, or per criterion — more specific adjustments override general ones. Adjusted values are clipped to the 0-4 scale and are never shown back to the expert.</ListItem>
+                      <ListItem>In <b>Confidence Review</b>, look at each expert's self-declared confidence and adjust it if you have reason to believe it's over- or under-stated (e.g., you observed hesitation during elicitation, or the consistency check in the previous point flags a problem). Adjustments can be applied overall, to all qualitative indicators, to all value functions, or per criterion, and they add up: the effective confidence is the declared value plus every adjustment that applies to it. Effective values are clipped to the 0-4 scale and are never shown back to the expert.</ListItem>
                     </OrderedList>
                   </Box>
 
@@ -2846,7 +2845,9 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                         </UnorderedList>
                       </ListItem>
                       <ListItem>Set the number of Monte Carlo iterations (the default is fine in most cases).</ListItem>
+                      <ListItem>(Optional) Open <b>Advanced (NSMC)</b> to set opinion weights, i.e. how often each expert is drawn when their opinions are pooled. They are equal by default.</ListItem>
                       <ListItem>Click <b>Run</b> and compare the resulting <b>ranking heatmaps</b>, one per method — each shows how often each alternative lands in each rank.</ListItem>
+                      <ListItem>Mark one of the checked methods as <b>Use for next steps</b>. That method and its α are used, read-only, in Steps 3-5; come back here to change them.</ListItem>
                     </OrderedList>
                   </Box>
 
@@ -2860,7 +2861,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     </Text>
                     <Text fontWeight="semibold" color="gray.700" mb={1}>What you do:</Text>
                     <OrderedList spacing={1} color="gray.700" pl={2}>
-                      <ListItem>Pick a single aggregation method and α (informed by what you saw in Step 2).</ListItem>
+                      <ListItem>Check the aggregation method and α shown: they are the ones chosen in Step 2.</ListItem>
                       <ListItem>Set the Monte Carlo iteration count (the default is fine in most cases) and run SMC.</ListItem>
                       <ListItem>Inspect the per-alternative value distribution plots, one per expert — look at spread and skew, and watch for unusually wide distributions.</ListItem>
                       <ListItem>If needed, use the distribution statistics table (mean, median, std. dev., IQR, skewness, kurtosis, percentiles) for a numeric read on how uncertain each alternative's value is.</ListItem>
@@ -2876,11 +2877,11 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     </Text>
                     <Text fontWeight="semibold" color="gray.700" mb={1}>What you do:</Text>
                     <OrderedList spacing={1} color="gray.700" pl={2}>
-                      <ListItem>Pick the aggregation method, α, and iteration count (left column), then run the analysis.</ListItem>
+                      <ListItem>Set the iteration count, then run the analysis. It uses the aggregation method and α chosen in Step 2.</ListItem>
                       <ListItem>
                         Read the consensus score <InlineMath math={'C = \\frac{A}{N-1}'} />, where <InlineMath math={'A = \\sum_x \\left|\\max_i p_i(x) - \\sum_i p_i(x)\\right|'} /> is the average absolute gap between each expert's distribution and the group's maximum overlap at each point. Higher values mean the experts agree more; lower values mean their opinions diverge.
                       </ListItem>
-                      <ListItem>If needed, use the session list on the right to exclude opinions from this step and from the final results, then re-run.</ListItem>
+                      <ListItem>If needed, use the <b>Included Sessions</b> list to exclude opinions from this step and from the final results, then re-run.</ListItem>
                     </OrderedList>
                   </Box>
 
@@ -2893,7 +2894,8 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                     </Text>
                     <Text fontWeight="semibold" color="gray.700" mb={1}>What you do:</Text>
                     <OrderedList spacing={1} color="gray.700" pl={2}>
-                      <ListItem>Pick the previously chosen aggregation method and α if needed; the default MC iteration count is fine in most cases.</ListItem>
+                      <ListItem>Check the aggregation method and α chosen in Step 2; the default MC iteration count is fine in most cases.</ListItem>
+                      <ListItem>(Optional) Adjust the opinion weights under <b>Advanced (NSMC)</b>; they are shared with Step 2.</ListItem>
                       <ListItem>Click <b>Run</b> to get the final ranking heatmap.</ListItem>
                       <ListItem>Click <b>Export Results</b> to choose which artifacts to download.</ListItem>
                     </OrderedList>
@@ -2930,7 +2932,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                           </Tr>
                           <Tr>
                             <Td fontWeight="semibold">Confidence adjustment</Td>
-                            <Td>Practitioner-side correction to an expert's self-declared confidence; hierarchical (overall → QI/VF → per-criterion), clipped to 0-4.</Td>
+                            <Td>Practitioner-side correction to an expert's self-declared confidence; the overall, QI/VF and per-criterion adjustments add up, and the result is clipped to 0-4.</Td>
                           </Tr>
                           <Tr>
                             <Td fontWeight="semibold">Opinion weight</Td>
@@ -2964,10 +2966,13 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                         </Link>
                       </Text>
                       <Text color="gray.700">
-                        Software paper (SoftwareX): <Text as="span" fontStyle="italic" color="gray.500">coming soon.</Text>
+                        Software paper (SoftwareX):{' '}
+                        <Link href="https://doi.org/10.1016/j.softx.2026.103112" isExternal color="blue.600" textDecoration="underline">
+                          Pagliuca S, Huang R, Cadoni M, Burgherr P. UP-MAVT suite: A web application for multi-criteria group decision analysis under uncertainty. <i>SoftwareX</i>. <ExternalLinkIcon mx="2px" />
+                        </Link>
                       </Text>
                       <Text color="gray.700">
-                        Method paper (European Journal of Operational Research), detailing the UP-MAVT methodology and workflow: <Text as="span" fontStyle="italic" color="gray.500">coming soon.</Text>
+                        Method paper, detailing the UP-MAVT methodology and workflow: <Text as="span" fontStyle="italic" color="gray.500">coming soon.</Text>
                       </Text>
                       <Text color="gray.700">
                         The α-parameterized (partially compensatory) aggregation methods used in Step 2 follow{' '}
@@ -3528,7 +3533,7 @@ function RunUpMavtPage({ studySessionId, onNavigate }) {
                           Confidence Review
                         </Heading>
                         <Box color="gray.600">
-                          Review the self-declared confidence reported by each expert and apply practitioner-side corrections for underestimation or overestimation. Adjustments are applied hierarchically, the resulting confidence values are clipped to the 0-4 range, and these corrections are not shown in the expert-facing interface. Confidence only sets the width of the uncertainty bands; it does not change how often an expert is sampled in NSMC, which is controlled separately by the opinion weights in the Advanced (NSMC) settings of Steps 2 and 5.
+                          Review the self-declared confidence reported by each expert and apply practitioner-side corrections for underestimation or overestimation. The overall, group (QI/VF) and per-criterion adjustments add up, the resulting confidence values are clipped to the 0-4 range, and these corrections are not shown in the expert-facing interface. Confidence only sets the width of the uncertainty bands; it does not change how often an expert is sampled in NSMC, which is controlled separately by the opinion weights in the Advanced (NSMC) settings of Steps 2 and 5.
                         </Box>
                       </VStack>
 
