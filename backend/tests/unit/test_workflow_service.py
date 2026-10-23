@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import zipfile
+from pathlib import Path
 
 import pytest
 from bson.objectid import ObjectId
@@ -540,7 +541,12 @@ class TestOfflineBundleExport:
             'weight_space_parameters': {'max_results': 12},
             'weight_solutions': {session_id: [{'Cost': 0.4, 'Quality': 0.6}]},
             'timestamp': datetime.now(timezone.utc),
-        }}})
+        }, 'workflow_preferences': {'run_page': {
+            'selected_session_ids': [session_id, str(ObjectId())],
+            'aggregation_step_methods': ['WAM', 'WPM'],
+            'aggregation_step_alphas': {'WPM': 0.3},
+            'chosen_aggregation_method': 'WPM',
+        }}}})
 
         buf, _, _ = wf_svc.export_workflow_data_zip(sid)
         zf = zipfile.ZipFile(buf)
@@ -551,10 +557,11 @@ class TestOfflineBundleExport:
     def _read(zf, name):
         return zf.read(name).decode('utf-8')
 
-    def test_bundles_the_shared_session_inputs_module(self, bundle):
+    def test_bundles_the_worker_scripts_unchanged(self, bundle):
         zf, _ = bundle
-        assert 'scripts/session_inputs.py' in zf.namelist()
-        assert 'def build_alternatives_with_qualitative' in self._read(zf, 'scripts/session_inputs.py')
+        worker_scripts = Path(__file__).resolve().parents[3] / 'worker' / 'scripts'
+        for name in ['session_inputs.py', 'workflow_steps.py', 'upmavt.py', 'weight_space_definition.py']:
+            assert self._read(zf, f'scripts/{name}') == (worker_scripts / name).read_text(encoding='utf-8')
 
     def test_input_csv_marks_qualitative_criteria(self, bundle):
         zf, _ = bundle
@@ -563,14 +570,32 @@ class TestOfflineBundleExport:
         assert rows[1] == ['is_qi', 'FALSE', 'TRUE']
         assert rows[2] == ['A', '100', '']
 
-    def test_writes_weight_settings_the_study_used(self, bundle):
-        zf, _ = bundle
+    def test_writes_the_settings_the_study_used(self, bundle):
+        zf, folder = bundle
         settings = json.loads(self._read(zf, 'data/settings.json'))
         assert settings == {
+            # Selected sessions that still exist, as their folder names.
+            'sessions': [folder.split('/')[1]],
             'use_non_linear_model': False,
             'phase3_tolerance_pct': 2.5,
             'weight_space_parameters': {'max_results': 12},
+            'aggregation': {
+                'chosen_method': 'weighted_power_mean',
+                'compared_methods': ['weighted_sum', 'weighted_power_mean'],
+                'alphas': {'weighted_power_mean': 0.3},
+            },
         }
+
+    def test_aggregation_settings_default_to_the_run_page_defaults(self, mock_db, wf_svc):
+        sid = StudySessionService(mock_db).create('NO-PREFS-STUDY')
+        buf, _, _ = wf_svc.export_workflow_data_zip(sid)
+        with zipfile.ZipFile(buf) as zf:
+            settings = json.loads(zf.read('data/settings.json').decode('utf-8'))
+        assert settings == {'aggregation': {
+            'chosen_method': 'weighted_sum',
+            'compared_methods': ['weighted_sum', 'geometric_mean', 'harmonic_mean'],
+            'alphas': {},
+        }}
 
     def test_writes_practitioner_settings_per_session(self, bundle):
         zf, folder = bundle

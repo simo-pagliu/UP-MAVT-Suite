@@ -11,13 +11,6 @@ standardized Python dictionaries/lists that the core modules expect.
 
 from bson.objectid import ObjectId
 
-# Pure session -> engine-input helpers, shared with the offline export bundle.
-from .session_inputs import (  # noqa: F401  (re-exported for worker.py)
-    build_value_functions_from_session,
-    build_comparisons_from_session,
-    build_alternatives_with_qualitative,
-)
-
 
 def load_input_data(db, study_session_id):
     """Load criteria and alternatives from the input document.
@@ -296,7 +289,3 @@ def save_step_results(db, study_session_id, step_number, results):
         {'_id': ObjectId(study_session_id)},
         {'$set': {field: result_doc}}
     )
-
-# ============================================================================
-# HELPER FUNCTIONS FOR DATA EXTRACTION & PROCESSING
-# ============================================================================

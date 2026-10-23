@@ -2,25 +2,16 @@
 """
 Load data from local CSV files for UPMAVT analysis.
 
-This module provides functions to extract data from CSV files and format it
-for use by the core analysis modules (upmavt.py, weight_space_definition.py).
-
-The key principle: these functions read the files of a Suite export into the
-same session-shaped dictionaries the web worker loads from MongoDB, then build
-the engine inputs with the worker's own code (scripts/session_inputs.py), so an
-offline run uses exactly the same data preparation as the web app.
+This is the offline counterpart of the worker's load_DB.py: it reads the files
+of a Suite export into the same session-shaped dictionaries the web worker loads
+from MongoDB. Everything after loading runs the worker's own code
+(scripts/workflow_steps.py and the modules it uses), so an offline run computes
+exactly what the web app computes.
 """
 
 import os
 import csv
 import json
-
-from scripts.session_inputs import (
-    build_alternatives_with_qualitative,
-    build_comparisons_from_session,
-    build_value_functions_from_session,
-    compute_opinion_weights,
-)
 
 
 # Label-column values of input.csv rows that describe criteria instead of an
@@ -33,6 +24,13 @@ DEFAULT_ANALYSIS_SETTINGS = {
     'use_non_linear_model': True,
     'phase3_tolerance_pct': 1.0,
     'weight_space_parameters': {},
+}
+
+# Step 2 aggregation choices used when the export has none (run page defaults).
+DEFAULT_AGGREGATION_SETTINGS = {
+    'chosen_method': 'weighted_sum',
+    'compared_methods': ['weighted_sum', 'geometric_mean', 'harmonic_mean'],
+    'alphas': {},
 }
 
 
@@ -331,11 +329,38 @@ def load_analysis_settings(data_dir):
     return settings
 
 
-def compute_opinion_weights_from_csv(data_dir, session_names):
-    """NSMC opinion weights for the sessions, in the given order (None = equal)."""
-    return compute_opinion_weights(
-        [load_practitioner_settings(data_dir, session_name) for session_name in session_names]
-    )
+def load_aggregation_settings(data_dir):
+    """Load the aggregation choices made in Step 2 of the web app.
+
+    Reads the ``aggregation`` block of data/settings.json; exports without it
+    get the run page's defaults (WAM, comparing WAM, GEO and HAR).
+
+    Returns
+    -------
+    dict
+        {'chosen_method': str, 'compared_methods': list[str],
+         'alphas': {method: float}}, using the engine's method names.
+    """
+    loaded = _load_json(os.path.join(data_dir, 'settings.json'))
+    aggregation = loaded.get('aggregation') if isinstance(loaded, dict) else None
+    aggregation = aggregation if isinstance(aggregation, dict) else {}
+
+    chosen = aggregation.get('chosen_method')
+    compared = aggregation.get('compared_methods')
+    compared = [method for method in compared if isinstance(method, str)] if isinstance(compared, list) else []
+    alphas = {}
+    raw_alphas = aggregation.get('alphas')
+    for method, value in (raw_alphas.items() if isinstance(raw_alphas, dict) else []):
+        try:
+            alphas[str(method)] = max(-1.0, min(1.0, float(value)))
+        except (TypeError, ValueError):
+            continue
+
+    return {
+        'chosen_method': chosen if isinstance(chosen, str) and chosen else DEFAULT_AGGREGATION_SETTINGS['chosen_method'],
+        'compared_methods': compared or list(DEFAULT_AGGREGATION_SETTINGS['compared_methods']),
+        'alphas': alphas,
+    }
 
 
 def _load_value_functions_csv(filepath):
@@ -649,84 +674,25 @@ def list_sessions(data_dir):
 
     return sorted(sessions)
 
-# ============================================================================
-# HELPER FUNCTIONS FOR DATA EXTRACTION & PROCESSING
-# (thin wrappers: load the session files, then use the worker's builders)
-# ============================================================================
 
-def build_value_functions_from_csv(data_dir, session_name, criteria, return_confidence=False):
-    """Build value function dicts from CSV files.
+def select_sessions(data_dir):
+    """The sessions to run, in run order.
 
-    Parameters
-    ----------
-    data_dir : str
-        Path to data directory.
-    session_name : str
-        Elicitation session name (e.g., 'elicitation_1').
-    criteria : list[dict]
-        Criteria list from input document.
-    return_confidence : bool
-        If True, also return confidence dict (with the practitioner's
-        confidence adjustments applied).
-
-    Returns
-    -------
-    dict or tuple
-        If return_confidence=False:
-            Mapping criterion_name -> piecewise-linear callable
-        If return_confidence=True:
-            (vf_dict, confidence_dict)
-    """
-    session_doc = load_session_data(data_dir, session_name)
-    return build_value_functions_from_session(session_doc, criteria, return_confidence=return_confidence)
-
-
-def build_comparisons_from_csv(data_dir, session_name):
-    """Extract and format comparisons from CSV BWT file.
-
-    Parameters
-    ----------
-    data_dir : str
-        Path to data directory.
-    session_name : str
-        Elicitation session name (e.g., 'elicitation_1').
-
-    Returns
-    -------
-    list[dict]
-        List of comparison records with standard format.
-    """
-    session_doc = load_session_data(data_dir, session_name)
-    return build_comparisons_from_session(session_doc)
-
-
-def build_alternatives_from_csv(data_dir, session_name=None):
-    """Build the decision matrix (alternatives dict) from the CSV files.
-
-    Parameters
-    ----------
-    data_dir : str
-        Path to data directory.
-    session_name : str or None
-        Session whose qualitative indicators (and practitioner confidence
-        adjustments) fill the qualitative columns. Each decision-maker ranked
-        the qualitative criteria separately, so build one matrix per session.
-        Without a session the qualitative entries stay empty.
+    These are the sessions selected on the web app's Run page, recorded in
+    data/settings.json (``sessions``), so a local run includes the same
+    decision-makers in the same order. Exports without that list (or whose
+    listed folders are missing) use every session folder found.
 
     Returns
     -------
     tuple
-        (alternatives_dict, criteria_names_list)
+        (list of session folder names, True when taken from the web app)
     """
-    input_data = load_input_data(data_dir)
-    input_doc = {'criteria': input_data.get('criteria', [])}
-
-    if not session_name:
-        return build_alternatives_with_qualitative(input_doc)
-
-    session_doc = load_session_data(data_dir, session_name)
-    return build_alternatives_with_qualitative(
-        input_doc,
-        session_doc.get('qualitative_indicators'),
-        session_doc.get('practitioner_settings'),
-    )
+    available = list_sessions(data_dir)
+    loaded = _load_json(os.path.join(data_dir, 'settings.json'))
+    selected = loaded.get('sessions') if isinstance(loaded, dict) else None
+    if isinstance(selected, list):
+        selected = [name for name in selected if name in available]
+        if selected:
+            return selected, True
+    return available, False

@@ -19,6 +19,26 @@ from app.services.export_service import ExportService
 from app.services.session_service import SessionService
 from app.exceptions import NotFoundError, ValidationError
 
+# Aggregation tokens accepted from the frontend (method ids and engine names)
+# mapped to the engine's method names in worker/scripts/upmavt.py.
+AGGREGATION_METHOD_TOKENS = {
+    'SUM': 'weighted_sum',
+    'WAM': 'weighted_sum',
+    'GEO': 'geometric_mean',
+    'HAR': 'harmonic_mean',
+    'GEO_OFFSET': 'geometric_mean_offset',
+    'WAM_MIN': 'weighted_sum_min_mix',
+    'WPM': 'weighted_power_mean',
+    'WEM': 'weighted_exponential_mean',
+    'weighted_sum': 'weighted_sum',
+    'geometric_mean': 'geometric_mean',
+    'harmonic_mean': 'harmonic_mean',
+    'geometric_mean_offset': 'geometric_mean_offset',
+    'weighted_sum_min_mix': 'weighted_sum_min_mix',
+    'weighted_power_mean': 'weighted_power_mean',
+    'weighted_exponential_mean': 'weighted_exponential_mean',
+}
+
 
 class WorkflowService:
     """Service layer for the UP-MAVT workflow task management."""
@@ -133,23 +153,7 @@ class WorkflowService:
         except (TypeError, ValueError):
             mc_iterations = 10000 if step_number == 6 else 1000
 
-        agg_map = {
-            'SUM': 'weighted_sum',
-            'WAM': 'weighted_sum',
-            'GEO': 'geometric_mean',
-            'HAR': 'harmonic_mean',
-            'GEO_OFFSET': 'geometric_mean_offset',
-            'WAM_MIN': 'weighted_sum_min_mix',
-            'WPM': 'weighted_power_mean',
-            'WEM': 'weighted_exponential_mean',
-            'weighted_sum': 'weighted_sum',
-            'geometric_mean': 'geometric_mean',
-            'harmonic_mean': 'harmonic_mean',
-            'geometric_mean_offset': 'geometric_mean_offset',
-            'weighted_sum_min_mix': 'weighted_sum_min_mix',
-            'weighted_power_mean': 'weighted_power_mean',
-            'weighted_exponential_mean': 'weighted_exponential_mean',
-        }
+        agg_map = AGGREGATION_METHOD_TOKENS
         aggregation_method = agg_map.get(aggregation_method, 'weighted_sum')
         try:
             aggregation_alpha = max(-1.0, min(1.0, float(aggregation_alpha)))
@@ -1017,6 +1021,45 @@ class WorkflowService:
         return path.read_text(encoding='utf-8')
 
     @staticmethod
+    def _run_page_preferences(study):
+        """The Run UP-MAVT page preferences saved on the study ({} when absent)."""
+        preferences = study.get('workflow_preferences')
+        run_page = preferences.get('run_page') if isinstance(preferences, dict) else None
+        return run_page if isinstance(run_page, dict) else {}
+
+    @classmethod
+    def _local_aggregation_settings(cls, study):
+        """Step 2 aggregation choices of the run page, as engine method names.
+
+        ``compared_methods`` are the methods checked in Step 2, ``chosen_method``
+        the one carried into Steps 3-5 and ``alphas`` the α of each method.
+        Missing preferences fall back to the run page's defaults.
+        """
+        run_page = cls._run_page_preferences(study)
+
+        compared_methods = []
+        for token in run_page.get('aggregation_step_methods') or ['WAM', 'GEO', 'HAR']:
+            method = AGGREGATION_METHOD_TOKENS.get(token)
+            if method and method not in compared_methods:
+                compared_methods.append(method)
+
+        alphas = {}
+        raw_alphas = run_page.get('aggregation_step_alphas')
+        for token, value in (raw_alphas.items() if isinstance(raw_alphas, dict) else []):
+            method = AGGREGATION_METHOD_TOKENS.get(token)
+            try:
+                if method:
+                    alphas[method] = max(-1.0, min(1.0, float(value)))
+            except (TypeError, ValueError):
+                continue
+
+        return {
+            'chosen_method': AGGREGATION_METHOD_TOKENS.get(run_page.get('chosen_aggregation_method') or 'WAM'),
+            'compared_methods': compared_methods,
+            'alphas': alphas,
+        }
+
+    @staticmethod
     def _build_local_input_csv(criteria):
         """Build data/input.csv expected by frontend/public/load_LOCAL.py.
 
@@ -1134,6 +1177,10 @@ class WorkflowService:
                 Path('worker/scripts/session_inputs.py'),
                 Path('scripts/session_inputs.py'),
             ])
+            workflow_steps_path = self._find_existing_path([
+                Path('worker/scripts/workflow_steps.py'),
+                Path('scripts/workflow_steps.py'),
+            ])
 
             # main.py and load_LOCAL.py import the exact worker scripts from scripts/.
             zf.writestr('main.py', self._read_text(main_path))
@@ -1146,15 +1193,18 @@ class WorkflowService:
             zf.writestr('scripts/weight_space_definition.py', self._read_text(weight_space_path))
             zf.writestr('scripts/upmavt.py', self._read_text(upmavt_path))
             zf.writestr('scripts/session_inputs.py', self._read_text(session_inputs_path))
+            zf.writestr('scripts/workflow_steps.py', self._read_text(workflow_steps_path))
 
             # Local data layout expected by load_LOCAL.py. Numbers are written at
             # full precision so a local run sees exactly what the web app uses.
             zf.writestr('data/input.csv', self._build_local_input_csv(criteria))
+            folder_by_session_id = {}
             for session_doc in session_docs:
                 if not isinstance(session_doc, dict):
                     continue
                 session_name = session_doc.get('name') or str(session_doc.get('_id'))
                 safe_session_name = self._safe_filename(session_name)
+                folder_by_session_id[str(session_doc.get('_id'))] = safe_session_name
                 session_criteria = self._session_svc.resolve_session_criteria(session_doc)
                 # Same normalization the web app applies before each run.
                 qualitative = self._session_svc.normalize_qualitative_indicators(
@@ -1185,15 +1235,26 @@ class WorkflowService:
                     self._json_bytes(practitioner_settings),
                 )
 
+            # Settings main.py reuses so a local run matches the web app: the sessions
+            # selected on the Run page (in run order), the aggregation choices of
+            # Step 2 and, once computed, the weight-space settings.
+            local_settings = {'aggregation': self._local_aggregation_settings(study)}
+            selected_folders = [
+                folder_by_session_id[str(session_id)]
+                for session_id in (self._run_page_preferences(study).get('selected_session_ids') or [])
+                if str(session_id) in folder_by_session_id
+            ]
+            if selected_folders:
+                local_settings['sessions'] = selected_folders
             computed_weights = study.get('computed_weights')
             if computed_weights:
                 zf.writestr('weights/computed_weights.json', self._json_bytes(computed_weights))
-                # Weight-space settings the study ran with, reused by main.py step 1.
-                zf.writestr('data/settings.json', self._json_bytes({
+                local_settings.update({
                     'use_non_linear_model': computed_weights.get('use_non_linear_model', True),
                     'phase3_tolerance_pct': computed_weights.get('phase3_tolerance_pct', 1.0),
                     'weight_space_parameters': computed_weights.get('weight_space_parameters') or {},
-                }))
+                })
+            zf.writestr('data/settings.json', self._json_bytes(local_settings))
 
             for step_number in [2, 3, 4, 5, 6]:
                 step_results = study.get(f'step_{step_number}_results')
