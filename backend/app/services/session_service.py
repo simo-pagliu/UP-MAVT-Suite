@@ -19,18 +19,6 @@ logger = logging.getLogger(__name__)
 class SessionService:
     """Service layer for elicitation session operations."""
 
-    DEFAULT_PRACTITIONER_SETTINGS = {
-        'notes': '',
-        'overall_weight': 1.0,
-        'confidence_adjustments': {
-            'overall': 0.0,
-            'qi': 0.0,
-            'vf': 0.0,
-            'qi_criteria': {},
-            'vf_criteria': {},
-        },
-    }
-
     def __init__(self, db):
         """Initialise the service with a database handle.
 
@@ -81,7 +69,7 @@ class SessionService:
 
     @staticmethod
     def _normalize_adjustment_value(value, default=0.0):
-        """Clamp a confidence adjustment to the valid range [-4.0, 4.0]."""
+        """Round a confidence adjustment to 0.1; *default* when invalid or outside [-4.0, 4.0]."""
         try:
             adjustment = float(value)
         except (TypeError, ValueError):

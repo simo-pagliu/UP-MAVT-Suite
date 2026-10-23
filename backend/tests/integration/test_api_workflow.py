@@ -248,14 +248,21 @@ class TestRunStep:
 
 
 class TestRunPagePreferences:
-    def test_updates_confidence_adjustments(self, client):
-        study_id, session_id = setup_study_with_session(client)
+    def test_updates_aggregation_choices(self, client):
+        study_id, _ = setup_study_with_session(client)
         resp = client.put(
             f'/api/study-session/{study_id}/workflow-preferences/run-page',
-            json={'confidence_adjustments_by_session': {session_id: 1.5}},
+            json={
+                'aggregation_step_methods': ['WAM', 'WPM'],
+                'aggregation_step_alphas': {'WPM': 1.5},
+                'chosen_aggregation_method': 'WPM',
+            },
         )
         assert resp.status_code == 200
-        assert resp.json['preferences']['run_page']['confidence_adjustments_by_session'][session_id] == pytest.approx(1.5)
+        run_page = resp.json['preferences']['run_page']
+        assert run_page['aggregation_step_methods'] == ['WAM', 'WPM']
+        assert run_page['aggregation_step_alphas']['WPM'] == pytest.approx(1.0)
+        assert run_page['chosen_aggregation_method'] == 'WPM'
 
 
 # ---------------------------------------------------------------------------

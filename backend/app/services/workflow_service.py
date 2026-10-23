@@ -210,9 +210,6 @@ class WorkflowService:
         # independent of confidence: confidence only sets uncertainty band widths.
         raw_opinion_weights = []
         for session_doc in session_docs:
-            session_study_id = self._sessions._to_oid(session_doc.get('study_session_id'))
-            if session_study_id != self._studies._to_oid(study_session_id):
-                continue
             criteria = self._session_svc.resolve_session_criteria(session_doc)
             current_qi = session_doc.get('qualitative_indicators')
             current_qi = current_qi if isinstance(current_qi, dict) else {}
@@ -435,11 +432,6 @@ class WorkflowService:
                         for session_id in run_page.get('selected_session_ids', [])
                         if session_id is not None
                     ],
-                    'confidence_adjustments_by_session': {
-                        str(k): float(v)
-                        for k, v in (run_page.get('confidence_adjustments_by_session') or {}).items()
-                        if v is not None
-                    },
                     'aggregation_step_methods': [
                         str(method_id)
                         for method_id in (run_page.get('aggregation_step_methods') or [])
@@ -460,7 +452,6 @@ class WorkflowService:
         study_session_id,
         use_non_linear_model=None,
         selected_session_ids=None,
-        confidence_adjustments_by_session=None,
         aggregation_step_methods=None,
         aggregation_step_alphas=None,
         chosen_aggregation_method=None,
@@ -482,15 +473,6 @@ class WorkflowService:
                 for session_id in selected_session_ids
                 if session_id is not None
             ]
-
-        if confidence_adjustments_by_session is not None:
-            if not isinstance(confidence_adjustments_by_session, dict):
-                raise ValidationError('confidence_adjustments_by_session must be a dict')
-            updates['workflow_preferences.run_page.confidence_adjustments_by_session'] = {
-                str(k): max(-4.0, min(4.0, float(v)))
-                for k, v in confidence_adjustments_by_session.items()
-                if v is not None
-            }
 
         if aggregation_step_methods is not None:
             if not isinstance(aggregation_step_methods, list):

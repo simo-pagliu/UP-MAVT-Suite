@@ -196,7 +196,7 @@ class TestCreateElicitationSession:
         listed = svc.list_elicitation_sessions(study_with_input)
         created = next((item for item in listed['sessions'] if item['_id'] == session_id), None)
         assert created is not None
-        assert created['practitioner_note'] == ''
+        assert created['practitioner_settings']['notes'] == ''
 
     def test_missing_name_raises(self, svc, study_with_input):
         with pytest.raises(ValidationError, match='code is required'):

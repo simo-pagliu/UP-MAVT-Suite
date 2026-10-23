@@ -218,10 +218,6 @@ class TestCreateRunStepTask:
                 'practitioner_settings.confidence_adjustments.overall': -2.0,
             }}
         )
-        mock_db.study_sessions.update_one(
-            {'_id': ObjectId(study_with_weights)},
-            {'$set': {'workflow_preferences.run_page.confidence_adjustments_by_session': {session_id: 1.5}}}
-        )
 
         weights = self._run_nsmc_opinion_weights(
             mock_db, wf_svc, study_with_weights, [session_id, second_session_id]

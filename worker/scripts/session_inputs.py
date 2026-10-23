@@ -83,7 +83,6 @@ def build_value_functions_from_session(session_doc, criteria, return_confidence=
     confidence_dict = {}
 
     value_functions_data = session_doc.get('value_functions', {})
-    qualitative_indicators = session_doc.get('qualitative_indicators')
     practitioner_settings = session_doc.get('practitioner_settings')
     confidence_adjustments = {}
     if isinstance(practitioner_settings, dict):
@@ -184,7 +183,11 @@ def build_alternatives_with_qualitative(input_doc, qualitative_indicators=None, 
         Input document with criteria field.
     qualitative_indicators : dict or None
         Qualitative indicators mapping criterion_name -> qualitative data.
-    
+    practitioner_settings : dict or None
+        The session's practitioner settings; their overall, qualitative and
+        per-criterion confidence adjustments widen or narrow the uncertainty of
+        the qualitative values.
+
     Returns
     -------
     tuple
