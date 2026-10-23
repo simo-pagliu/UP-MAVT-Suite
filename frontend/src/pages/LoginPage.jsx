@@ -404,9 +404,9 @@ function LoginPage({ onLogin, onDocumentation }) {
             </SimpleGrid>
 
             <VStack align="start" spacing={1}>
-              <Text color="gray.400" fontWeight="semibold">
-                Read the software paper about this software. (coming soon)
-              </Text>
+              <Link href="https://doi.org/10.1016/j.softx.2026.103112" isExternal color="blue.700" fontWeight="semibold">
+                Read the publication about this software.
+              </Link>
               <Text color="gray.400" fontWeight="semibold">
                 Read the method paper about the UP-MAVT methodology. (coming soon)
               </Text>
@@ -439,7 +439,11 @@ function LoginPage({ onLogin, onDocumentation }) {
                     Large hierarchical uncertain case study
                   </Link>
                   <Text fontSize="sm" color="gray.600">
-                    A complete example, with hierarchical structure and real uncertainty, from the original UP-MAVT study (DOI coming soon).
+                    A complete example, with hierarchical structure and real uncertainty, from the original UP-MAVT study, the author's{' '}
+                    <Link href="https://hdl.handle.net/10589/250657" isExternal color="blue.700">
+                      master's thesis
+                    </Link>
+                    .
                   </Text>
                 </Box>
               </VStack>
