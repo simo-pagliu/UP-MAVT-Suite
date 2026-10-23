@@ -18,6 +18,7 @@ import {
 import axios from 'axios'
 import { useEffect, useRef, useState } from 'react'
 import { API_URL } from '../config'
+import VersionInfo from '../components/VersionInfo'
 
 const PSI_TERMS_OF_USE_URL = 'https://www.psi.ch/en/nutzungsbedingungen'
 
@@ -464,6 +465,7 @@ function LoginPage({ onLogin, onDocumentation }) {
                 </Box>
               </VStack>
             </VStack>
+            <VersionInfo />
           </VStack>
         </GridItem>
 

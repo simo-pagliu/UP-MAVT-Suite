@@ -7,6 +7,12 @@
  */
 export const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 
+/** Version of this deployment: frontend/package.json's version, set at build time. */
+export const APP_VERSION = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : ''
+
+/** The public GitHub repository; its releases are compared against APP_VERSION. */
+export const GITHUB_REPO = 'simo-pagliu/UP-MAVT-Suite'
+
 const parseBool = (value, defaultValue = false) => {
   if (typeof value !== 'string') return defaultValue
   const normalized = value.trim().toLowerCase()

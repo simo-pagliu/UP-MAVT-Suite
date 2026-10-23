@@ -124,6 +124,15 @@ Log in with the **Admin** option on the landing page, using the password you con
 
 ---
 
+## Versions
+
+The landing page shows the deployed version and, in brackets, the latest version released on GitHub, with a link to what changed in between when the deployment is behind. The deployed version is the `version` field of `frontend/package.json`. To release a new version:
+
+1. Set `version` in `frontend/package.json` (e.g. `1.1.0`).
+2. Tag that commit `v1.1.0` and publish a GitHub release for the tag. Pre-releases (e.g. `v1.1.0-beta.1`) never count as the latest version.
+
+---
+
 ## Example case studies
 
 The [`examples/`](examples/) folder contains five case studies, see
