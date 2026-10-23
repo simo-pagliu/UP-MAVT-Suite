@@ -24,7 +24,7 @@ describe('LoginPage – rendering', () => {
     renderLoginPage()
     expect(screen.getByText('UP-MAVT Suite')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /access an existing session/i })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /create a new session/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /create a new empty case study/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /upload a case study/i })).toBeInTheDocument()
     expect(screen.queryByPlaceholderText(/enter session code/i)).not.toBeInTheDocument()
   })
@@ -102,7 +102,7 @@ describe('LoginPage – create/upload without mandatory email', () => {
     axios.post.mockResolvedValueOnce({ data: { study_session_id: 'study-1' } })
     renderLoginPage(onLogin)
 
-    await userEvent.click(screen.getByRole('button', { name: /create a new session/i }))
+    await userEvent.click(screen.getByRole('button', { name: /create a new empty case study/i }))
     await userEvent.click(screen.getByRole('button', { name: /no, continue without email/i }))
     await userEvent.click(screen.getByRole('button', { name: /create new empty session/i }))
 
@@ -112,6 +112,48 @@ describe('LoginPage – create/upload without mandatory email', () => {
       expect.objectContaining({ auto_generate: true }),
     )
     expect(onLogin).toHaveBeenCalledWith('study-1', 'study-1', 'practitioner')
+  })
+
+  it('hides email-sharing consent when email is disabled and creates directly', async () => {
+    const onLogin = vi.fn()
+    mockEmailEnabled(false)
+    axios.post.mockResolvedValueOnce({ data: { study_session_id: 'study-disabled-email' } })
+    renderLoginPage(onLogin)
+
+    await userEvent.click(screen.getByRole('button', { name: /create a new empty case study/i }))
+
+    expect(screen.queryByRole('button', { name: /yes, share email/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /no, continue without email/i })).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: /create new empty session/i }))
+
+    await waitFor(() =>
+      expect(axios.post).toHaveBeenCalledWith(
+        expect.stringContaining('/study-session'),
+        expect.objectContaining({ auto_generate: true }),
+      ),
+    )
+    expect(onLogin).toHaveBeenCalledWith('study-disabled-email', 'study-disabled-email', 'practitioner')
+  })
+
+  it('submits the email verification request when Enter is pressed in the email field', async () => {
+    mockEmailEnabled()
+    axios.post.mockResolvedValueOnce({})
+
+    renderLoginPage()
+
+    await userEvent.click(screen.getByRole('button', { name: /create a new empty case study/i }))
+    await userEvent.click(screen.getByRole('button', { name: /yes, share email/i }))
+
+    const emailInput = screen.getByPlaceholderText(/email address/i)
+    await userEvent.type(emailInput, 'user@example.com{enter}')
+
+    await waitFor(() =>
+      expect(axios.post).toHaveBeenCalledWith(
+        expect.stringContaining('/email-verification/request'),
+        { email: 'user@example.com' },
+      ),
+    )
   })
 
   it('runs email verification when user consents, then creates a session with verified email', async () => {
@@ -124,7 +166,7 @@ describe('LoginPage – create/upload without mandatory email', () => {
 
     renderLoginPage(onLogin)
 
-    await userEvent.click(screen.getByRole('button', { name: /create a new session/i }))
+    await userEvent.click(screen.getByRole('button', { name: /create a new empty case study/i }))
     await userEvent.click(screen.getByRole('button', { name: /yes, share email/i }))
     await userEvent.type(screen.getByPlaceholderText(/email address/i), 'user@example.com')
     await userEvent.click(screen.getByRole('button', { name: /send code/i }))
