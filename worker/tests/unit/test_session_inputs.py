@@ -47,8 +47,8 @@ class TestQualitativeSubstitution:
     def test_practitioner_adjustment_widens_the_uncertainty(self):
         settings = {'confidence_adjustments': {'overall': -1, 'qi_criteria': {'Quality': -1}}}
         alternatives, _ = build_alternatives_with_qualitative(INPUT_DOC, qualitative_session(0.9, 0.2), settings)
-        # confidence 4 - 2 = 2 -> 10% * (4 - 2) / 4 = 5% error
-        assert alternatives['A']['Quality'] == '0.9 ± 5.0%'
+        # confidence 4 - 2 = 2 -> 10% * (4 - 2) / 4 = 5% of the value scale -> ±0.05
+        assert alternatives['A']['Quality'] == '0.9 ± 0.05'
 
     def test_value_function_confidence_gets_practitioner_adjustment(self):
         session = {

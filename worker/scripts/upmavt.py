@@ -310,10 +310,11 @@ def evaluate_alternative(alt_name, alt_data, criteria, vf_lists, confidence_list
             # Apply value function
             normalized_value = float(vf(raw_value))
             
-            # Apply confidence error margin
+            # Apply confidence error margin: v ± e, with e a share of the 0-1 value scale
+            # (confidence 0 -> ±0.1, 2 -> ±0.05, 4 -> none), the same width whatever v is
             error_pct = 0.10 * (4.0 - max(0.0, min(4.0, float(confidence)))) / 4.0
             if error_pct > 0:
-                error_margin = normalized_value * error_pct
+                error_margin = error_pct
                 normalized_value = np.random.uniform(
                     normalized_value - error_margin,
                     normalized_value + error_margin

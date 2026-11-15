@@ -39,11 +39,22 @@ class TestConfidenceErrorMargin:
         alt_data = {"Cost": "100"}
         scores = [evaluate_alternative("A", alt_data, ["Cost"], vf_lists, confidence_lists,
                                         0, 0, {"Cost": 1.0}, weighted_sum) for _ in range(4000)]
-        margin = 0.5 * expected_pct
+        margin = expected_pct  # half-width on the 0-1 value scale, not a share of the value
         assert min(scores) >= 0.5 - margin - 1e-9
         assert max(scores) <= 0.5 + margin + 1e-9
         # And the band should actually be used, not degenerate to a point.
         assert max(scores) - min(scores) > margin  # at least covers half the declared width
+
+    def test_band_width_does_not_depend_on_the_value(self):
+        # v ± e: at confidence 0 the band is ±0.1 around 0.2 just as around 0.8
+        np.random.seed(0)
+        for base in (0.2, 0.8):
+            vf_lists = [make_vf_dict(Cost=base)]
+            scores = [evaluate_alternative("A", {"Cost": "100"}, ["Cost"], vf_lists, [{"Cost": 0}],
+                                            0, 0, {"Cost": 1.0}, weighted_sum) for _ in range(4000)]
+            assert min(scores) >= base - 0.1 - 1e-9
+            assert max(scores) <= base + 0.1 + 1e-9
+            assert max(scores) - min(scores) > 0.19
 
 
 class TestClipFloor:

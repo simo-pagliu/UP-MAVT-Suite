@@ -129,7 +129,7 @@ def _apply_qualitative_overrides(alternatives, criteria_meta, session_qi):
             confidence = int(confidences.get(str(rank), 4))
             error_pct = CONFIDENCE_ERROR_PCT.get(confidence, 0.0)
             if error_pct > 0:
-                out[alt_name][crit_name] = f"{x_pos} ± {error_pct}%"
+                out[alt_name][crit_name] = f"{x_pos} ± {error_pct / 100}"  # error_pct% of the 0-1 value scale
             else:
                 out[alt_name][crit_name] = x_pos
     return out

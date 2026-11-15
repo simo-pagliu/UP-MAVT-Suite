@@ -57,13 +57,13 @@ two endpoints:
 | Criterion | v(worst) | v(best) | Confidence |
 |---|---|---|:---:|
 | Cost | v(200) = 0 | v(100) = 1 | 4 (no value-function error) |
-| Quality | v(0) = 0 | v(10) = 1 | 2 (±5% uniform error band) |
+| Quality | v(0) = 0 | v(10) = 1 | 2 (±0.05 uniform error band) |
 
 i.e. `VF_Cost(x) = (200 − x) / 100` and `VF_Quality(x) = x / 10`.
 
 Confidence is a 0–4 rating of how certain a value-function judgment is (see the Glossary in
-[`USER_MANUAL/`](../../USER_MANUAL/)); confidence 2 corresponds to a ±5% uniform error band
-around the evaluated value (`worker/scripts/upmavt.py::evaluate_alternative`'s
+[`USER_MANUAL/`](../../USER_MANUAL/)); confidence 2 corresponds to a uniform error band of ±0.05
+(5% of the 0–1 value scale) around the evaluated value (`worker/scripts/upmavt.py::evaluate_alternative`'s
 `confidence_errors` table). Cost's value function carries no such band (confidence 4); all of
 Cost's uncertainty instead comes from the input data in Section 1. Quality's input value is
 exact; all of its uncertainty comes from this confidence band.
@@ -110,15 +110,15 @@ independently:
   so `VF_Cost(Cost) ~ Uniform(VF_Cost(cost₀) − 0.05, VF_Cost(cost₀) + 0.05)` — a width of `0.1`,
   identical for every alternative, since the slope is constant.
 - **Quality**: Quality's input is a fixed value `q₀`, so `VF_Quality(q₀) = v₀` is a fixed number;
-  the ±5% confidence band then gives `Uniform(v₀ · 0.95, v₀ · 1.05)` — a width of `0.1 · v₀`,
-  proportional to Quality's value function output, and so different for each alternative.
+  the ±0.05 confidence band then gives `Uniform(v₀ − 0.05, v₀ + 0.05)` — a width of `0.1`,
+  identical for every alternative, since the band is a share of the 0–1 value scale, not of `v₀`.
 
 | Alternative | VF_Cost range | VF_Quality range |
 |---|---|---|
-| Supplier A | [0.900, 1.000] | [0.190, 0.210] |
-| Supplier B | [0.450, 0.550] | [0.570, 0.630] |
-| Supplier C | [0.000, 0.100] | [0.855, 0.945] |
-| Supplier D | [0.700, 0.800] | [0.760, 0.840] |
+| Supplier A | [0.900, 1.000] | [0.150, 0.250] |
+| Supplier B | [0.450, 0.550] | [0.550, 0.650] |
+| Supplier C | [0.000, 0.100] | [0.850, 0.950] |
+| Supplier D | [0.700, 0.800] | [0.750, 0.850] |
 
 Since aggregation is weighted-sum and the two terms are independent, the alternative's overall
 score `w_Cost · VF_Cost + w_Quality · VF_Quality` has an exact closed-form mean (linearity of
@@ -133,17 +133,18 @@ max(score)  = w_Cost · max(VF_Cost)  + w_Quality · max(VF_Quality)
 
 | Alternative | Mean | Min | Max |
 |---|---:|---:|---:|
-| Supplier A | 0.48125 | 0.45625 | 0.50625 |
-| Supplier B | 0.56250 | 0.52500 | 0.60000 |
-| Supplier C | 0.58125 | 0.534375 | 0.628125 |
-| Supplier D | 0.78125 | 0.73750 | 0.82500 |
+| Supplier A | 0.48125 | 0.43125 | 0.53125 |
+| Supplier B | 0.56250 | 0.51250 | 0.61250 |
+| Supplier C | 0.58125 | 0.53125 | 0.63125 |
+| Supplier D | 0.78125 | 0.73125 | 0.83125 |
 
 **Ranking by mean score: Supplier D > Supplier C > Supplier B > Supplier A.**
 
-Supplier B's and Supplier C's ranges overlap ([0.525, 0.600] and [0.534, 0.628]): although
+Supplier B's and Supplier C's ranges overlap ([0.513, 0.613] and [0.531, 0.631]): although
 Supplier C has the higher mean, a single realization of the underlying uncertainty could produce
-either ordering between them. Supplier A and Supplier D do not overlap with any other
-alternative's range, so their relative position is certain given this model. This is a genuine
+either ordering between them. Supplier A's range also overlaps Supplier B's, over a smaller
+interval ([0.431, 0.531] and [0.513, 0.613]). Supplier D does not overlap with any other
+alternative's range, so its position is certain given this model. This is a genuine
 consequence of propagating uncertainty rather than an artifact — it is exactly the kind of
 information a deterministic score alone would not reveal, and it is what UP-MAVT's own rank
 probability heatmaps ([`USER_MANUAL/`](../../USER_MANUAL/), "Run UP-MAVT" Step 5) are designed to
@@ -167,16 +168,16 @@ the following.
 
 | Alternative | Analytical mean | MC mean | Analytical [min, max] | MC [min, max] |
 |---|---:|---:|---|---|
-| Supplier A | 0.481250 | 0.481266 | [0.456250, 0.506250] | [0.456424, 0.506062] |
-| Supplier B | 0.562500 | 0.562588 | [0.525000, 0.600000] | [0.525137, 0.599977] |
-| Supplier C | 0.581250 | 0.581190 | [0.534375, 0.628125] | [0.534865, 0.627816] |
-| Supplier D | 0.781250 | 0.781277 | [0.737500, 0.825000] | [0.737797, 0.824908] |
+| Supplier A | 0.481250 | 0.481197 | [0.431250, 0.531250] | [0.431707, 0.531114] |
+| Supplier B | 0.562500 | 0.562546 | [0.512500, 0.612500] | [0.512731, 0.612180] |
+| Supplier C | 0.581250 | 0.581184 | [0.531250, 0.631250] | [0.531743, 0.630800] |
+| Supplier D | 0.781250 | 0.781062 | [0.731250, 0.831250] | [0.731609, 0.830902] |
 
 Every simulated mean matches the analytical mean to within Monte Carlo sampling error, and every
 simulated minimum and maximum falls inside the analytically derived bounds (as it must: NumPy's
 uniform sampling cannot draw a value outside the interval it is given). The final ranking by mean
 score matches Section 4: **Supplier D > Supplier C > Supplier B > Supplier A**, with the same
-Supplier B / Supplier C overlap observed in the simulated ranges.
+overlaps observed in the simulated ranges.
 
 The weight computation in Step 1 is seeded and therefore reproducible across runs; the Monte
 Carlo simulation in Step 2 is not seeded, so the exact figures above will differ slightly on each

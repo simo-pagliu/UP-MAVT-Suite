@@ -270,8 +270,9 @@ def build_alternatives_with_qualitative(input_doc, qualitative_indicators=None, 
                     error_pct = _confidence_to_error_pct(adjusted_confidence, scale=10.0)
                     
                     if error_pct > 0:
-                        # Format as "x_pos ± error_pct%"
-                        alternatives[alt_name][crit_name] = f"{x_pos} ± {error_pct}%"
+                        # Format as "x_pos ± margin", the margin being error_pct% of the 0-1 value
+                        # scale ("x_pos ± error_pct%" would make it a share of x_pos)
+                        alternatives[alt_name][crit_name] = f"{x_pos} ± {error_pct / 100}"
                     else:
                         # No uncertainty, just store the x_pos
                         alternatives[alt_name][crit_name] = x_pos

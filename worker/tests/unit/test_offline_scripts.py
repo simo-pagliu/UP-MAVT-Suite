@@ -124,8 +124,8 @@ class TestLoading:
             {'criteria': criteria}, expert_1['qualitative_indicators'], expert_1['practitioner_settings'])
         alternatives_2, _ = build_alternatives_with_qualitative(
             {'criteria': criteria}, expert_2['qualitative_indicators'], expert_2['practitioner_settings'])
-        # expert_1's practitioner lowered all confidences by 1 (4 -> 3 = ±2.5%)
-        assert alternatives_1['A']['Quality'] == '0.9 ± 2.5%'
+        # expert_1's practitioner lowered all confidences by 1 (4 -> 3 = ±0.025)
+        assert alternatives_1['A']['Quality'] == '0.9 ± 0.025'
         assert alternatives_2['A']['Quality'] == 0.3
         assert alternatives_1['A']['Cost'] == '100'
 

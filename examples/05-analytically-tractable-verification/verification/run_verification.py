@@ -58,8 +58,9 @@ VALUE_FUNCTIONS = {
 }
 
 # Confidence: Cost = 4 (no value-function-level error; all of Cost's uncertainty
-# enters through the input data below). Quality = 2 (5% uniform error band
-# around the value-function output; Quality's raw input is deterministic).
+# enters through the input data below). Quality = 2 (uniform error band of
+# ±0.05, 5% of the 0-1 value scale, around the value-function output;
+# Quality's raw input is deterministic).
 CONFIDENCE = {"Cost": 4, "Quality": 2}
 QUALITY_ERROR_PCT = 0.05  # from worker/scripts/upmavt.py::evaluate_alternative's confidence_errors table
 
@@ -91,13 +92,13 @@ EXPECTED_WEIGHTS = {"Cost": 0.375, "Quality": 0.625}
 # derived in README.md ("Analytical propagation of uncertainty"). Cost's
 # uniform margin (+/-5 EUR) maps, through the linear value function, to a
 # uniform term of width 2*5/100 = 0.1 for every alternative. Quality's
-# confidence band maps to a uniform term of width 2 * VF_Quality * 0.05,
-# proportional to its deterministic base value.
+# confidence band maps to a uniform term of width 2 * 0.05 = 0.1 around its
+# deterministic base value, also the same for every alternative.
 EXPECTED = {
-    "Supplier A": {"mean": 0.48125, "min": 0.45625, "max": 0.50625},
-    "Supplier B": {"mean": 0.56250, "min": 0.52500, "max": 0.60000},
-    "Supplier C": {"mean": 0.58125, "min": 0.534375, "max": 0.628125},
-    "Supplier D": {"mean": 0.78125, "min": 0.73750, "max": 0.82500},
+    "Supplier A": {"mean": 0.48125, "min": 0.43125, "max": 0.53125},
+    "Supplier B": {"mean": 0.56250, "min": 0.51250, "max": 0.61250},
+    "Supplier C": {"mean": 0.58125, "min": 0.53125, "max": 0.63125},
+    "Supplier D": {"mean": 0.78125, "min": 0.73125, "max": 0.83125},
 }
 
 
